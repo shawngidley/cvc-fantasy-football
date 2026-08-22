@@ -6,6 +6,12 @@ import superjson from "superjson";
 import App from "./App";
 import "./index.css";
 
+if (import.meta.env.PROD && "serviceWorker" in navigator) {
+  window.addEventListener("load", () => {
+    navigator.serviceWorker.register("/sw.js").catch(error => console.warn("CVC PWA service worker registration failed", error));
+  });
+}
+
 const queryClient = new QueryClient();
 
 queryClient.getQueryCache().subscribe(event => {
