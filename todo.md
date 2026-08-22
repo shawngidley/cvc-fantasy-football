@@ -122,6 +122,9 @@
 - [x] Remove the Money Owed and Tm # columns from the CVC standings tables while retaining owner, team, record, points, and division-record data.
 - [x] Rebuild CVC Standings to the direct WRC 2026 structure: compact CVC Fantasy Football 2026 header, current-week matchup card, and dense East/West division tables with no generic introduction or configuration controls.
 - [x] Display the Week 1 CVC matchup on the Standings card during the 2026 pre-season rather than a later scheduled week.
+- [x] Personalize the CVC Standings Week 1 matchup card to the signed-in owner’s franchise, with a neutral public fallback.
+- [x] Remove the scrolling ticker banner beneath the CVC global navigation.
+- [ ] Publish the verified owner-specific Week 1 standings card and ticker removal to cvcfantasyfootball.com for immediate review.
 - [x] Rebuild the CVC Draft navigation route from the WRC Draft Hub tab structure using live CVC auction board, player pool, protections, and rookie-draft states without generic draft placeholders.
 - [x] Map, store, and apply the supplied CVC franchise logos across primary owner/team contexts including signed-in team identity, standings, rosters, matchup cards, Live Scoring, Lineup, and Schedule & Results.
 - [x] Store and map the supplied Xavier Musketeers logo so every active CVC franchise has a team mark.
