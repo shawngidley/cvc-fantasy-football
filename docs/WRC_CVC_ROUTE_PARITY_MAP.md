@@ -28,3 +28,7 @@ CVC uses the WRC source as the route, layout, interaction, and responsive-design
 ## Evidence retained from WRC source
 
 WRC exposes its owner Lineup route with direct access to: current-week matchup data, Tank01 live scores, player stat tables, player/game context, lineup persistence, player locks, and an automatic final-results writer. WRC Live Scoring uses the same Tank01 live-score hooks and current-week data surface. CVC must retain this structure while replacing the WRC data conventions with CVC Supabase records, CVC scoring rules, and the CVC Tank01 server proxy.
+
+## Draft and auction reference structure
+
+The WRC `DraftHub` source uses a dark draft workspace under the shared navigation with a sticky sub-tab bar. Its reference tabs are **Draft Order**, **Draft Players**, **Protections**, and a linked **Draft Lottery** route. CVC’s Auction Room should use this structure as its operating shell: a draft/auction workspace with a persistent sub-navigation, a public board, player pool, protections/right context, and a separately protected commissioner console. CVC auction rules remain unique: manual nomination and award, $115 starting-budget cap, and a 15–22 total roster range.

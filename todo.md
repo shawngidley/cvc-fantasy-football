@@ -116,3 +116,5 @@
 - [ ] Use WRC source components and route structures directly as the baseline for each CVC page, substituting only CVC-specific branding, teams, rules, authentication, and dynamic data.
 - [x] Port the WRC shared navigation hierarchy into CVC with compact header, route order, live indicator, ticker, team context, League menu, and mobile overlay drawer.
 - [x] Port the WRC centered team-selector and PIN login structure into CVC while retaining the secure independent CVC owner-session backend.
+- [x] Rebuild the CVC Auction Room as a WRC Draft Hub-style workspace with sticky auction tabs, public board, player pool, protections context, and a protected commissioner console.
+- [ ] Verify the WRC Draft Hub-style commissioner auction console using an authenticated commissioner session and real auction state before treating auction parity as complete.
