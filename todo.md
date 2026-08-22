@@ -130,4 +130,5 @@
 - [x] Rebuild CVC Weekly Rundown from the WRC week selector, owner matchup marker, league median, and Tank01-only matchup-card structure.
 - [ ] Rebuild CVC Player News from the WRC source and position-filtered news-feed structure using server-only CVC provider data and owner roster context.
 - [x] Rebuild CVC Player Profiles from the WRC hero, ownership, scoring, matchup, and position-specific stat-table structure using available CVC provider data.
+- [x] Rebuild CVC Money from the WRC owner-balance, financial-history, prize-structure, and earnings workspace using CVC financial data without importing WRC payout assumptions.
 - [ ] Verify populated Tank01 player-stat and current-matchup details in the WRC-style CVC Player Profile during an active provider window.
