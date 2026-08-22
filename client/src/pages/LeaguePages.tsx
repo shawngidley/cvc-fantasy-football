@@ -67,7 +67,8 @@ function Standings() {
   const overview = trpc.league.overview.useQuery();
   const liveFranchises = overview.data?.franchises ?? [];
   const divisions = new Set(liveFranchises.map(team => team.division_name).filter(Boolean));
-  const nextMatchup = overview.data?.matchups.find(matchup => matchup.result_state !== "final");
+  const nextMatchup = overview.data?.matchups.find(matchup => Number(matchup.week?.week_number) === 1)
+    ?? overview.data?.matchups.find(matchup => matchup.result_state !== "final");
   const orderedDivisions = ["East", "West", ...Array.from(divisions).filter(division => division !== "East" && division !== "West")];
   const completedGames = overview.data?.matchups.filter(matchup => matchup.result_state === "final").length ?? 0;
   const seasonYear = overview.data?.season?.year ?? 2026;

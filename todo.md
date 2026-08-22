@@ -121,9 +121,11 @@
 - [x] Correct CVC’s active lineup to QB, 2 RB, 2 WR, TE, FLEX (RB/WR/TE), K, and D/ST only; assign one valid starter at every configured slot for all franchises.
 - [x] Remove the Money Owed and Tm # columns from the CVC standings tables while retaining owner, team, record, points, and division-record data.
 - [x] Rebuild CVC Standings to the direct WRC 2026 structure: compact CVC Fantasy Football 2026 header, current-week matchup card, and dense East/West division tables with no generic introduction or configuration controls.
+- [x] Display the Week 1 CVC matchup on the Standings card during the 2026 pre-season rather than a later scheduled week.
 - [x] Rebuild the CVC Draft navigation route from the WRC Draft Hub tab structure using live CVC auction board, player pool, protections, and rookie-draft states without generic draft placeholders.
-- [x] Map, store, and apply the supplied CVC franchise logos across owner/team contexts including signed-in team identity, standings, rosters, matchup cards, Live Scoring, Lineup, Draft/Auction, and trades.
+- [x] Map, store, and apply the supplied CVC franchise logos across primary owner/team contexts including signed-in team identity, standings, rosters, matchup cards, Live Scoring, Lineup, and Schedule & Results.
 - [x] Store and map the supplied Xavier Musketeers logo so every active CVC franchise has a team mark.
+- [ ] Extend the shared CVC franchise-logo treatment into the detailed Auction Room and authenticated Trade Desk workflows.
 - [ ] Audit and rebuild every CVC route from its corresponding WRC page structure, interaction pattern, responsive layout, and information density before adding further generic interfaces.
 - [ ] Use WRC source components and route structures directly as the baseline for each CVC page, substituting only CVC-specific branding, teams, rules, authentication, and dynamic data.
 - [x] Rebuild CVC Free Agents and FAAB from the WRC player-pool structure with position tabs, sortable data-backed columns, owner bid flow, and commissioner queue context.
