@@ -2,7 +2,8 @@ import { TRPCError } from "@trpc/server";
 import { z } from "zod";
 import { ENV } from "../_core/env";
 import { protectedProcedure, publicProcedure, router } from "../_core/trpc";
-import { getNFLDataAdapter } from "../nflDataAdapter";
+import { getFantasyProsDataAdapter, getNFLDataAdapter } from "../nflDataAdapter";
+import { fantasyProsCacheStatus } from "../fantasyProsCache";
 import { supabase, unwrap } from "../supabase";
 
 type CurrentUser = { openId: string };
@@ -188,6 +189,17 @@ export const leagueRouter = router({
   }),
 
   nflProviderStatus: publicProcedure.query(async () => getNFLDataAdapter().status()),
+
+  fantasyProsCacheStatus: publicProcedure.query(async () => fantasyProsCacheStatus()),
+
+  refreshFantasyProsPlayers: protectedProcedure.mutation(async ({ ctx }) => {
+    await requireCommissioner({ openId: ctx.user.openId });
+    const adapter = getFantasyProsDataAdapter();
+    if (!adapter) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "FantasyPros is not configured for CVC." });
+    const snapshot = await adapter.listPlayerSnapshot();
+    const payloadCount = Array.isArray(snapshot.payload) ? snapshot.payload.length : Array.isArray((snapshot.payload as { players?: unknown[] })?.players) ? ((snapshot.payload as { players: unknown[] }).players.length) : null;
+    return { provider: snapshot.provider, source: snapshot.source, fetchedAt: snapshot.fetchedAt, expiresAt: snapshot.expiresAt, playerCount: payloadCount, lastError: snapshot.lastError };
+  }),
 
   myFranchise: protectedProcedure.query(async ({ ctx }) => {
     const owner = await getOwnerAccess({ openId: ctx.user.openId });

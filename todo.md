@@ -55,7 +55,7 @@
 - [ ] Verify and document the resulting CVC rights-record counts and sample mappings after import.
 - [ ] Build all provider-independent CVC dynamics now, while keeping the Tank01 and FantasyPros adapters ready for credential configuration later.
 - [ ] Configure the supplied Tank01 RapidAPI credential as a server-only CVC secret, verify it, and build the player-pool adapter without exposing provider access in the browser.
-- [ ] Configure the supplied FantasyPros API key as a server-only shared provider credential and enforce cached, rate-limited CVC refresh behavior compatible with WRC usage.
+- [ ] Complete shared-key FantasyPros coordination with WRC, provider-adapter integration, and cache-behavior coverage beyond the CVC-local durable cache and request-spacing layer.
 - [x] Verify and report the final Tank01 and FantasyPros credential status using each provider’s documented authentication method.
 - [x] Verify Tank01 against its official RapidAPI documentation or dashboard reference, then align the production CVC adapter to the documented host, headers, and endpoint conventions.
 - [x] Inspect and align the live CVC Tank01 adapter host, headers, and endpoint paths with the verified RapidAPI documentation.

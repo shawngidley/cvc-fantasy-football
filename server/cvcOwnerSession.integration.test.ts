@@ -41,8 +41,12 @@ describe("CVC owner session integration", () => {
     const protectedContext = await createTrpcContext({ req: authenticatedContext.ctx.req, res: authenticatedContext.ctx.res });
     const leagueAccess = await appRouter.createCaller(protectedContext).league.access();
     expect(leagueAccess).toMatchObject({ displayName: "Jonas", isCommissioner: true });
+    const refresh = await appRouter.createCaller(protectedContext).league.refreshFantasyProsPlayers();
+    expect(refresh).toMatchObject({ provider: "FantasyPros" });
+    expect(["network", "cache", "stale_cache"]).toContain(refresh.source);
+    expect(refresh.fetchedAt).toEqual(expect.any(String));
 
     await appRouter.createCaller(authenticatedContext.ctx).ownerAuth.signOut();
     expect(authenticatedContext.cookies.some(cookie => cookie.name === "cvc_owner_session" && cookie.value === undefined)).toBe(true);
-  });
+  }, 30_000);
 });

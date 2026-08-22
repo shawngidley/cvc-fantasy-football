@@ -2,6 +2,7 @@
  * Provider-neutral boundary for future NFL feeds. Provider-specific credentials,
  * payload mapping, and refresh scheduling belong behind this contract.
  */
+import { fantasyProsCacheStatus, getFantasyProsPlayerSnapshot } from "./fantasyProsCache";
 export type NFLAdapterStatus = {
   provider: string | null;
   configured: boolean;
@@ -71,11 +72,28 @@ export class Tank01NFLDataAdapter implements NFLDataAdapter {
   }
 }
 
+export class FantasyProsNFLDataAdapter implements NFLDataAdapter {
+  async status(): Promise<NFLAdapterStatus> {
+    const cache = await fantasyProsCacheStatus();
+    return { provider: "FantasyPros", configured: cache.configured, message: cache.fresh ? "FantasyPros CVC player data is available from the server-side cache." : "FantasyPros is configured; a commissioner refresh will populate or renew the CVC server-side cache." };
+  }
+
+  normalizePlayer(input: ProviderPlayerUpdate): ProviderPlayerUpdate { return input; }
+
+  async listPlayerSnapshot() {
+    return getFantasyProsPlayerSnapshot();
+  }
+}
+
 let adapter: NFLDataAdapter = process.env.TANK01_RAPIDAPI_KEY
   ? new Tank01NFLDataAdapter(process.env.TANK01_RAPIDAPI_KEY)
   : new UnconfiguredNFLDataAdapter();
 
 export function getNFLDataAdapter() { return adapter; }
+
+export function getFantasyProsDataAdapter() {
+  return process.env.FANTASYPROS_API_KEY ? new FantasyProsNFLDataAdapter() : null;
+}
 
 /** Used by a future server-only provider integration; never invoke this from the browser. */
 export function registerNFLDataAdapter(nextAdapter: NFLDataAdapter) { adapter = nextAdapter; }
