@@ -152,9 +152,16 @@ export const leagueRouter = router({
   activity: publicProcedure.query(async () => {
     const { data: season, error: seasonError } = await supabase.from("season").select("id").order("year", { ascending: false }).limit(1).single();
     if (seasonError || !season) throw new TRPCError({ code: "NOT_FOUND", message: "CVC season configuration was not found." });
-    const { data, error } = await supabase.from("transaction").select("id, transaction_type, status, summary, occurred_at, details").eq("season_id", season.id).order("occurred_at", { ascending: false }).limit(50);
+    const { data, error } = await supabase.from("transaction").select("id, transaction_type, status, summary, occurred_at, details, franchise:franchise_id(name, is_active)").eq("season_id", season.id).order("occurred_at", { ascending: false }).limit(50);
     if (error) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: error.message });
-    return data ?? [];
+    const legacySummary = /atlas aces|harbor hounds|placeholder/i;
+    return (data ?? []).filter((item: any) => {
+      const franchise = Array.isArray(item.franchise) ? item.franchise[0] : item.franchise;
+      return franchise?.is_active !== false && !legacySummary.test(item.summary ?? "");
+    }).map((item: any) => {
+      const franchise = Array.isArray(item.franchise) ? item.franchise[0] : item.franchise;
+      return { ...item, franchise_name: franchise?.name ?? null };
+    });
   }),
 
   auditHistory: protectedProcedure.input(z.object({ limit: z.number().int().min(1).max(200).optional() }).optional()).query(async ({ ctx, input }) => {

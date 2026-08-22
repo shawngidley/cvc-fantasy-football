@@ -9,6 +9,7 @@ import { CvcWrcLiveScoring } from "@/components/CvcWrcLiveScoring";
 import { CvcWrcOwnerLineup } from "@/components/CvcWrcOwnerLineup";
 import { CvcWrcFreeAgents } from "@/components/CvcWrcFreeAgents";
 import { CvcWrcRosters } from "@/components/CvcWrcRosters";
+import { CvcWrcTransactions } from "@/components/CvcWrcTransactions";
 import { Activity, ArrowRight, BadgeDollarSign, BookOpen, CalendarDays, Check, ChevronRight, ClipboardList, Crown, FileText, Gavel, LayoutDashboard, ListFilter, Newspaper, Plus, Radio, ReceiptText, Scale, Settings2, ShieldCheck, Sparkles, Trophy, Upload, UsersRound, WalletCards } from "lucide-react";
 import { useMemo, useState } from "react";
 import { Link, useRoute } from "wouter";
@@ -100,6 +101,7 @@ function TradesDesk() { const { owner } = useCvcOwnerAuth(); const utils = trpc.
 
 function Transactions({ kind }: { kind: "transactions" | "trades" | "free-agents" }) {
   if (kind === "free-agents") return <CvcWrcFreeAgents />;
+  if (kind === "transactions") return <CvcWrcTransactions />;
   const activity = trpc.league.activity.useQuery();
   const { owner } = useCvcOwnerAuth();
   const [playerSearch, setPlayerSearch] = useState("");
@@ -177,6 +179,6 @@ export default function LeaguePage({ kind }: { kind: PageKind }) {
   else if (kind === "rosters") body = <CvcWrcRosters />;
   else if (kind === "settings") body = <CommissionerPanel />;
   else body = <Informational kind={kind as "history" | "playoffs" | "rules" | "nfl-sites" | "money"} />;
-  const usesDirectWrcWorkspace = kind === "live" || kind === "lineup" || kind === "free-agents" || kind === "rosters";
+  const usesDirectWrcWorkspace = kind === "live" || kind === "lineup" || kind === "free-agents" || kind === "rosters" || kind === "transactions";
   return <LeagueLayout>{usesDirectWrcWorkspace ? null : <PageHeader kind={kind} action={kind === "standings" ? <Link href="/settings" className="cvc-button-compact"><Settings2 size={14} /> Configure CVC</Link> : undefined} />}{body}</LeagueLayout>;
 }
