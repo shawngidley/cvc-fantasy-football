@@ -144,6 +144,7 @@
 - [x] Exclude stale CVC draft-board placeholders, including lottery wording and unknown franchises, from the public Draft Recap until approved CVC pick ownership exists.
 - [x] Remove the WRC-only Draft Lottery route and navigation references from CVC while retaining Auction and Rookie Draft paths.
 - [x] Remove the intermediate CVC Draft Hub landing page and route Draft navigation directly to Protections.
+- [x] Restore the CVC Draft Hub and navigation to Draft Order, Draft Players, Protections, Auction Room, Rookie Draft, and Draft Recap while retaining no Draft Lottery route.
 - [ ] Audit and rebuild every CVC route from its corresponding WRC page structure, interaction pattern, responsive layout, and information density before adding further generic interfaces.
 - [ ] Use WRC source components and route structures directly as the baseline for each CVC page, substituting only CVC-specific branding, teams, rules, authentication, and dynamic data.
 - [x] Rebuild CVC Free Agents and FAAB from the WRC player-pool structure with position tabs, sortable data-backed columns, owner bid flow, and commissioner queue context.
@@ -163,6 +164,7 @@
 - [x] Limit Protections decisions for 2027 and 2028 contract players to Cut only; treat W as the 2026/expiring contract designation eligible for protection decisions.
 - [x] Split Protections contract display into Salary, Year, and Status columns, with Status rendered as F, R, T, or W.
 - [x] Correct Protections Status to display only actual F/R/T/W markers and leave the field blank for players without a tag.
+- [x] Remove the Cut Penalty summary header from the CVC Protections workspace.
 - [x] Limit expiring R contracts in Protections to Rookie Right as their only non-cut decision.
 - [x] Clarify the CVC Rules page so Transition salary calculations explicitly use prior-season salary rather than the displayed current-season salary.
 - [ ] Verify the WRC-style CVC Protections page using an authenticated owner franchise before treating protections parity as complete.

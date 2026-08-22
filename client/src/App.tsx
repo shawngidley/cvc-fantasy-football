@@ -30,7 +30,7 @@ function Router() {
       <Route path="/lineup/:franchiseId" component={PublicFranchiseLineup} />
       <Route path="/protections"><ProtectedPage><Protections /></ProtectedPage></Route>
       <Route path="/owner-settings"><ProtectedPage><OwnerSettings /></ProtectedPage></Route>
-      <Route path="/draft" component={() => <Redirect to="/protections" />} />
+      <Route path="/draft" component={() => <LeaguePage kind="draft" />} />
       <Route path="/auction" component={() => <Auction />} />
       <Route path="/auction/control"><ProtectedPage commissioner><Auction controls /></ProtectedPage></Route>
       <Route path="/draft-recap" component={() => <LeaguePage kind="draft-recap" />} />
