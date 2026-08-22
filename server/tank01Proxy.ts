@@ -7,6 +7,7 @@ const ALLOWED_ENDPOINTS = new Set([
   "getNFLTeams",
   "getNFLGamesForWeek",
   "getNFLBoxScore",
+  "getNFLNews",
   "getNFLTeamSchedule",
   "getNFLGamesForPlayer",
 ]);
