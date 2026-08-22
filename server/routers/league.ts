@@ -307,6 +307,74 @@ export const leagueRouter = router({
     return resolved;
   }),
 
+  myTrades: protectedProcedure.query(async ({ ctx }) => {
+    const owner = await getOwnerAccess({ openId: ctx.user.openId });
+    if (!owner) throw new TRPCError({ code: "FORBIDDEN", message: "A CVC owner session is required." });
+    const { season } = await getCurrentLeagueAndSeason();
+    const franchise = unwrap(await supabase.from("franchise").select("id").eq("current_owner_id", owner.id).eq("is_active", true).limit(1).maybeSingle());
+    if (!franchise && !["commissioner", "administrator"].includes(owner.role)) return [];
+    let query = supabase.from("trade_offer").select("id, status, note, proposed_at, responded_at, reviewed_at, proposer:proposer_franchise_id(id, name), recipient:recipient_franchise_id(id, name), assets:trade_asset(id, from_franchise_id, player:player_id(id, display_name, position, nfl_team))").eq("season_id", season.id).order("proposed_at", { ascending: false }).limit(100);
+    if (franchise) query = query.or(`proposer_franchise_id.eq.${franchise.id},recipient_franchise_id.eq.${franchise.id}`);
+    return unwrap(await query) ?? [];
+  }),
+
+  proposeTrade: protectedProcedure.input(z.object({ recipientFranchiseId: z.string().uuid(), offerPlayerIds: z.array(z.string().uuid()).min(1).max(22), requestPlayerIds: z.array(z.string().uuid()).min(1).max(22), note: z.string().trim().max(500).optional() }).refine(value => new Set([...value.offerPlayerIds, ...value.requestPlayerIds]).size === value.offerPlayerIds.length + value.requestPlayerIds.length, { message: "A player may appear only once in a CVC trade proposal." })).mutation(async ({ ctx, input }) => {
+    const owner = await getOwnerAccess({ openId: ctx.user.openId });
+    if (!owner) throw new TRPCError({ code: "FORBIDDEN", message: "A CVC owner session is required to propose a trade." });
+    const { league, season } = await getCurrentLeagueAndSeason();
+    const proposer = unwrap(await supabase.from("franchise").select("id, name").eq("current_owner_id", owner.id).eq("is_active", true).limit(1).maybeSingle());
+    if (!proposer) throw new TRPCError({ code: "FORBIDDEN", message: "Only an owner with an active CVC franchise may propose a trade." });
+    if (proposer.id === input.recipientFranchiseId) throw new TRPCError({ code: "BAD_REQUEST", message: "A CVC franchise cannot propose a trade to itself." });
+    const recipient = unwrap(await supabase.from("franchise").select("id, name").eq("id", input.recipientFranchiseId).eq("is_active", true).maybeSingle());
+    if (!recipient) throw new TRPCError({ code: "NOT_FOUND", message: "The recipient CVC franchise was not found." });
+    const playerIds = [...input.offerPlayerIds, ...input.requestPlayerIds];
+    const assignments = unwrap(await supabase.from("roster_assignment").select("player_id, franchise_id").eq("season_id", season.id).in("player_id", playerIds).is("released_at", null)) ?? [];
+    const ownerByPlayer = new Map(assignments.map(assignment => [assignment.player_id, assignment.franchise_id]));
+    if (input.offerPlayerIds.some(playerId => ownerByPlayer.get(playerId) !== proposer.id) || input.requestPlayerIds.some(playerId => ownerByPlayer.get(playerId) !== recipient.id)) throw new TRPCError({ code: "BAD_REQUEST", message: "Every CVC trade player must be on the franchise offering that player." });
+    const trade = unwrap(await supabase.from("trade_offer").insert({ season_id: season.id, proposer_franchise_id: proposer.id, recipient_franchise_id: recipient.id, note: input.note ?? null }).select("id").single());
+    if (!trade) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "CVC trade proposal could not be saved." });
+    const assets = [
+      ...input.offerPlayerIds.map(player_id => ({ trade_offer_id: trade.id, from_franchise_id: proposer.id, player_id })),
+      ...input.requestPlayerIds.map(player_id => ({ trade_offer_id: trade.id, from_franchise_id: recipient.id, player_id })),
+    ];
+    unwrap(await supabase.from("trade_asset").insert(assets).select("id"));
+    await createAuditEvent(league.id, season.id, owner.id, "trade_offer", trade.id, "proposed", `${proposer.name} proposed a trade to ${recipient.name}.`);
+    return { tradeId: trade.id };
+  }),
+
+  respondToTrade: protectedProcedure.input(z.object({ tradeId: z.string().uuid(), response: z.enum(["accepted", "rejected", "cancelled"]) })).mutation(async ({ ctx, input }) => {
+    const owner = await getOwnerAccess({ openId: ctx.user.openId });
+    if (!owner) throw new TRPCError({ code: "FORBIDDEN", message: "A CVC owner session is required." });
+    const { league, season } = await getCurrentLeagueAndSeason();
+    const franchise = unwrap(await supabase.from("franchise").select("id").eq("current_owner_id", owner.id).eq("is_active", true).limit(1).maybeSingle());
+    const trade = unwrap(await supabase.from("trade_offer").select("id, proposer_franchise_id, recipient_franchise_id, status").eq("id", input.tradeId).eq("season_id", season.id).maybeSingle());
+    if (!franchise || !trade) throw new TRPCError({ code: "NOT_FOUND", message: "CVC trade proposal was not found for this owner." });
+    const isRecipient = trade.recipient_franchise_id === franchise.id; const isProposer = trade.proposer_franchise_id === franchise.id;
+    if (trade.status !== "proposed" || (input.response === "accepted" || input.response === "rejected" ? !isRecipient : !isProposer)) throw new TRPCError({ code: "FORBIDDEN", message: "This CVC trade response is not available." });
+    const updated = unwrap(await supabase.from("trade_offer").update({ status: input.response, responded_at: new Date().toISOString() }).eq("id", trade.id).select("id, status").single());
+    await createAuditEvent(league.id, season.id, owner.id, "trade_offer", trade.id, input.response, `CVC trade proposal was ${input.response}.`);
+    return updated;
+  }),
+
+  executeTrade: protectedProcedure.input(z.object({ tradeId: z.string().uuid() })).mutation(async ({ ctx, input }) => {
+    const commissioner = await requireCommissioner({ openId: ctx.user.openId });
+    const { league, season } = await getCurrentLeagueAndSeason();
+    const trade = unwrap(await supabase.from("trade_offer").select("id, proposer_franchise_id, recipient_franchise_id, status, proposer:proposer_franchise_id(name), recipient:recipient_franchise_id(name), assets:trade_asset(id, from_franchise_id, player_id)").eq("id", input.tradeId).eq("season_id", season.id).maybeSingle());
+    if (!trade || trade.status !== "accepted") throw new TRPCError({ code: "BAD_REQUEST", message: "Only an accepted CVC trade may be executed." });
+    const assets = trade.assets ?? [];
+    const assignments = unwrap(await supabase.from("roster_assignment").select("id, player_id, franchise_id").eq("season_id", season.id).in("player_id", assets.map((asset: any) => asset.player_id)).is("released_at", null)) ?? [];
+    const assignmentByPlayer = new Map(assignments.map(assignment => [assignment.player_id, assignment]));
+    if (assets.some((asset: any) => assignmentByPlayer.get(asset.player_id)?.franchise_id !== asset.from_franchise_id)) throw new TRPCError({ code: "CONFLICT", message: "A CVC trade asset is no longer on its offering franchise roster." });
+    await Promise.all(assets.map((asset: any) => {
+      const destination = asset.from_franchise_id === trade.proposer_franchise_id ? trade.recipient_franchise_id : trade.proposer_franchise_id;
+      return supabase.from("roster_assignment").update({ franchise_id: destination, roster_state: "active", updated_at: new Date().toISOString() }).eq("id", assignmentByPlayer.get(asset.player_id)!.id).select("id");
+    }));
+    unwrap(await supabase.from("trade_offer").update({ status: "processed", reviewed_at: new Date().toISOString(), reviewed_by_owner_id: commissioner.id }).eq("id", trade.id).select("id").single());
+    unwrap(await supabase.from("transaction").insert({ season_id: season.id, franchise_id: trade.proposer_franchise_id, actor_owner_id: commissioner.id, transaction_type: "trade", status: "final", summary: `${trade.proposer?.[0]?.name ?? "CVC franchise"} completed a trade with ${trade.recipient?.[0]?.name ?? "CVC franchise"}.`, details: { trade_offer_id: trade.id, asset_count: assets.length } }).select("id").single());
+    await createAuditEvent(league.id, season.id, commissioner.id, "trade_offer", trade.id, "processed", "Commissioner executed an accepted CVC trade.");
+    return { processed: true };
+  }),
+
   myFranchise: protectedProcedure.query(async ({ ctx }) => {
     const owner = await getOwnerAccess({ openId: ctx.user.openId });
     if (!owner) throw new TRPCError({ code: "FORBIDDEN", message: "Your account is not associated with a CVC owner record." });
