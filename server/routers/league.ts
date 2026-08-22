@@ -314,7 +314,9 @@ export const leagueRouter = router({
   waiverBidQueue: protectedProcedure.query(async ({ ctx }) => {
     await requireCommissioner({ openId: ctx.user.openId });
     const { season } = await getCurrentLeagueAndSeason();
-    return unwrap(await supabase.from("faab_bid").select("id, amount, priority, status, submitted_at, player:player_id(id, display_name, position, nfl_team), franchise:franchise_id(id, name), period:waiver_period_id(id, label, closes_at, status)").eq("period.season_id", season.id).eq("status", "pending").order("amount", { ascending: false }).order("priority").limit(200)) ?? [];
+    const periodIds = (unwrap(await supabase.from("waiver_period").select("id").eq("season_id", season.id)) ?? []).map(period => period.id);
+    if (!periodIds.length) return [];
+    return unwrap(await supabase.from("faab_bid").select("id, amount, priority, status, submitted_at, player:player_id(id, display_name, position, nfl_team), franchise:franchise_id(id, name), period:waiver_period_id(id, label, closes_at, status)").in("waiver_period_id", periodIds).eq("status", "pending").order("amount", { ascending: false }).order("priority").limit(200)) ?? [];
   }),
 
   resolveFaabBid: protectedProcedure.input(z.object({ bidId: z.string().uuid(), outcome: z.enum(["won", "lost"]) })).mutation(async ({ ctx, input }) => {
