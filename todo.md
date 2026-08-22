@@ -129,3 +129,5 @@
 - [ ] Verify the WRC-style CVC Trade Desk with authenticated owner proposal, recipient response, and commissioner execution before treating trade parity as complete.
 - [x] Rebuild CVC Weekly Rundown from the WRC week selector, owner matchup marker, league median, and Tank01-only matchup-card structure.
 - [ ] Rebuild CVC Player News from the WRC source and position-filtered news-feed structure using server-only CVC provider data and owner roster context.
+- [x] Rebuild CVC Player Profiles from the WRC hero, ownership, scoring, matchup, and position-specific stat-table structure using available CVC provider data.
+- [ ] Verify populated Tank01 player-stat and current-matchup details in the WRC-style CVC Player Profile during an active provider window.

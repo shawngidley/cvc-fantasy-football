@@ -258,7 +258,17 @@ export const leagueRouter = router({
   playerDetail: publicProcedure.input(z.object({ playerId: z.string().uuid() })).query(async ({ input }) => {
     const player = unwrap(await supabase.from("player").select("id, provider, external_id, display_name, position, nfl_team, status, metadata, created_at, updated_at").eq("id", input.playerId).maybeSingle());
     if (!player) throw new TRPCError({ code: "NOT_FOUND", message: "CVC player was not found." });
-    return player;
+    const { season } = await getCurrentLeagueAndSeason();
+    const assignment = unwrap(await supabase.from("roster_assignment").select("franchise_id, acquired_at, assigned_slot_code").eq("season_id", season.id).eq("player_id", player.id).eq("roster_state", "active").is("released_at", null).maybeSingle());
+    const contract = assignment ? unwrap(await supabase.from("player_contract").select("salary, expires_year, source_marker, contract_status").eq("season_id", season.id).eq("franchise_id", assignment.franchise_id).eq("player_id", player.id).maybeSingle()) : null;
+    const franchise = assignment ? unwrap(await supabase.from("franchise").select("id, name, owner_id").eq("id", assignment.franchise_id).maybeSingle()) : null;
+    const owner = franchise ? unwrap(await supabase.from("owner").select("display_name").eq("id", franchise.owner_id).maybeSingle()) : null;
+    return {
+      ...player,
+      season: { id: season.id, year: season.year },
+      ownership: franchise ? { franchiseId: franchise.id, franchiseName: franchise.name, ownerName: owner?.display_name ?? null, acquiredAt: assignment?.acquired_at ?? null, assignedSlotCode: assignment?.assigned_slot_code ?? null } : null,
+      contract,
+    };
   }),
 
   nflProviderStatus: publicProcedure.query(async () => getNFLDataAdapter().status()),
