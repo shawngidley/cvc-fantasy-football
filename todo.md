@@ -21,7 +21,7 @@
 - [x] Run route-by-route verification for the full CVC page map, including public and protected variants, and document or fix any mismatches.
 - [x] Implement a true CVC player-detail route with stable player lookup and loading, empty, and error states.
 - [ ] Create and use a provider-neutral NFL data adapter service boundary rather than UI-only provider messaging.
-- [ ] Expand commissioner schedule configuration to support validated matchup entry and a matching CSV import template.
+- [x] Expand commissioner schedule configuration to support validated matchup entry and a matching CSV import template.
 - [ ] Add Vitest route-map coverage and commissioner happy-path/core mutation coverage.
 - [x] Prepare CVC metadata, canonical-domain assumptions, and custom-domain handoff notes for cvcfantasyfootball.com without publishing or changing DNS.
 - [ ] Define a commissioner-friendly CVC auction draft operating model covering setup, nominations, bidding, timing, roster enforcement, pauses, corrections, and post-draft reconciliation.

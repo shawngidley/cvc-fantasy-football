@@ -9,6 +9,13 @@ import { supabase, unwrap } from "../supabase";
 
 type CurrentUser = { openId: string };
 
+export const matchupInputSchema = z.object({
+  weekNumber: z.number().int().min(1).max(30),
+  homeFranchiseId: z.string().uuid(),
+  awayFranchiseId: z.string().uuid(),
+  resultState: z.enum(["upcoming", "live", "final", "corrected"]),
+}).refine(value => value.homeFranchiseId !== value.awayFranchiseId, { message: "A franchise cannot play itself." });
+
 async function getOwnerAccess(user: CurrentUser) {
   const cvcOwnerId = user.openId.startsWith("cvc:") ? user.openId.slice(4) : null;
   if (cvcOwnerId) {
@@ -433,7 +440,7 @@ export const leagueRouter = router({
     await createAuditEvent(league.id, season.id, commissioner.id, "schedule_week", item.id, "saved", `Saved ${input.label}`); return item;
   }),
 
-  saveMatchup: protectedProcedure.input(z.object({ weekNumber: z.number().int().min(1).max(30), homeFranchiseId: z.string().uuid(), awayFranchiseId: z.string().uuid(), resultState: z.enum(["upcoming", "live", "final", "corrected"]) }).refine(value => value.homeFranchiseId !== value.awayFranchiseId, { message: "A franchise cannot play itself." })).mutation(async ({ ctx, input }) => {
+  saveMatchup: protectedProcedure.input(matchupInputSchema).mutation(async ({ ctx, input }) => {
     const commissioner = await requireCommissioner({ openId: ctx.user.openId }); const { league, season } = await getCurrentLeagueAndSeason();
     const week = unwrap(await supabase.from("schedule_week").select("id, label").eq("season_id", season.id).eq("week_number", input.weekNumber).maybeSingle());
     if (!week) throw new TRPCError({ code: "BAD_REQUEST", message: "Save the CVC schedule week before adding its matchup." });
