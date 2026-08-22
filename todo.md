@@ -19,7 +19,7 @@
 - [ ] Add explicit loading, empty, and error states across every CVC league module page and verify them in the browser.
 - [x] Create commissioner onboarding guidance for setup order, required CVC inputs, CSV templates, role mapping, placeholder replacement, and live-data activation.
 - [x] Run route-by-route verification for the full CVC page map, including public and protected variants, and document or fix any mismatches.
-- [ ] Implement a true CVC player-detail route with stable player lookup and loading, empty, and error states.
+- [x] Implement a true CVC player-detail route with stable player lookup and loading, empty, and error states.
 - [ ] Create and use a provider-neutral NFL data adapter service boundary rather than UI-only provider messaging.
 - [ ] Expand commissioner schedule configuration to support validated matchup entry and a matching CSV import template.
 - [ ] Add Vitest route-map coverage and commissioner happy-path/core mutation coverage.

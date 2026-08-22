@@ -54,4 +54,13 @@ describe("CVC public league procedures", () => {
     expect(players.length).toBeLessThanOrEqual(25);
     expect(players.every(player => player.display_name.toLowerCase().includes("a.j.") && player.position === "WR")).toBe(true);
   });
+
+  it("resolves a stable CVC player directory ID to its detail record", async () => {
+    const caller = appRouter.createCaller(createPublicContext());
+    const directory = await caller.league.playerDirectory();
+    const player = await caller.league.playerDetail({ playerId: directory[0].id });
+
+    expect(player.id).toBe(directory[0].id);
+    expect(player.display_name).toBe(directory[0].display_name);
+  });
 });
