@@ -120,6 +120,7 @@
 - [ ] Verify the WRC-style CVC owner Lineup page using an authenticated owner roster on desktop and mobile before treating the owner experience as complete.
 - [x] Replace the flat CVC Lineup roster table with WRC-style position-grouped starter and bench sections, player imagery, and dense weekly/season stat columns using CVC data and truthful unavailable states.
 - [x] Correct CVC’s active lineup to QB, 2 RB, 2 WR, TE, FLEX (RB/WR/TE), K, and D/ST only; assign one valid starter at every configured slot for all franchises.
+- [x] Order CVC starting offense as QB, RB, RB, WR, WR, TE before bench players, and normalize imported KI labels to K across lineup grouping and display.
 - [x] Remove the Money Owed and Tm # columns from the CVC standings tables while retaining owner, team, record, points, and division-record data.
 - [x] Rebuild CVC Standings to the direct WRC 2026 structure: compact CVC Fantasy Football 2026 header, current-week matchup card, and dense East/West division tables with no generic introduction or configuration controls.
 - [x] Display the Week 1 CVC matchup on the Standings card during the 2026 pre-season rather than a later scheduled week.
@@ -144,6 +145,8 @@
 - [x] Rebuild the CVC Auction Room as a WRC Draft Hub-style workspace with sticky auction tabs, public board, player pool, protections context, and a protected commissioner console.
 - [ ] Verify the WRC Draft Hub-style commissioner auction console using an authenticated commissioner session and real auction state before treating auction parity as complete.
 - [x] Rebuild the CVC Protections page from the WRC owner-workspace structure while preserving CVC contract cuts, franchise/transition tags, and restricted-right rules.
+- [ ] Replace CVC Protections action buttons with one owner decision dropdown per player that exposes only currently eligible cut, franchise, transition, rookie-right, or waiver-right actions.
+- [ ] Enforce the supplied CVC Transition and Franchise contract rules: term eligibility, salary adjustments, future tag restrictions, one franchise tag per 2-year and 3-year contract tier, and off-season franchise/transition trade handling.
 - [ ] Verify the WRC-style CVC Protections page using an authenticated owner franchise before treating protections parity as complete.
 - [x] Rebuild CVC Rosters from the WRC division-filtered franchise-card structure with real owner, player, contract, and public-lineup data.
 - [x] Rebuild CVC Transactions from the WRC filtered add, drop, trade, and FAAB activity-feed structure with real CVC audit-aware transaction data.

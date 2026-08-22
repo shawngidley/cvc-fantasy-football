@@ -9,7 +9,20 @@ export function isCvcBenchAssignment(assignment: Pick<CvcLineupAssignment, "assi
 }
 
 function orderLineupRows(rows: CvcLineupAssignment[]) {
-  return [...rows].sort((a, b) => (a.assigned_slot_code ?? "BN").localeCompare(b.assigned_slot_code ?? "BN") || (a.player?.display_name ?? "").localeCompare(b.player?.display_name ?? ""));
+  const starterOrder: Record<string, number> = { QB: 0, RB1: 1, RB2: 2, WR1: 3, WR2: 4, TE: 5, FLEX: 6, K: 7, DST: 8 };
+  const benchOrder: Record<string, number> = { QB: 0, RB: 1, WR: 2, TE: 3, K: 4, DST: 5, DEF: 5 };
+  return [...rows].sort((a, b) => {
+    const aBench = isCvcBenchAssignment(a); const bBench = isCvcBenchAssignment(b);
+    const aPosition = normalizeCvcPosition(a.player?.position); const bPosition = normalizeCvcPosition(b.player?.position);
+    const aOrder = aBench ? (benchOrder[aPosition] ?? 99) : (starterOrder[(a.assigned_slot_code ?? "").trim().toUpperCase()] ?? 99);
+    const bOrder = bBench ? (benchOrder[bPosition] ?? 99) : (starterOrder[(b.assigned_slot_code ?? "").trim().toUpperCase()] ?? 99);
+    return aOrder - bOrder || aPosition.localeCompare(bPosition) || (a.player?.display_name ?? "").localeCompare(b.player?.display_name ?? "");
+  });
+}
+
+export function normalizeCvcPosition(position: string | null | undefined) {
+  const normalized = (position ?? "").trim().toUpperCase();
+  return normalized === "KI" ? "K" : normalized;
 }
 
 export function groupCvcLineup(assignments: CvcLineupAssignment[]): CvcLineupGroup[] {
@@ -19,8 +32,8 @@ export function groupCvcLineup(assignments: CvcLineupAssignment[]): CvcLineupGro
     return { key, title, profile, starters: orderLineupRows(rows.filter(row => !isCvcBenchAssignment(row))), bench: orderLineupRows(rows.filter(isCvcBenchAssignment)) };
   };
   return [
-    build("OFFENSE", "Offense", "offense", player => !["K", "DST", "DEF"].includes((player.position ?? "").toUpperCase())),
-    build("K", "Kicker", "kicker", player => (player.position ?? "").toUpperCase() === "K"),
-    build("DST", "D/ST", "defense", player => ["DST", "DEF"].includes((player.position ?? "").toUpperCase())),
+    build("OFFENSE", "Offense", "offense", player => !["K", "DST", "DEF"].includes(normalizeCvcPosition(player.position))),
+    build("K", "Kicker", "kicker", player => normalizeCvcPosition(player.position) === "K"),
+    build("DST", "D/ST", "defense", player => ["DST", "DEF"].includes(normalizeCvcPosition(player.position))),
   ].filter(group => group.starters.length || group.bench.length);
 }

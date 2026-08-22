@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { groupCvcLineup, isCvcBenchAssignment, type CvcLineupAssignment } from "./cvcLineupGrouping";
+import { groupCvcLineup, isCvcBenchAssignment, normalizeCvcPosition, type CvcLineupAssignment } from "./cvcLineupGrouping";
 
 const rows: CvcLineupAssignment[] = [
   { id: "qb", assigned_slot_code: "QB", player: { id: "p1", display_name: "Quarterback", position: "QB", nfl_team: "BUF" } },
@@ -22,5 +22,23 @@ describe("CVC lineup grouping", () => {
     expect(groups[0].bench.map(row => row.player?.display_name)).toEqual(["Runner"]);
     expect(groups[1].starters).toHaveLength(1);
     expect(groups[2].bench).toHaveLength(1);
+  });
+
+  it("orders offense as QB, RB, RB, WR, WR, TE and treats KI as K", () => {
+    const group = groupCvcLineup([
+      { id: "te", assigned_slot_code: "TE", player: { id: "te", display_name: "Tight End", position: "TE", nfl_team: "TEN" } },
+      { id: "wr2", assigned_slot_code: "WR2", player: { id: "wr2", display_name: "Wide Two", position: "WR", nfl_team: "LAR" } },
+      { id: "rb2", assigned_slot_code: "RB2", player: { id: "rb2", display_name: "Runner Two", position: "RB", nfl_team: "ATL" } },
+      { id: "qb", assigned_slot_code: "QB", player: { id: "qb", display_name: "Quarterback", position: "QB", nfl_team: "BUF" } },
+      { id: "wr1", assigned_slot_code: "WR1", player: { id: "wr1", display_name: "Wide One", position: "WR", nfl_team: "KC" } },
+      { id: "rb1", assigned_slot_code: "RB1", player: { id: "rb1", display_name: "Runner One", position: "RB", nfl_team: "MIA" } },
+      { id: "ki", assigned_slot_code: "K", player: { id: "ki", display_name: "Kicker", position: "KI", nfl_team: "DAL" } },
+      { id: "bench-wr", assigned_slot_code: "BN", player: { id: "bench-wr", display_name: "Bench Wide", position: "WR", nfl_team: "NYG" } },
+      { id: "bench-qb", assigned_slot_code: "BN", player: { id: "bench-qb", display_name: "Bench Quarterback", position: "QB", nfl_team: "CHI" } },
+    ]);
+    expect(group[0]?.starters.map(row => row.player?.display_name)).toEqual(["Quarterback", "Runner One", "Runner Two", "Wide One", "Wide Two", "Tight End"]);
+    expect(group[0]?.bench.map(row => row.player?.display_name)).toEqual(["Bench Quarterback", "Bench Wide"]);
+    expect(group[1]?.starters.map(row => row.player?.display_name)).toEqual(["Kicker"]);
+    expect(normalizeCvcPosition("KI")).toBe("K");
   });
 });
