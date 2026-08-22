@@ -41,7 +41,7 @@
 - [x] Map Jonas to The Super Snuffleupagus and Justin to DS Warteaters as the confirmed CVC co-commissioner franchise assignments.
 - [x] Create the separate CVC administrator owner-selector account with the display name Administrator.
 - [x] Build a WRC-style CVC owner Settings page where authenticated owners can securely change their own four-digit PIN.
-- [ ] Add a secure owner-session Sign Out control to the CVC Team Settings page that returns the user to owner sign-in.
+- [x] Add a secure owner-session Sign Out control to the CVC Team Settings page that returns the user to owner sign-in.
 - [ ] Add Team Settings sign-out failure feedback and verify in the browser that a signed-in owner session is cleared, protected routes gate correctly, and the user lands on owner sign-in.
 - [ ] Complete real CVC Owner Settings logo management and device-sign-in setup readiness controls.
 - [x] Replace the current placeholder owner and franchise rows with the validated 2026 CVC owner and franchise records before assigning co-commissioner roles.
@@ -149,8 +149,8 @@
 - [x] Rebuild the CVC Auction Room as a WRC Draft Hub-style workspace with sticky auction tabs, public board, player pool, protections context, and a protected commissioner console.
 - [ ] Verify the WRC Draft Hub-style commissioner auction console using an authenticated commissioner session and real auction state before treating auction parity as complete.
 - [x] Rebuild the CVC Protections page from the WRC owner-workspace structure while preserving CVC contract cuts, franchise/transition tags, and restricted-right rules.
-- [ ] Replace CVC Protections action buttons with one owner decision dropdown per player that exposes only currently eligible cut, franchise, transition, rookie-right, or waiver-right actions.
-- [ ] Enforce the supplied CVC Transition and Franchise contract rules: term eligibility, salary adjustments, future tag restrictions, one franchise tag per 2-year and 3-year contract tier, and off-season franchise/transition trade handling.
+- [x] Replace CVC Protections action buttons with one owner decision dropdown per player that exposes only currently eligible cut, franchise, transition, rookie-right, or waiver-right actions.
+- [x] Enforce the supplied CVC Transition and Franchise contract rules: term eligibility, salary adjustments, future tag restrictions, one franchise tag per 2-year and 3-year contract tier, and off-season franchise/transition trade handling.
 - [ ] Verify the WRC-style CVC Protections page using an authenticated owner franchise before treating protections parity as complete.
 - [x] Rebuild CVC Rosters from the WRC division-filtered franchise-card structure with real owner, player, contract, and public-lineup data.
 - [x] Add a live Contract column to CVC Roster player tables using active contract and protection-right data.
