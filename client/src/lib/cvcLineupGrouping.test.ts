@@ -15,9 +15,9 @@ describe("CVC lineup grouping", () => {
     expect(isCvcBenchAssignment(rows[3])).toBe(true);
   });
 
-  it("keeps Superflex, Kicker, and D/ST sections separate with bench players beneath starters", () => {
+  it("keeps Offense, Kicker, and D/ST sections separate with bench players beneath starters", () => {
     const groups = groupCvcLineup(rows);
-    expect(groups.map(group => group.key)).toEqual(["SFLEX", "K", "DST"]);
+    expect(groups.map(group => group.key)).toEqual(["OFFENSE", "K", "DST"]);
     expect(groups[0].starters.map(row => row.player?.display_name)).toEqual(["Quarterback"]);
     expect(groups[0].bench.map(row => row.player?.display_name)).toEqual(["Runner"]);
     expect(groups[1].starters).toHaveLength(1);
