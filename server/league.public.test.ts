@@ -20,6 +20,13 @@ describe("CVC public league procedures", () => {
     expect(overview.matchups.length).toBeGreaterThanOrEqual(3);
   });
 
+  it("exposes mapped franchise logos in overview and scheduled matchup data", async () => {
+    const overview = await appRouter.createCaller(createPublicContext()).league.overview();
+
+    expect(overview.franchises.every(franchise => typeof franchise.logo_url === "string" && franchise.logo_url.length > 0)).toBe(true);
+    expect(overview.matchups.every(matchup => typeof matchup.homeLogoUrl === "string" && typeof matchup.awayLogoUrl === "string")).toBe(true);
+  });
+
   it("reports configured records for every required league-domain module", async () => {
     const modules = await appRouter.createCaller(createPublicContext()).league.setupSummary();
     const populated = new Map(modules.map(module => [module.table, module.count]));

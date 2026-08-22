@@ -121,6 +121,9 @@
 - [x] Correct CVC’s active lineup to QB, 2 RB, 2 WR, TE, FLEX (RB/WR/TE), K, and D/ST only; assign one valid starter at every configured slot for all franchises.
 - [x] Remove the Money Owed and Tm # columns from the CVC standings tables while retaining owner, team, record, points, and division-record data.
 - [x] Rebuild CVC Standings to the direct WRC 2026 structure: compact CVC Fantasy Football 2026 header, current-week matchup card, and dense East/West division tables with no generic introduction or configuration controls.
+- [x] Rebuild the CVC Draft navigation route from the WRC Draft Hub tab structure using live CVC auction board, player pool, protections, and rookie-draft states without generic draft placeholders.
+- [x] Map, store, and apply the supplied CVC franchise logos across owner/team contexts including signed-in team identity, standings, rosters, matchup cards, Live Scoring, Lineup, Draft/Auction, and trades.
+- [x] Store and map the supplied Xavier Musketeers logo so every active CVC franchise has a team mark.
 - [ ] Audit and rebuild every CVC route from its corresponding WRC page structure, interaction pattern, responsive layout, and information density before adding further generic interfaces.
 - [ ] Use WRC source components and route structures directly as the baseline for each CVC page, substituting only CVC-specific branding, teams, rules, authentication, and dynamic data.
 - [x] Rebuild CVC Free Agents and FAAB from the WRC player-pool structure with position tabs, sortable data-backed columns, owner bid flow, and commissioner queue context.
@@ -137,7 +140,7 @@
 - [x] Rebuild CVC Trades from the WRC owner proposal and trade-inbox workspace while preserving CVC player, FAAB, and commissioner-execution rules.
 - [ ] Verify the WRC-style CVC Trade Desk with authenticated owner proposal, recipient response, and commissioner execution before treating trade parity as complete.
 - [x] Rebuild CVC Weekly Rundown from the WRC week selector, owner matchup marker, league median, and Tank01-only matchup-card structure.
-- [ ] Rebuild CVC Player News from the WRC source and position-filtered news-feed structure using server-only CVC provider data and owner roster context.
+- [x] Rebuild CVC Player News from the WRC source and position-filtered news-feed structure using server-only CVC provider data and owner roster context.
 - [x] Rebuild CVC Player Profiles from the WRC hero, ownership, scoring, matchup, and position-specific stat-table structure using available CVC provider data.
 - [x] Rebuild CVC Money from the WRC owner-balance, financial-history, prize-structure, and earnings workspace using CVC financial data without importing WRC payout assumptions.
 - [x] Rebuild CVC Rules from the WRC section-card rulebook structure using approved CVC scoring, protections, auction, and transaction policies only.

@@ -62,7 +62,7 @@ export const leagueRouter = router({
     const [league, season, franchises, owners, weeks, matchups, financialEntries] = await Promise.all([
       supabase.from("league").select("id, slug, name, short_name, timezone, primary_color, accent_color").eq("slug", "cvc-auction-football").single(),
       supabase.from("season").select("id, year, label, status, regular_season_weeks, playoff_teams").order("year", { ascending: false }).limit(1).single(),
-      supabase.from("franchise").select("id, name, abbreviation, division_name, current_owner_id, brand_color, display_order").eq("is_active", true).order("display_order"),
+      supabase.from("franchise").select("id, name, abbreviation, division_name, current_owner_id, brand_color, logo_url, display_order").eq("is_active", true).order("display_order"),
       supabase.from("owner").select("id, display_name, role").eq("is_active", true),
       supabase.from("schedule_week").select("id, week_number, label, status").order("week_number"),
       supabase.from("matchup").select("id, schedule_week_id, home_franchise_id, away_franchise_id, home_score, away_score, home_projection, away_projection, result_state").order("created_at"),
@@ -120,6 +120,10 @@ export const leagueRouter = router({
         week: weekById.get(matchup.schedule_week_id),
         home: teamById.get(matchup.home_franchise_id)?.name ?? "TBD",
         away: teamById.get(matchup.away_franchise_id)?.name ?? "TBD",
+        homeLogoUrl: teamById.get(matchup.home_franchise_id)?.logo_url ?? null,
+        awayLogoUrl: teamById.get(matchup.away_franchise_id)?.logo_url ?? null,
+        homeAbbreviation: teamById.get(matchup.home_franchise_id)?.abbreviation ?? null,
+        awayAbbreviation: teamById.get(matchup.away_franchise_id)?.abbreviation ?? null,
       })),
     };
   }),
@@ -176,7 +180,7 @@ export const leagueRouter = router({
     if (draftError || !draft) throw new TRPCError({ code: "NOT_FOUND", message: "CVC draft configuration was not found." });
     const [picksResult, franchisesResult] = await Promise.all([
       supabase.from("draft_pick").select("id, round_number, pick_number, original_franchise_id, current_franchise_id, pick_status, is_protected, notes").eq("draft_id", draft.id).order("pick_number").limit(500),
-      supabase.from("franchise").select("id, name, abbreviation").eq("is_active", true).limit(100),
+      supabase.from("franchise").select("id, name, abbreviation, logo_url").eq("is_active", true).limit(100),
     ]);
     const picks = unwrap(picksResult) ?? [];
     const franchises = unwrap(franchisesResult) ?? [];
@@ -214,7 +218,7 @@ export const leagueRouter = router({
   }),
 
   franchiseRoster: publicProcedure.input(z.object({ franchiseId: z.string().uuid() })).query(async ({ input }) => {
-    const { data: franchise, error: franchiseError } = await supabase.from("franchise").select("id, name, abbreviation, division_name, brand_color, current_owner_id").eq("id", input.franchiseId).single();
+    const { data: franchise, error: franchiseError } = await supabase.from("franchise").select("id, name, abbreviation, division_name, brand_color, logo_url, current_owner_id").eq("id", input.franchiseId).single();
     if (franchiseError || !franchise) throw new TRPCError({ code: "NOT_FOUND", message: "CVC franchise was not found." });
     const { data: season, error: seasonError } = await supabase.from("season").select("id").order("year", { ascending: false }).limit(1).single();
     if (seasonError || !season) throw new TRPCError({ code: "NOT_FOUND", message: "CVC season was not found." });
@@ -440,7 +444,7 @@ export const leagueRouter = router({
   myFranchise: protectedProcedure.query(async ({ ctx }) => {
     const owner = await getOwnerAccess({ openId: ctx.user.openId });
     if (!owner) throw new TRPCError({ code: "FORBIDDEN", message: "Your account is not associated with a CVC owner record." });
-    const franchise = unwrap(await supabase.from("franchise").select("id, name, abbreviation, division_name").eq("current_owner_id", owner.id).eq("is_active", true).limit(1).maybeSingle());
+    const franchise = unwrap(await supabase.from("franchise").select("id, name, abbreviation, division_name, logo_url").eq("current_owner_id", owner.id).eq("is_active", true).limit(1).maybeSingle());
     if (!franchise) throw new TRPCError({ code: "NOT_FOUND", message: "No active CVC franchise is assigned to your owner record." });
     return franchise;
   }),
@@ -470,16 +474,17 @@ export const leagueRouter = router({
     const weeks = unwrap(await supabase.from("schedule_week").select("id, week_number, label, status").eq("season_id", season.id).order("week_number")) ?? [];
     const week = weeks.find(item => item.status === "live") ?? weeks.find(item => item.status === "upcoming") ?? null;
     if (!week) return { week: null, matchups: [] };
-    const matchups = unwrap(await supabase.from("matchup").select("id, home_franchise_id, away_franchise_id, home_score, away_score, result_state, home:home_franchise_id(id, name), away:away_franchise_id(id, name)").eq("schedule_week_id", week.id).order("created_at")) ?? [];
+    const matchups = unwrap(await supabase.from("matchup").select("id, home_franchise_id, away_franchise_id, home_score, away_score, result_state, home:home_franchise_id(id, name, logo_url), away:away_franchise_id(id, name, logo_url)").eq("schedule_week_id", week.id).order("created_at")) ?? [];
     const franchiseIds = Array.from(new Set(matchups.flatMap(item => [item.home_franchise_id, item.away_franchise_id])));
     const assignments = franchiseIds.length ? unwrap(await supabase.from("roster_assignment").select("id, franchise_id, assigned_slot_code, player:player_id(id, display_name, position, nfl_team)").eq("season_id", season.id).in("franchise_id", franchiseIds).is("released_at", null).not("assigned_slot_code", "is", null)) ?? [] : [];
     const lineupFor = (franchiseId: string) => activeLiveLineup(assignments, franchiseId);
-    const franchiseName = (value: unknown) => Array.isArray(value) ? value[0]?.name : (value as { name?: string } | null)?.name;
+    const franchise = (value: unknown) => Array.isArray(value) ? value[0] as { name?: string; logo_url?: string | null } | undefined : value as { name?: string; logo_url?: string | null } | null;
     return {
       week: { weekNumber: week.week_number, label: week.label, status: week.status },
       matchups: matchups.map(item => ({
         id: item.id,
-        home: franchiseName(item.home) ?? "Home", away: franchiseName(item.away) ?? "Away",
+        home: franchise(item.home)?.name ?? "Home", away: franchise(item.away)?.name ?? "Away",
+        homeLogoUrl: franchise(item.home)?.logo_url ?? null, awayLogoUrl: franchise(item.away)?.logo_url ?? null,
         homeScore: item.home_score, awayScore: item.away_score, resultState: item.result_state,
         homeLineup: lineupFor(item.home_franchise_id), awayLineup: lineupFor(item.away_franchise_id),
       })),
