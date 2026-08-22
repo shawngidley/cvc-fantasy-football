@@ -2,12 +2,13 @@ import { TRPCError } from "@trpc/server";
 import { z } from "zod";
 import { clearCvcOwnerSession, getCvcOwnerSession, hashPin, issueCvcOwnerSession, requireCvcOwnerSession, verifyPin } from "../cvcOwnerAuth";
 import { router, publicProcedure } from "../_core/trpc";
+import { storagePut } from "../storage";
 import { supabase, unwrap } from "../supabase";
 
 async function ownerSummary(ownerId: string) {
   const owner = unwrap(await supabase.from("owner").select("id, display_name, role").eq("id", ownerId).eq("is_active", true).maybeSingle());
   if (!owner) throw new TRPCError({ code: "NOT_FOUND", message: "CVC owner record was not found." });
-  const franchise = unwrap(await supabase.from("franchise").select("id, name, abbreviation").eq("current_owner_id", owner.id).eq("is_active", true).limit(1).maybeSingle());
+  const franchise = unwrap(await supabase.from("franchise").select("id, name, abbreviation, logo_url").eq("current_owner_id", owner.id).eq("is_active", true).limit(1).maybeSingle());
   return { id: owner.id, displayName: owner.display_name, role: owner.role, franchise };
 }
 
@@ -55,5 +56,17 @@ export const ownerAuthRouter = router({
     unwrap(await supabase.from("owner").update({ pin_hash: hashPin("1234"), pin_updated_at: new Date().toISOString() }).eq("id", owner.id).select("id").single());
     unwrap(await supabase.from("owner_session").delete().eq("owner_id", owner.id).select("id"));
     return { success: true, displayName: owner.display_name } as const;
+  }),
+
+  uploadTeamLogo: publicProcedure.input(z.object({ mimeType: z.enum(["image/png", "image/jpeg", "image/webp"]), base64: z.string().min(1).max(3_000_000) })).mutation(async ({ ctx, input }) => {
+    const session = await requireCvcOwnerSession(ctx.req);
+    const franchise = unwrap(await supabase.from("franchise").select("id, abbreviation").eq("current_owner_id", session.owner.id).eq("is_active", true).maybeSingle());
+    if (!franchise) throw new TRPCError({ code: "FORBIDDEN", message: "Only a CVC franchise owner may upload a team logo." });
+    const bytes = Buffer.from(input.base64, "base64");
+    if (!bytes.length || bytes.length > 2 * 1024 * 1024) throw new TRPCError({ code: "BAD_REQUEST", message: "Team logos must be a valid PNG, JPG, or WebP image under 2 MB." });
+    const extension = input.mimeType === "image/png" ? "png" : input.mimeType === "image/jpeg" ? "jpg" : "webp";
+    const uploaded = await storagePut(`cvc/franchise-logos/${franchise.id}/logo.${extension}`, bytes, input.mimeType);
+    unwrap(await supabase.from("franchise").update({ logo_url: uploaded.url }).eq("id", franchise.id).select("id").single());
+    return { logoUrl: uploaded.url };
   }),
 });
