@@ -132,4 +132,5 @@
 - [x] Rebuild CVC Player Profiles from the WRC hero, ownership, scoring, matchup, and position-specific stat-table structure using available CVC provider data.
 - [x] Rebuild CVC Money from the WRC owner-balance, financial-history, prize-structure, and earnings workspace using CVC financial data without importing WRC payout assumptions.
 - [x] Rebuild CVC Rules from the WRC section-card rulebook structure using approved CVC scoring, protections, auction, and transaction policies only.
+- [x] Rebuild CVC Franchise History from the WRC champions, selector, standings, playoff results, and all-time-records hierarchy using truthful CVC configuration states until historical records are approved and imported.
 - [ ] Verify populated Tank01 player-stat and current-matchup details in the WRC-style CVC Player Profile during an active provider window.

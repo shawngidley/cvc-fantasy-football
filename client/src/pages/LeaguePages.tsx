@@ -17,6 +17,7 @@ import { CvcWrcPlayerNews } from "@/components/CvcWrcPlayerNews";
 import { CvcWrcPlayerProfile } from "@/components/CvcWrcPlayerProfile";
 import { CvcWrcMoney } from "@/components/CvcWrcMoney";
 import { CvcWrcRules } from "@/components/CvcWrcRules";
+import { CvcWrcHistory } from "@/components/CvcWrcHistory";
 import { Activity, ArrowRight, BadgeDollarSign, BookOpen, CalendarDays, Check, ChevronRight, ClipboardList, Crown, FileText, Gavel, LayoutDashboard, ListFilter, Newspaper, Plus, Radio, ReceiptText, Scale, Settings2, ShieldCheck, Sparkles, Trophy, Upload, UsersRound, WalletCards } from "lucide-react";
 import { useMemo, useState } from "react";
 import { Link, useRoute } from "wouter";
@@ -185,9 +186,10 @@ export default function LeaguePage({ kind }: { kind: PageKind }) {
   else if (kind === "player") body = <CvcWrcPlayerProfile />;
   else if (kind === "money") body = <CvcWrcMoney />;
   else if (kind === "rules") body = <CvcWrcRules />;
+  else if (kind === "history") body = <CvcWrcHistory />;
   else if (kind === "rosters") body = <CvcWrcRosters />;
   else if (kind === "settings") body = <CommissionerPanel />;
   else body = <Informational kind={kind as "history" | "playoffs" | "rules" | "nfl-sites" | "money"} />;
-  const usesDirectWrcWorkspace = kind === "live" || kind === "lineup" || kind === "free-agents" || kind === "rosters" || kind === "transactions" || kind === "results" || kind === "rundown" || kind === "trades" || kind === "news" || kind === "player" || kind === "money" || kind === "rules";
+  const usesDirectWrcWorkspace = kind === "live" || kind === "lineup" || kind === "free-agents" || kind === "rosters" || kind === "transactions" || kind === "results" || kind === "rundown" || kind === "trades" || kind === "news" || kind === "player" || kind === "money" || kind === "rules" || kind === "history";
   return <LeagueLayout>{usesDirectWrcWorkspace ? null : <PageHeader kind={kind} action={kind === "standings" ? <Link href="/settings" className="cvc-button-compact"><Settings2 size={14} /> Configure CVC</Link> : undefined} />}{body}</LeagueLayout>;
 }
