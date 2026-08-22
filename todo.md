@@ -114,6 +114,8 @@
 - [ ] Verify the WRC-style CVC owner Lineup page using an authenticated owner roster on desktop and mobile before treating the owner experience as complete.
 - [ ] Audit and rebuild every CVC route from its corresponding WRC page structure, interaction pattern, responsive layout, and information density before adding further generic interfaces.
 - [ ] Use WRC source components and route structures directly as the baseline for each CVC page, substituting only CVC-specific branding, teams, rules, authentication, and dynamic data.
+- [x] Rebuild CVC Free Agents and FAAB from the WRC player-pool structure with position tabs, sortable data-backed columns, owner bid flow, and commissioner queue context.
+- [ ] Verify the WRC-style CVC Free Agents bid flow and commissioner queue using authenticated owner and commissioner sessions before treating waiver parity as complete.
 - [x] Port the WRC shared navigation hierarchy into CVC with compact header, route order, live indicator, ticker, team context, League menu, and mobile overlay drawer.
 - [x] Port the WRC centered team-selector and PIN login structure into CVC while retaining the secure independent CVC owner-session backend.
 - [x] Rebuild the CVC Auction Room as a WRC Draft Hub-style workspace with sticky auction tabs, public board, player pool, protections context, and a protected commissioner console.
