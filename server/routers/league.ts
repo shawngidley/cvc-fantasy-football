@@ -58,13 +58,14 @@ async function createAuditEvent(leagueId: string, seasonId: string, actorOwnerId
 
 export const leagueRouter = router({
   overview: publicProcedure.query(async () => {
-    const [league, season, franchises, owners, weeks, matchups] = await Promise.all([
+    const [league, season, franchises, owners, weeks, matchups, financialEntries] = await Promise.all([
       supabase.from("league").select("id, slug, name, short_name, timezone, primary_color, accent_color").eq("slug", "cvc-auction-football").single(),
       supabase.from("season").select("id, year, label, status, regular_season_weeks, playoff_teams").order("year", { ascending: false }).limit(1).single(),
       supabase.from("franchise").select("id, name, abbreviation, division_name, current_owner_id, brand_color, display_order").eq("is_active", true).order("display_order"),
       supabase.from("owner").select("id, display_name, role").eq("is_active", true),
       supabase.from("schedule_week").select("id, week_number, label, status").order("week_number"),
       supabase.from("matchup").select("id, schedule_week_id, home_franchise_id, away_franchise_id, home_score, away_score, home_projection, away_projection, result_state").order("created_at"),
+      supabase.from("league_financial_entry").select("franchise_id, entry_type, amount, status").order("created_at"),
     ]);
 
     const leagueData = unwrap(league);
@@ -73,29 +74,41 @@ export const leagueRouter = router({
     const ownerRows = unwrap(owners) ?? [];
     const weekRows = unwrap(weeks) ?? [];
     const matchupRows = unwrap(matchups) ?? [];
+    const financialRows = unwrap(financialEntries) ?? [];
     const ownerById = new Map(ownerRows.map(owner => [owner.id, owner]));
     const teamById = new Map(franchiseRows.map(franchise => [franchise.id, franchise]));
     const weekById = new Map(weekRows.map(week => [week.id, week]));
 
+    const franchiseStats = new Map(franchiseRows.map(franchise => [franchise.id, { wins: 0, losses: 0, pointsFor: 0, pointsAgainst: 0, divisionWins: 0, divisionLosses: 0 }]));
+    matchupRows.filter(matchup => matchup.result_state === "final").forEach(matchup => {
+      const home = franchiseStats.get(matchup.home_franchise_id); const away = franchiseStats.get(matchup.away_franchise_id);
+      if (!home || !away) return;
+      const homeScore = Number(matchup.home_score); const awayScore = Number(matchup.away_score); const sameDivision = teamById.get(matchup.home_franchise_id)?.division_name === teamById.get(matchup.away_franchise_id)?.division_name;
+      home.pointsFor += homeScore; home.pointsAgainst += awayScore; away.pointsFor += awayScore; away.pointsAgainst += homeScore;
+      if (homeScore > awayScore) { home.wins += 1; away.losses += 1; if (sameDivision) { home.divisionWins += 1; away.divisionLosses += 1; } }
+      if (awayScore > homeScore) { away.wins += 1; home.losses += 1; if (sameDivision) { away.divisionWins += 1; home.divisionLosses += 1; } }
+    });
+    const divisionLeaders = new Map<string, { wins: number; losses: number }>();
+    franchiseRows.forEach(franchise => { const stats = franchiseStats.get(franchise.id)!; const key = franchise.division_name ?? "Unassigned"; const leader = divisionLeaders.get(key); if (!leader || stats.wins > leader.wins || (stats.wins === leader.wins && stats.losses < leader.losses)) divisionLeaders.set(key, stats); });
     const franchisesWithRecord = franchiseRows.map(franchise => {
       const completed = matchupRows.filter(matchup => matchup.result_state === "final" && (matchup.home_franchise_id === franchise.id || matchup.away_franchise_id === franchise.id));
-      const record = completed.reduce((summary, matchup) => {
-        const isHome = matchup.home_franchise_id === franchise.id;
-        const ownScore = Number(isHome ? matchup.home_score : matchup.away_score);
-        const opposingScore = Number(isHome ? matchup.away_score : matchup.home_score);
-        return {
-          wins: summary.wins + Number(ownScore > opposingScore),
-          losses: summary.losses + Number(ownScore < opposingScore),
-          pointsFor: summary.pointsFor + ownScore,
-        };
-      }, { wins: 0, losses: 0, pointsFor: 0 });
+      const stats = franchiseStats.get(franchise.id)!;
+      const leader = divisionLeaders.get(franchise.division_name ?? "Unassigned")!;
+      const moneyOwed = financialRows.filter(entry => entry.franchise_id === franchise.id && entry.status === "open").reduce((total, entry) => total + Number(entry.amount) * (["credit", "payout"].includes(entry.entry_type) ? -1 : 1), 0);
       return {
         ...franchise,
         owner: franchise.current_owner_id ? ownerById.get(franchise.current_owner_id)?.display_name ?? "Unassigned" : "Unassigned",
-        record: `${record.wins}–${record.losses}`,
-        pointsFor: record.pointsFor,
+        record: `${stats.wins}–${stats.losses}`,
+        wins: stats.wins,
+        losses: stats.losses,
+        gamesBack: Number((((leader.wins - stats.wins) + (stats.losses - leader.losses)) / 2).toFixed(1)),
+        pointsFor: stats.pointsFor,
+        pointsAgainst: stats.pointsAgainst,
+        divisionRecord: `${stats.divisionWins}–${stats.divisionLosses}`,
+        moneyOwed,
+        completedGames: completed.length,
       };
-    }).sort((left, right) => right.pointsFor - left.pointsFor);
+    }).sort((left, right) => left.division_name.localeCompare(right.division_name) || right.wins - left.wins || left.losses - right.losses || right.pointsFor - left.pointsFor || left.display_order - right.display_order);
 
     return {
       league: leagueData,
@@ -658,6 +671,17 @@ export const leagueRouter = router({
     const item = unwrap(await supabase.from("matchup").upsert({ schedule_week_id: week.id, home_franchise_id: input.homeFranchiseId, away_franchise_id: input.awayFranchiseId, result_state: input.resultState }, { onConflict: "schedule_week_id,home_franchise_id" }).select("id").single());
     if (!item) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "CVC matchup could not be saved." });
     await createAuditEvent(league.id, season.id, commissioner.id, "matchup", item.id, "saved", `Saved ${week.label} matchup`); return item;
+  }),
+
+  recordMatchupResult: protectedProcedure.input(z.object({ matchupId: z.string().uuid(), homeScore: z.number().min(0).max(500).finite(), awayScore: z.number().min(0).max(500).finite(), resultState: z.enum(["upcoming", "live", "final"]) })).mutation(async ({ ctx, input }) => {
+    const commissioner = await requireCommissioner({ openId: ctx.user.openId }); const { league, season } = await getCurrentLeagueAndSeason();
+    const matchup = unwrap(await supabase.from("matchup").select("id, schedule_week_id, home_franchise_id, away_franchise_id, week:schedule_week_id(season_id, label), home:home_franchise_id(name), away:away_franchise_id(name)").eq("id", input.matchupId).maybeSingle());
+    if (!matchup || matchup.week?.[0]?.season_id !== season.id) throw new TRPCError({ code: "NOT_FOUND", message: "CVC matchup was not found for the current season." });
+    unwrap(await supabase.from("matchup").update({ home_score: input.homeScore, away_score: input.awayScore, result_state: input.resultState, updated_at: new Date().toISOString() }).eq("id", matchup.id).select("id").single());
+    const summary = `${matchup.week?.[0]?.label ?? "CVC week"}: ${matchup.away?.[0]?.name ?? "Away"} ${input.awayScore} – ${matchup.home?.[0]?.name ?? "Home"} ${input.homeScore}`;
+    unwrap(await supabase.from("transaction").insert({ season_id: season.id, actor_owner_id: commissioner.id, transaction_type: "commissioner_adjustment", status: "final", summary: `Recorded ${input.resultState} result — ${summary}`, details: { matchup_id: matchup.id, home_score: input.homeScore, away_score: input.awayScore, result_state: input.resultState } }).select("id").single());
+    await createAuditEvent(league.id, season.id, commissioner.id, "matchup", matchup.id, "result_recorded", `Recorded ${input.resultState} result — ${summary}`);
+    return { matchupId: matchup.id, homeScore: input.homeScore, awayScore: input.awayScore, resultState: input.resultState };
   }),
 
   saveRuleDocument: protectedProcedure.input(z.object({ title: z.string().min(2).max(120), slug: z.string().regex(/^[a-z0-9-]+$/), versionLabel: z.string().min(1).max(40), contentMarkdown: z.string().min(1).max(100000) })).mutation(async ({ ctx, input }) => {

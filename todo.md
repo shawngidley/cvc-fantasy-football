@@ -100,3 +100,4 @@
 - [x] Add a commissioner-configured CVC rookie-draft foundation with transparent public board state, franchise pick ownership, and audited rookie selection procedures.
 - [x] Focus CVC Live Scoring on the current live or next scheduled week and add explicit loading, empty, and error states to the core Standings and Live Scoring modules.
 - [x] Add owner-PIN-protected CVC lineup-slot assignment with commissioner-configured position eligibility, slot-capacity validation, transaction records, and audit events.
+- [x] Rebuild the CVC standings page as East and West division tables with verified owner/franchise ordering and dynamic Money Owed, W–L, GB, PF, PA, and division-record columns.
