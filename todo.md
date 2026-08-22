@@ -108,7 +108,10 @@
 - [x] Add isolated Tank01 finalizer coverage for the CVC correction-window timing that determines provisional live versus finalized result state.
 - [x] Replace the incomplete temporary scoring configuration with the supplied CVC QB, RB/WR/TE, PK, and D/ST scoring specification before automated Tank01 calculations run.
 - [x] Rebuild CVC Live Scoring as a WRC-style current-week-only head-to-head interface with matchup rail, live team totals, and side-by-side starter rows.
-- [ ] Populate or derive current-week CVC lineup assignments so Live Scoring renders real side-by-side starter rows and Tank01 totals instead of zero configured starters.
+- [x] Populate or derive current-week CVC lineup assignments so Live Scoring renders real side-by-side starter rows and Tank01 totals instead of zero configured starters.
+- [ ] Verify a production CVC Tank01 Heartbeat run returns updated or finalized provider data and persists the resulting matchup and standings changes.
+- [ ] Verify the live CVC product no longer offers commissioner manual result entry and renders the new populated starters in the Live Scoring interface on desktop and mobile.
+- [x] Fix the CVC Live Scoring response transform so populated starter assignments retain player identities and exclude bench rows from the submitted-starter board.
 - [ ] Verify the WRC-style CVC Live Scoring structure with populated current-week matchups on desktop and mobile before treating the live experience as complete.
 - [x] Rebuild the CVC owner Lineup page as a WRC-style mobile-first workspace with team context, live metrics, weekly decisions, and a dense real-roster lineup table.
 - [x] Show each owner-lineup player’s Tank01 live fantasy points, CVC scoring-relevant stat line, NFL matchup context, and shared lineup total.
