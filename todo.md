@@ -95,3 +95,4 @@
 - [x] Add bounded live player-name and position filtering to CVC Free Agents and commissioner Auction Room eligibility selection.
 - [x] Add bounded live player-directory search and position filtering with stable public player-detail navigation.
 - [x] Add an owner-PIN-protected CVC FAAB waiver workflow with commissioner-opened periods, owner claim submission, audited resolution, roster assignment, and transaction reconciliation.
+- [x] Add a live CVC transaction feed and protected commissioner audit timeline for protections, auction, waiver, and configuration activity.

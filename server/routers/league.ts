@@ -144,6 +144,12 @@ export const leagueRouter = router({
     return data ?? [];
   }),
 
+  auditHistory: protectedProcedure.input(z.object({ limit: z.number().int().min(1).max(200).optional() }).optional()).query(async ({ ctx, input }) => {
+    await requireCommissioner({ openId: ctx.user.openId });
+    const { season } = await getCurrentLeagueAndSeason();
+    return unwrap(await supabase.from("audit_event").select("id, entity_type, entity_id, action, summary, created_at, actor:actor_owner_id(display_name, role)").eq("season_id", season.id).order("created_at", { ascending: false }).limit(input?.limit ?? 100)) ?? [];
+  }),
+
   draftBoard: publicProcedure.query(async () => {
     const { data: draft, error: draftError } = await supabase.from("draft").select("id, label, draft_type, status, pick_timer_seconds, keeper_enabled, lottery_enabled, settings").limit(1).single();
     if (draftError || !draft) throw new TRPCError({ code: "NOT_FOUND", message: "CVC draft configuration was not found." });
