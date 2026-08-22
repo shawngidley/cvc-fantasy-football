@@ -96,6 +96,7 @@
 - [x] Synchronize the cached FantasyPros player pool through a commissioner-controlled, non-destructive CVC workflow while excluding active roster identity duplicates from free agents and the regular auction pool.
 - [x] Add bounded live player-name and position filtering to CVC Free Agents and commissioner Auction Room eligibility selection.
 - [x] Restrict CVC Free Agents to QB, RB, WR, TE, K, and D/ST only; exclude individual defensive-player positions from server eligibility and UI filters.
+- [ ] Restrict CVC Auction Players in Draft Hub and Auction Room to QB, RB, WR, TE, K, and D/ST only; exclude individual defensive-player positions from server eligibility and UI filters.
 - [x] Add bounded live player-directory search and position filtering with stable public player-detail navigation.
 - [x] Add an owner-PIN-protected CVC FAAB waiver workflow with commissioner-opened periods, owner claim submission, audited resolution, roster assignment, and transaction reconciliation.
 - [x] Add a live CVC transaction feed and protected commissioner audit timeline for protections, auction, waiver, and configuration activity.
@@ -140,6 +141,7 @@
 - [x] Rebuild CVC Draft Recap from the WRC subroute structure using live rookie-draft configuration and a truthful no-result state; CVC does not use a draft lottery.
 - [x] Exclude stale CVC draft-board placeholders, including lottery wording and unknown franchises, from the public Draft Recap until approved CVC pick ownership exists.
 - [x] Remove the WRC-only Draft Lottery route and navigation references from CVC while retaining Auction and Rookie Draft paths.
+- [x] Remove the intermediate CVC Draft Hub landing page and route Draft navigation directly to Protections.
 - [ ] Audit and rebuild every CVC route from its corresponding WRC page structure, interaction pattern, responsive layout, and information density before adding further generic interfaces.
 - [ ] Use WRC source components and route structures directly as the baseline for each CVC page, substituting only CVC-specific branding, teams, rules, authentication, and dynamic data.
 - [x] Rebuild CVC Free Agents and FAAB from the WRC player-pool structure with position tabs, sortable data-backed columns, owner bid flow, and commissioner queue context.
