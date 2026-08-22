@@ -27,14 +27,13 @@ import { Activity, ArrowRight, BadgeDollarSign, BookOpen, CalendarDays, Check, C
 import { useMemo, useState } from "react";
 import { Link, useRoute } from "wouter";
 
-export type PageKind = "standings" | "live" | "lineup" | "draft" | "draft-lottery" | "draft-recap" | "rundown" | "news" | "transactions" | "trades" | "free-agents" | "results" | "history" | "playoffs" | "rules" | "nfl-sites" | "rosters" | "money" | "settings" | "player";
+export type PageKind = "standings" | "live" | "lineup" | "draft" | "draft-recap" | "rundown" | "news" | "transactions" | "trades" | "free-agents" | "results" | "history" | "playoffs" | "rules" | "nfl-sites" | "rosters" | "money" | "settings" | "player";
 
 const pageMeta: Record<PageKind, { eyebrow: string; title: string; detail: string; icon: React.ElementType }> = {
   standings: { eyebrow: "League table", title: "Standings", detail: "The current competitive picture, driven by CVC-configured records, divisions, and tiebreakers.", icon: Trophy },
   live: { eyebrow: "Game center", title: "Live scoring", detail: "A provider-neutral scoring surface that will connect to the CVC NFL data adapter once a source is selected.", icon: Radio },
   lineup: { eyebrow: "Owner workspace", title: "My lineup", detail: "Set starters, manage your roster, and review matchup projections in one secure owner view.", icon: ClipboardList },
   draft: { eyebrow: "Draft room", title: "Draft hub", detail: "Configuration-ready draft board, pick ownership, protections, and timing controls.", icon: Gavel },
-  "draft-lottery": { eyebrow: "Draft room", title: "Draft lottery", detail: "A transparent lottery surface that can be enabled if CVC uses a lottery draft order.", icon: Sparkles },
   "draft-recap": { eyebrow: "Draft room", title: "Draft recap", detail: "Review selections, traded picks, and post-draft outcomes across CVC seasons.", icon: FileText },
   rundown: { eyebrow: "League desk", title: "Commissioner rundown", detail: "A polished landing area for league updates, weekly context, and key deadlines.", icon: Newspaper },
   news: { eyebrow: "Player desk", title: "Player news", detail: "A source-agnostic player news surface with provider attribution ready to be configured.", icon: Activity },
@@ -195,7 +194,7 @@ export default function LeaguePage({ kind }: { kind: PageKind }) {
   else if (kind === "live") body = <CvcWrcLiveScoring />;
   else if (kind === "lineup") body = <CvcWrcOwnerLineup />;
   else if (kind === "draft") body = <CvcWrcDraftHub />;
-  else if (kind === "draft-lottery" || kind === "draft-recap") body = <Draft mode={kind === "draft-lottery" ? "lottery" : "recap"} />;
+  else if (kind === "draft-recap") body = <Draft mode="recap" />;
   else if (kind === "trades") body = <CvcWrcTrades />;
   else if (kind === "transactions" || kind === "free-agents") body = <Transactions kind={kind} />;
   else if (kind === "results") body = <CvcWrcScheduleResults />;

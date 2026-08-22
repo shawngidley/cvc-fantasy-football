@@ -33,7 +33,6 @@ function Router() {
       <Route path="/draft" component={() => <LeaguePage kind="draft" />} />
       <Route path="/auction" component={() => <Auction />} />
       <Route path="/auction/control"><ProtectedPage commissioner><Auction controls /></ProtectedPage></Route>
-      <Route path="/draft-lottery" component={() => <LeaguePage kind="draft-lottery" />} />
       <Route path="/draft-recap" component={() => <LeaguePage kind="draft-recap" />} />
       <Route path="/rundown" component={() => <LeaguePage kind="rundown" />} />
       <Route path="/news" component={() => <LeaguePage kind="news" />} />

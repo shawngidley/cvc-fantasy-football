@@ -10,7 +10,7 @@ type NavLink = { href: string; label: string; live?: boolean };
 const primaryLinks: NavLink[] = [
   { href: "/standings", label: "Standings" }, { href: "/live", label: "Live", live: true }, { href: "/lineup", label: "Lineup" }, { href: "/rosters", label: "Rosters" }, { href: "/free-agents", label: "Free agents" }, { href: "/transactions", label: "Transactions" }, { href: "/results", label: "Schedule" }, { href: "/news", label: "News" }, { href: "/trades", label: "Trades" }, { href: "/draft", label: "Draft" },
 ];
-const draftLinks: NavLink[] = [{ href: "/draft", label: "Draft order" }, { href: "/draft-lottery", label: "Draft lottery" }, { href: "/draft-recap", label: "Draft recap" }, { href: "/protections", label: "Protections" }];
+const draftLinks: NavLink[] = [{ href: "/draft", label: "Draft order" }, { href: "/draft-recap", label: "Draft recap" }, { href: "/protections", label: "Protections" }];
 const leagueLinks: NavLink[] = [{ href: "/rules", label: "Rules" }, { href: "/money", label: "Money" }, { href: "/history", label: "History" }, { href: "/playoffs", label: "Playoffs" }, { href: "/owner-settings", label: "Owner settings" }, { href: "/nfl-sites", label: "NFL sites" }];
 
 function DrawerGroup({ label, links, location, onNavigate }: { label: string; links: NavLink[]; location: string; onNavigate: () => void }) {
