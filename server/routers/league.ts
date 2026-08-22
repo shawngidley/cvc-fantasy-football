@@ -7,7 +7,7 @@ import { fantasyProsCacheStatus } from "../fantasyProsCache";
 import { syncFantasyProsSnapshot } from "../fantasyProsSync";
 import { activeLiveLineup } from "../liveScoringLineup";
 import { supabase, unwrap } from "../supabase";
-import { cvcContractTier, cvcFranchiseTerms, cvcPriorSeasonSalary, cvcTransitionSalary, isCvcHighSalaryTransition } from "../../shared/cvcProtectionPolicy";
+import { cvcContractTier, cvcFranchiseTerms, cvcPriorSeasonSalary, cvcTransitionSalary, isCvcHighSalaryTransition, isCvcProtectionYear } from "../../shared/cvcProtectionPolicy";
 
 type CurrentUser = { openId: string };
 
@@ -221,12 +221,16 @@ export const leagueRouter = router({
   franchiseRoster: publicProcedure.input(z.object({ franchiseId: z.string().uuid() })).query(async ({ input }) => {
     const { data: franchise, error: franchiseError } = await supabase.from("franchise").select("id, name, abbreviation, division_name, brand_color, logo_url, current_owner_id").eq("id", input.franchiseId).single();
     if (franchiseError || !franchise) throw new TRPCError({ code: "NOT_FOUND", message: "CVC franchise was not found." });
-    const { data: season, error: seasonError } = await supabase.from("season").select("id").order("year", { ascending: false }).limit(1).single();
+    const { data: season, error: seasonError } = await supabase.from("season").select("id, year").order("year", { ascending: false }).limit(1).single();
     if (seasonError || !season) throw new TRPCError({ code: "NOT_FOUND", message: "CVC season was not found." });
     const assignments = unwrap(await supabase.from("roster_assignment").select("id, player_id, roster_state, assigned_slot_code, acquired_at").eq("season_id", season.id).eq("franchise_id", franchise.id).is("released_at", null).order("acquired_at")) ?? [];
+    const releasedAssignments = unwrap(await supabase.from("roster_assignment").select("id, player_id, released_at").eq("season_id", season.id).eq("franchise_id", franchise.id).not("released_at", "is", null).order("released_at", { ascending: false })) ?? [];
     const playerIds = assignments.map(item => item.player_id);
+    const releasedPlayerIds = releasedAssignments.map(item => item.player_id);
     const players = playerIds.length ? unwrap(await supabase.from("player").select("id, display_name, position, nfl_team, status").in("id", playerIds)) ?? [] : [];
     const contracts = playerIds.length ? unwrap(await supabase.from("player_contract").select("player_id, salary, expires_year, source_marker, contract_status").eq("season_id", season.id).eq("franchise_id", franchise.id).in("player_id", playerIds)) ?? [] : [];
+    const releasedPlayers = releasedPlayerIds.length ? unwrap(await supabase.from("player").select("id, display_name, position, nfl_team").in("id", releasedPlayerIds)) ?? [] : [];
+    const releasedContracts = releasedPlayerIds.length ? unwrap(await supabase.from("player_contract").select("player_id, salary, expires_year, source_marker, contract_status").eq("season_id", season.id).eq("franchise_id", franchise.id).in("player_id", releasedPlayerIds)) ?? [] : [];
     const [rights, historicalRights, franchiseTags]: [any[], any[], any[]] = playerIds.length ? await Promise.all([
       unwrap(await supabase.from("player_right").select("id, player_id, right_type, status, salary_basis, contract_years, expires_year, metadata").eq("season_id", season.id).eq("franchise_id", franchise.id).eq("status", "active").in("player_id", playerIds)) ?? [],
       unwrap(await supabase.from("player_right").select("player_id, right_type, status, salary_basis, contract_years, metadata").in("player_id", playerIds)) ?? [],
@@ -234,25 +238,35 @@ export const leagueRouter = router({
     ]) : [[], [], []];
     const playerById = new Map(players.map(player => [player.id, player]));
     const contractByPlayerId = new Map(contracts.map(contract => [contract.player_id, contract]));
+    const releasedPlayerById = new Map(releasedPlayers.map(player => [player.id, player]));
+    const releasedContractByPlayerId = new Map(releasedContracts.map(contract => [contract.player_id, contract]));
     const rightsByPlayerId = new Map<string, typeof rights>();
     rights.forEach(right => rightsByPlayerId.set(right.player_id, [...(rightsByPlayerId.get(right.player_id) ?? []), right]));
     const historicalByPlayerId = new Map<string, typeof historicalRights>();
     historicalRights.forEach(right => historicalByPlayerId.set(right.player_id, [...(historicalByPlayerId.get(right.player_id) ?? []), right]));
     const twoYearTagTaken = franchiseTags.some(tag => cvcContractTier(Number(tag.salary_basis), tag.metadata?.term_tier) === "two_year" || tag.contract_years === 2);
     const threeYearTagTaken = franchiseTags.some(tag => cvcContractTier(Number(tag.salary_basis), tag.metadata?.term_tier) === "three_year" || tag.contract_years === 3);
-    return { franchise, players: assignments.map(assignment => {
+    const playersWithEligibility = assignments.map(assignment => {
       const contract = contractByPlayerId.get(assignment.player_id) ?? null; const activeRights = rightsByPlayerId.get(assignment.player_id) ?? []; const history = historicalByPlayerId.get(assignment.player_id) ?? [];
       const actions: Array<"cut" | "franchise_2" | "franchise_3" | "transition" | "rookie_match" | "waiver_match"> = [];
       if (contract && !activeRights.length) {
         actions.push("cut");
-        const termTier = cvcContractTier(Number(contract.salary), contract.source_marker);
-        const highTransition = history.some(isCvcHighSalaryTransition); const hasTransition = history.some(right => right.right_type === "transition"); const hasFranchise = history.some(right => right.right_type === "franchise");
-        if (!highTransition && (termTier === "two_year" ? !twoYearTagTaken : !threeYearTagTaken)) actions.push(termTier === "two_year" ? "franchise_2" : "franchise_3");
-        if (!hasTransition && !hasFranchise) actions.push("transition");
-        const marker = (contract.source_marker ?? "").toUpperCase(); if (marker.includes("R")) actions.push("rookie_match"); if (marker.includes("W")) actions.push("waiver_match");
+        if (isCvcProtectionYear(contract.expires_year, season.year)) {
+          const termTier = cvcContractTier(Number(contract.salary), contract.source_marker);
+          const highTransition = history.some(isCvcHighSalaryTransition); const hasTransition = history.some(right => right.right_type === "transition"); const hasFranchise = history.some(right => right.right_type === "franchise");
+          if (!highTransition && (termTier === "two_year" ? !twoYearTagTaken : !threeYearTagTaken)) actions.push(termTier === "two_year" ? "franchise_2" : "franchise_3");
+          if (!hasTransition && !hasFranchise) actions.push("transition");
+          const marker = (contract.source_marker ?? "").toUpperCase(); if (marker.includes("R")) actions.push("rookie_match"); if (marker.includes("W")) actions.push("waiver_match");
+        }
       }
       return { ...assignment, player: playerById.get(assignment.player_id) ?? null, contract, rights: activeRights, protectionEligibility: { availableActions: actions } };
-    }) };
+    });
+    return {
+      franchise,
+      players: playersWithEligibility,
+      cutPlayers: releasedAssignments.map(assignment => ({ ...assignment, player: releasedPlayerById.get(assignment.player_id) ?? null, contract: releasedContractByPlayerId.get(assignment.player_id) ?? null })),
+      restrictedPlayers: playersWithEligibility.filter(item => item.rights.some((right: any) => ["rookie_match", "waiver_match"].includes(right.right_type))),
+    };
   }),
 
   playerDirectory: publicProcedure.input(z.object({ search: z.string().trim().max(64).optional(), position: z.string().trim().max(12).optional(), limit: z.number().int().min(1).max(150).optional() }).optional()).query(async ({ input }) => {
@@ -587,7 +601,7 @@ export const leagueRouter = router({
     if (franchise.current_owner_id !== actor.id && !["commissioner", "administrator"].includes(actor.role)) throw new TRPCError({ code: "FORBIDDEN", message: "You may only assign a franchise tag for your own CVC franchise." });
     const [assignment, contract, player, activeRights, franchiseTags, priorTransition] = await Promise.all([
       supabase.from("roster_assignment").select("id").eq("season_id", season.id).eq("franchise_id", franchise.id).eq("player_id", input.playerId).is("released_at", null).maybeSingle(),
-      supabase.from("player_contract").select("id, salary, source_marker, contract_status").eq("season_id", season.id).eq("franchise_id", franchise.id).eq("player_id", input.playerId).maybeSingle(),
+      supabase.from("player_contract").select("id, salary, expires_year, source_marker, contract_status").eq("season_id", season.id).eq("franchise_id", franchise.id).eq("player_id", input.playerId).maybeSingle(),
       supabase.from("player").select("display_name").eq("id", input.playerId).maybeSingle(),
       supabase.from("player_right").select("id, right_type").eq("season_id", season.id).eq("franchise_id", franchise.id).eq("player_id", input.playerId).eq("status", "active"),
       supabase.from("player_right").select("player_id, salary_basis, metadata").eq("season_id", season.id).eq("franchise_id", franchise.id).eq("right_type", "franchise").eq("status", "active"),
@@ -596,11 +610,12 @@ export const leagueRouter = router({
     const activeAssignment = unwrap(assignment); const activeContract = unwrap(contract); const playerRow = unwrap(player);
     const existingRights = unwrap(activeRights) ?? []; const existingFranchiseTags = unwrap(franchiseTags) ?? [];
     if (!activeAssignment || !activeContract || ["released", "expired"].includes(activeContract.contract_status)) throw new TRPCError({ code: "BAD_REQUEST", message: "Only an active rostered contract can receive a franchise tag." });
+    if (!isCvcProtectionYear(activeContract.expires_year, season.year)) throw new TRPCError({ code: "BAD_REQUEST", message: "Only contracts expiring in 2026 may receive a CVC protection designation. 2027 and 2028 contracts may only be cut." });
     if (existingRights.length) throw new TRPCError({ code: "BAD_REQUEST", message: "Remove or resolve the player’s current protection right before assigning a franchise tag." });
     const priorTransitions = unwrap(priorTransition) ?? [];
     if (priorTransitions.some(isCvcHighSalaryTransition)) throw new TRPCError({ code: "BAD_REQUEST", message: "A player transitioned from a three-year / $10-and-over contract cannot later be franchised under CVC rules." });
     const currentSalary = Number(activeContract.salary);
-    const salary = currentSalary + 1;
+    const salary = currentSalary;
     const termTier = cvcContractTier(currentSalary, activeContract.source_marker);
     const requiredYears = cvcFranchiseTerms(termTier);
     if (input.contractYears !== requiredYears) throw new TRPCError({ code: "BAD_REQUEST", message: `${termTier === "two_year" ? "Two-year" : "Three-year"} CVC contracts require a ${requiredYears}-year franchise term.` });
@@ -610,8 +625,8 @@ export const leagueRouter = router({
       return existingTier === termTier;
     })) throw new TRPCError({ code: "BAD_REQUEST", message: `This franchise already has its ${termTier === "two_year" ? "two-year" : "three-year"} franchise designation.` });
     const expiresYear = season.year + requiredYears - 1;
-    unwrap(await supabase.from("player_contract").update({ salary, expires_year: expiresYear, contract_status: "active" }).eq("id", activeContract.id).select("id").single());
-    const right = unwrap(await supabase.from("player_right").insert({ season_id: season.id, franchise_id: franchise.id, player_id: input.playerId, right_type: "franchise", salary_basis: currentSalary, contract_years: input.contractYears, expires_year: expiresYear, metadata: { term_tier: termTier, designated_season: season.year, tagged_salary: salary, re_franchise_allowed: true, transition_allowed_after_expiry: false } }).select("id").single());
+    unwrap(await supabase.from("player_contract").update({ salary, expires_year: expiresYear, source_marker: "F", contract_status: "active" }).eq("id", activeContract.id).select("id").single());
+    const right = unwrap(await supabase.from("player_right").insert({ season_id: season.id, franchise_id: franchise.id, player_id: input.playerId, right_type: "franchise", salary_basis: currentSalary, contract_years: input.contractYears, expires_year: expiresYear, metadata: { term_tier: termTier, designated_season: season.year, tagged_salary: salary, re_franchise_allowed: true, transition_allowed_after_expiry: false, previous_salary: currentSalary, previous_expires_year: activeContract.expires_year, previous_source_marker: activeContract.source_marker, previous_contract_status: activeContract.contract_status } }).select("id").single());
     if (!right) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "CVC could not save the franchise designation." });
     unwrap(await supabase.from("transaction").insert({ season_id: season.id, franchise_id: franchise.id, actor_owner_id: actor.id, transaction_type: "note", status: "final", summary: `${franchise.name} assigned a ${input.contractYears}-year franchise tag to ${playerRow?.display_name ?? "a player"}.`, details: { player_id: input.playerId, right_type: "franchise", term_tier: termTier, salary, contract_years: input.contractYears } }).select("id").single());
     await createAuditEvent(league.id, season.id, actor.id, "player_right", right.id, "franchise_tag_assigned", `${franchise.name} assigned a ${input.contractYears}-year ${termTier} franchise tag to ${playerRow?.display_name ?? "a player"}.`);
@@ -627,7 +642,7 @@ export const leagueRouter = router({
     if (franchise.current_owner_id !== actor.id && !["commissioner", "administrator"].includes(actor.role)) throw new TRPCError({ code: "FORBIDDEN", message: "You may only assign a transition tag for your own CVC franchise." });
     const [assignment, contract, player, activeRights, priorTransition, priorFranchise] = await Promise.all([
       supabase.from("roster_assignment").select("id").eq("season_id", season.id).eq("franchise_id", franchise.id).eq("player_id", input.playerId).is("released_at", null).maybeSingle(),
-      supabase.from("player_contract").select("id, salary, source_marker, contract_status").eq("season_id", season.id).eq("franchise_id", franchise.id).eq("player_id", input.playerId).maybeSingle(),
+      supabase.from("player_contract").select("id, salary, expires_year, source_marker, contract_status").eq("season_id", season.id).eq("franchise_id", franchise.id).eq("player_id", input.playerId).maybeSingle(),
       supabase.from("player").select("display_name").eq("id", input.playerId).maybeSingle(),
       supabase.from("player_right").select("id").eq("season_id", season.id).eq("franchise_id", franchise.id).eq("player_id", input.playerId).eq("status", "active"),
       supabase.from("player_right").select("id").eq("player_id", input.playerId).eq("right_type", "transition").limit(1),
@@ -635,12 +650,13 @@ export const leagueRouter = router({
     ]);
     const activeAssignment = unwrap(assignment); const activeContract = unwrap(contract); const playerRow = unwrap(player);
     if (!activeAssignment || !activeContract || ["released", "expired"].includes(activeContract.contract_status)) throw new TRPCError({ code: "BAD_REQUEST", message: "Only an active rostered contract can receive a transition tag." });
+    if (!isCvcProtectionYear(activeContract.expires_year, season.year)) throw new TRPCError({ code: "BAD_REQUEST", message: "Only contracts expiring in 2026 may receive a CVC protection designation. 2027 and 2028 contracts may only be cut." });
     if ((unwrap(activeRights) ?? []).length) throw new TRPCError({ code: "BAD_REQUEST", message: "Remove or resolve the player’s current protection right before assigning a transition tag." });
     if ((unwrap(priorTransition) ?? []).length) throw new TRPCError({ code: "BAD_REQUEST", message: "This player has already used a transition designation and cannot be transitioned again." });
     if ((unwrap(priorFranchise) ?? []).length) throw new TRPCError({ code: "BAD_REQUEST", message: "A player who has been franchised may be re-franchised after expiry but may not be transitioned." });
     const currentSalary = Number(activeContract.salary); const priorSeasonSalary = cvcPriorSeasonSalary(currentSalary); const transitionTier = cvcContractTier(priorSeasonSalary, activeContract.source_marker); const salary = cvcTransitionSalary(priorSeasonSalary, transitionTier);
-    unwrap(await supabase.from("player_contract").update({ salary, expires_year: season.year, contract_status: "expiring" }).eq("id", activeContract.id).select("id").single());
-    const right = unwrap(await supabase.from("player_right").insert({ season_id: season.id, franchise_id: franchise.id, player_id: input.playerId, right_type: "transition", salary_basis: priorSeasonSalary, contract_years: 1, expires_year: season.year, metadata: { transition_exhausted: true, transition_tier: transitionTier, designated_season: season.year, prior_season_salary: priorSeasonSalary, tagged_salary: salary, future_franchise_allowed: transitionTier === "two_year" } }).select("id").single());
+    unwrap(await supabase.from("player_contract").update({ salary, expires_year: season.year, source_marker: "T", contract_status: "expiring" }).eq("id", activeContract.id).select("id").single());
+    const right = unwrap(await supabase.from("player_right").insert({ season_id: season.id, franchise_id: franchise.id, player_id: input.playerId, right_type: "transition", salary_basis: priorSeasonSalary, contract_years: 1, expires_year: season.year, metadata: { transition_exhausted: true, transition_tier: transitionTier, designated_season: season.year, prior_season_salary: priorSeasonSalary, tagged_salary: salary, future_franchise_allowed: transitionTier === "two_year", previous_salary: currentSalary, previous_expires_year: activeContract.expires_year, previous_source_marker: activeContract.source_marker, previous_contract_status: activeContract.contract_status } }).select("id").single());
     if (!right) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "CVC could not save the transition designation." });
     unwrap(await supabase.from("transaction").insert({ season_id: season.id, franchise_id: franchise.id, actor_owner_id: actor.id, transaction_type: "note", status: "final", summary: `${franchise.name} assigned a transition tag to ${playerRow?.display_name ?? "a player"}.`, details: { player_id: input.playerId, right_type: "transition", salary } }).select("id").single());
     await createAuditEvent(league.id, season.id, actor.id, "player_right", right.id, "transition_tag_assigned", `${franchise.name} assigned a one-year transition tag to ${playerRow?.display_name ?? "a player"}.`);
@@ -685,6 +701,45 @@ export const leagueRouter = router({
     unwrap(await supabase.from("transaction").insert({ season_id: season.id, franchise_id: franchise.id, actor_owner_id: actor.id, transaction_type: "note", status: "final", summary: `${franchise.name} designated ${playerRow?.display_name ?? "a player"} for ${input.rightType === "rookie_match" ? "rookie" : "waiver"} matching rights.`, details: { player_id: input.playerId, right_type: input.rightType } }).select("id").single());
     await createAuditEvent(league.id, season.id, actor.id, "player_right", right.id, "restricted_right_assigned", `${franchise.name} assigned ${input.rightType} to ${playerRow?.display_name ?? "a player"}.`);
     return { rightId: right.id, rightType: input.rightType };
+  }),
+
+  undoProtection: protectedProcedure.input(z.object({ franchiseId: z.string().uuid(), rightId: z.string().uuid() })).mutation(async ({ ctx, input }) => {
+    const actor = await getOwnerAccess({ openId: ctx.user.openId });
+    if (!actor) throw new TRPCError({ code: "FORBIDDEN", message: "A CVC owner session is required to undo a protection." });
+    const { league, season } = await getCurrentLeagueAndSeason();
+    const franchise = unwrap(await supabase.from("franchise").select("id, name, current_owner_id").eq("id", input.franchiseId).eq("league_id", league.id).maybeSingle());
+    if (!franchise || (franchise.current_owner_id !== actor.id && !["commissioner", "administrator"].includes(actor.role))) throw new TRPCError({ code: "FORBIDDEN", message: "You may only undo protections for your own CVC franchise." });
+    const right = unwrap(await supabase.from("player_right").select("id, player_id, right_type, salary_basis, metadata").eq("id", input.rightId).eq("season_id", season.id).eq("franchise_id", franchise.id).eq("status", "active").maybeSingle());
+    if (!right || !["franchise", "transition", "rookie_match", "waiver_match"].includes(right.right_type)) throw new TRPCError({ code: "NOT_FOUND", message: "That active CVC protection decision is not available to undo." });
+    const player = unwrap(await supabase.from("player").select("display_name").eq("id", right.player_id).maybeSingle());
+    if (["franchise", "transition"].includes(right.right_type)) {
+      const metadata = (right.metadata ?? {}) as { previous_salary?: number; previous_expires_year?: number; previous_source_marker?: string | null; previous_contract_status?: string };
+      const contract = unwrap(await supabase.from("player_contract").select("id, salary, source_marker").eq("season_id", season.id).eq("franchise_id", franchise.id).eq("player_id", right.player_id).maybeSingle());
+      if (!contract) throw new TRPCError({ code: "NOT_FOUND", message: "The CVC contract tied to this protection could not be found." });
+      const inferredPreviousSalary = right.right_type === "transition" ? Number(right.salary_basis ?? contract.salary) + 1 : Number(right.salary_basis ?? contract.salary);
+      unwrap(await supabase.from("player_contract").update({ salary: metadata.previous_salary ?? inferredPreviousSalary, expires_year: metadata.previous_expires_year ?? season.year, source_marker: metadata.previous_source_marker ?? contract.source_marker ?? "W", contract_status: metadata.previous_contract_status ?? "expiring" }).eq("id", contract.id).select("id").single());
+    }
+    unwrap(await supabase.from("player_right").update({ status: "revoked" }).eq("id", right.id).select("id").single());
+    unwrap(await supabase.from("transaction").insert({ season_id: season.id, franchise_id: franchise.id, actor_owner_id: actor.id, transaction_type: "note", status: "final", summary: `${franchise.name} undid the ${right.right_type.replaceAll("_", " ")} protection for ${player?.display_name ?? "a player"}.`, details: { player_id: right.player_id, right_id: right.id, action: "protection_undone" } }).select("id").single());
+    await createAuditEvent(league.id, season.id, actor.id, "player_right", right.id, "protection_undone", `${franchise.name} undid ${right.right_type} for ${player?.display_name ?? "a player"}.`);
+    return { undone: true };
+  }),
+
+  restoreCutPlayer: protectedProcedure.input(z.object({ franchiseId: z.string().uuid(), playerId: z.string().uuid() })).mutation(async ({ ctx, input }) => {
+    const actor = await getOwnerAccess({ openId: ctx.user.openId });
+    if (!actor) throw new TRPCError({ code: "FORBIDDEN", message: "A CVC owner session is required to restore a cut player." });
+    const { league, season } = await getCurrentLeagueAndSeason();
+    const franchise = unwrap(await supabase.from("franchise").select("id, name, current_owner_id").eq("id", input.franchiseId).eq("league_id", league.id).maybeSingle());
+    if (!franchise || (franchise.current_owner_id !== actor.id && !["commissioner", "administrator"].includes(actor.role))) throw new TRPCError({ code: "FORBIDDEN", message: "You may only restore players for your own CVC franchise." });
+    const assignment = unwrap(await supabase.from("roster_assignment").select("id").eq("season_id", season.id).eq("franchise_id", franchise.id).eq("player_id", input.playerId).not("released_at", "is", null).order("released_at", { ascending: false }).limit(1).maybeSingle());
+    const contract = unwrap(await supabase.from("player_contract").select("id, expires_year").eq("season_id", season.id).eq("franchise_id", franchise.id).eq("player_id", input.playerId).eq("contract_status", "released").maybeSingle());
+    if (!assignment || !contract) throw new TRPCError({ code: "NOT_FOUND", message: "That CVC cut player is not available to restore." });
+    const player = unwrap(await supabase.from("player").select("display_name").eq("id", input.playerId).maybeSingle());
+    unwrap(await supabase.from("roster_assignment").update({ roster_state: "active", released_at: null, updated_at: new Date().toISOString() }).eq("id", assignment.id).select("id").single());
+    unwrap(await supabase.from("player_contract").update({ contract_status: Number(contract.expires_year) <= season.year ? "expiring" : "active" }).eq("id", contract.id).select("id").single());
+    unwrap(await supabase.from("transaction").insert({ season_id: season.id, franchise_id: franchise.id, actor_owner_id: actor.id, transaction_type: "add", status: "final", summary: `${franchise.name} restored ${player?.display_name ?? "a player"} from Protections.`, details: { player_id: input.playerId, action: "cut_restored" } }).select("id").single());
+    await createAuditEvent(league.id, season.id, actor.id, "roster_assignment", assignment.id, "cut_restored", `${franchise.name} restored ${player?.display_name ?? "a player"} from Protections.`);
+    return { restored: true };
   }),
 
   saveFranchise: protectedProcedure.input(z.object({

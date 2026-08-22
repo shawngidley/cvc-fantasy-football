@@ -154,9 +154,14 @@
 - [ ] Verify the WRC Draft Hub-style commissioner auction console using an authenticated commissioner session and real auction state before treating auction parity as complete.
 - [x] Rebuild the CVC Protections page from the WRC owner-workspace structure while preserving CVC contract cuts, franchise/transition tags, and restricted-right rules.
 - [x] Replace CVC Protections action buttons with one owner decision dropdown per player that exposes only currently eligible cut, franchise, transition, rookie-right, or waiver-right actions.
+- [x] Add owner-controlled Undo Protection actions for saved CVC Franchise, Transition, rookie-right, and waiver-right decisions while the protection window remains open.
+- [x] Add visible CVC Protections lists for Cut Players and Restricted Players using live released contracts and active restriction records.
 - [x] Enforce the supplied CVC Transition and Franchise contract rules: term eligibility, salary adjustments, future tag restrictions, one franchise tag per 2-year and 3-year contract tier, and off-season franchise/transition trade handling.
 - [x] Order CVC Protections as QB, RB, WR, TE, K, D/ST with descending salary within each group and render player portraits in the position bubble.
 - [x] Calculate CVC Transition salary from prior-season salary basis, not the already updated 2026 displayed contract salary.
+- [x] Keep current 2026 CVC salaries unchanged for Franchise and all non-Transition decisions; change salary only when Transition is selected.
+- [x] Limit Protections decisions for 2027 and 2028 contract players to Cut only; treat W as the 2026/expiring contract designation eligible for protection decisions.
+- [x] Split Protections contract display into Salary, Year, and Status columns, with Status rendered as F, R, T, or W.
 - [x] Clarify the CVC Rules page so Transition salary calculations explicitly use prior-season salary rather than the displayed current-season salary.
 - [ ] Verify the WRC-style CVC Protections page using an authenticated owner franchise before treating protections parity as complete.
 - [x] Rebuild CVC Rosters from the WRC division-filtered franchise-card structure with real owner, player, contract, and public-lineup data.

@@ -19,6 +19,10 @@ export function cvcTransitionSalary(salary: number, tier: CvcContractTier) {
   return tier === "two_year" ? salary * 2 : salary + 10;
 }
 
+export function isCvcProtectionYear(expiresYear: number | null | undefined, seasonYear: number) {
+  return Number(expiresYear) === seasonYear;
+}
+
 export function isCvcFranchiseMarker(sourceMarker?: string | null) {
   return (sourceMarker ?? "").trim().toUpperCase().startsWith("F");
 }

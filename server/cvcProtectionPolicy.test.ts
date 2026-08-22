@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { cvcContractTier, cvcFranchiseTerms, cvcPriorSeasonSalary, cvcTransitionSalary, isCvcHighSalaryTransition } from "../shared/cvcProtectionPolicy";
+import { cvcContractTier, cvcFranchiseTerms, cvcPriorSeasonSalary, cvcTransitionSalary, isCvcHighSalaryTransition, isCvcProtectionYear } from "../shared/cvcProtectionPolicy";
 
 describe("CVC Transition and Franchise policy", () => {
   it("treats under-$10 contracts as two-year and doubles their transition salary", () => {
@@ -23,5 +23,11 @@ describe("CVC Transition and Franchise policy", () => {
   it("retains explicit transition tier after a salary change and identifies high-salary transition history", () => {
     expect(cvcContractTier(18, "T2")).toBe("two_year");
     expect(isCvcHighSalaryTransition({ salary_basis: 12, metadata: { transition_tier: "three_year" } })).toBe(true);
+  });
+
+  it("limits protection decisions to contracts expiring in the current CVC season", () => {
+    expect(isCvcProtectionYear(2026, 2026)).toBe(true);
+    expect(isCvcProtectionYear(2027, 2026)).toBe(false);
+    expect(isCvcProtectionYear(2028, 2026)).toBe(false);
   });
 });
