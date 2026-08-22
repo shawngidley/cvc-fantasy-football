@@ -91,3 +91,4 @@
 - [ ] Add happy-path CVC tests for franchise tags, transition tags, rookie rights, and a verified waiver-right candidate.
 - [x] Apply the supplied CVC league crest across the site header, PWA icons, favicon, and Open Graph/Twitter metadata images.
 - [x] Register a CVC service worker so the branded manifest and supplied crest icons are available to supported PWA installation flows.
+- [x] Synchronize the cached FantasyPros player pool through a commissioner-controlled, non-destructive CVC workflow while excluding active roster identity duplicates from free agents and the regular auction pool.

@@ -36,4 +36,15 @@ describe("CVC public league procedures", () => {
 
     expect(players.every(player => player.provider !== "placeholder")).toBe(true);
   });
+
+  it("does not expose active roster names as provider-duplicate free agents", async () => {
+    const caller = appRouter.createCaller(createPublicContext());
+    const [overview, freeAgents] = await Promise.all([caller.league.overview(), caller.league.freeAgents()]);
+    const rosters = await Promise.all(overview.franchises.map(franchise => caller.league.franchiseRoster({ franchiseId: franchise.id })));
+    const activeNames = new Set(
+      rosters.flatMap(roster => roster.players.map(player => player.player?.display_name.trim().toLowerCase()).filter(Boolean)),
+    );
+
+    expect(freeAgents.every(player => !activeNames.has(player.display_name.trim().toLowerCase()))).toBe(true);
+  });
 });

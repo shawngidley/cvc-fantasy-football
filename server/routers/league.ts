@@ -4,6 +4,7 @@ import { ENV } from "../_core/env";
 import { protectedProcedure, publicProcedure, router } from "../_core/trpc";
 import { getFantasyProsDataAdapter, getNFLDataAdapter } from "../nflDataAdapter";
 import { fantasyProsCacheStatus } from "../fantasyProsCache";
+import { syncFantasyProsSnapshot } from "../fantasyProsSync";
 import { supabase, unwrap } from "../supabase";
 
 type CurrentUser = { openId: string };
@@ -179,7 +180,9 @@ export const leagueRouter = router({
     ]);
     const players = unwrap(playersResult) ?? [];
     const activePlayerIds = new Set((unwrap(activeAssignmentsResult) ?? []).map(assignment => assignment.player_id));
-    return players.filter(player => !activePlayerIds.has(player.id));
+    const rosteredPlayers = activePlayerIds.size ? unwrap(await supabase.from("player").select("display_name").in("id", Array.from(activePlayerIds))) ?? [] : [];
+    const activePlayerNames = new Set(rosteredPlayers.map(player => player.display_name.trim().toLowerCase().replace(/\s+/g, " ")));
+    return players.filter(player => !activePlayerIds.has(player.id) && !activePlayerNames.has(player.display_name.trim().toLowerCase().replace(/\s+/g, " ")));
   }),
 
   playerDetail: publicProcedure.input(z.object({ playerId: z.string().uuid() })).query(async ({ input }) => {
@@ -199,6 +202,13 @@ export const leagueRouter = router({
     const snapshot = await adapter.listPlayerSnapshot();
     const payloadCount = Array.isArray(snapshot.payload) ? snapshot.payload.length : Array.isArray((snapshot.payload as { players?: unknown[] })?.players) ? ((snapshot.payload as { players: unknown[] }).players.length) : null;
     return { provider: snapshot.provider, source: snapshot.source, fetchedAt: snapshot.fetchedAt, expiresAt: snapshot.expiresAt, playerCount: payloadCount, lastError: snapshot.lastError };
+  }),
+
+  syncFantasyProsPlayers: protectedProcedure.mutation(async ({ ctx }) => {
+    await requireCommissioner({ openId: ctx.user.openId });
+    const adapter = getFantasyProsDataAdapter();
+    if (!adapter) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "FantasyPros is not configured for CVC." });
+    return syncFantasyProsSnapshot(await adapter.listPlayerSnapshot());
   }),
 
   myFranchise: protectedProcedure.query(async ({ ctx }) => {

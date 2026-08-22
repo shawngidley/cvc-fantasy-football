@@ -45,6 +45,9 @@ describe("CVC owner session integration", () => {
     expect(refresh).toMatchObject({ provider: "FantasyPros" });
     expect(["network", "cache", "stale_cache"]).toContain(refresh.source);
     expect(refresh.fetchedAt).toEqual(expect.any(String));
+    const sync = await appRouter.createCaller(protectedContext).league.syncFantasyProsPlayers();
+    expect(sync.totalReceived).toBeGreaterThan(0);
+    expect(sync.inserted + sync.enriched + sync.skipped).toBe(sync.totalReceived);
 
     await appRouter.createCaller(authenticatedContext.ctx).ownerAuth.signOut();
     expect(authenticatedContext.cookies.some(cookie => cookie.name === "cvc_owner_session" && cookie.value === undefined)).toBe(true);

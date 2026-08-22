@@ -7,6 +7,8 @@ export function calculateAuctionLegalMaxBid(startingBudget: number, spentBudget:
   return startingBudget - spentBudget - Math.max(0, 14 - rosterCount);
 }
 
+const playerIdentity = (name: string | null | undefined) => (name ?? "").trim().toLowerCase().replace(/\s+/g, " ");
+
 async function context() {
   const season = unwrap(await supabase.from("season").select("id, league_id").order("year", { ascending: false }).limit(1).single());
   if (!season) throw new TRPCError({ code: "NOT_FOUND", message: "CVC season was not found." });
@@ -36,10 +38,12 @@ export const auctionRouter = router({
       supabase.from("auction_nomination").select("player_id").eq("draft_id", draft.id).eq("status", "awarded"),
     ]);
     const activePlayerIds = new Set((unwrap(activeAssignmentsResult) ?? []).map(assignment => assignment.player_id));
+    const activeRosteredPlayers = activePlayerIds.size ? unwrap(await supabase.from("player").select("display_name").in("id", Array.from(activePlayerIds))) ?? [] : [];
+    const activePlayerNames = new Set(activeRosteredPlayers.map(player => playerIdentity(player.display_name)));
     const awardedPlayerIds = new Set((unwrap(awardedResult) ?? []).map(award => award.player_id));
     return (unwrap(playersResult) ?? []).filter(player => {
       const metadata = (player.metadata ?? {}) as { is_rookie?: boolean };
-      return !activePlayerIds.has(player.id) && !awardedPlayerIds.has(player.id) && !metadata.is_rookie;
+      return !activePlayerIds.has(player.id) && !activePlayerNames.has(playerIdentity(player.display_name)) && !awardedPlayerIds.has(player.id) && !metadata.is_rookie;
     });
   }),
   setBudget: protectedProcedure.input(z.object({ franchiseId: z.string().uuid(), startingBudget: z.number().int().min(0).max(115) })).mutation(async ({ ctx: c, input }) => {
