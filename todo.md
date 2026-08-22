@@ -110,6 +110,7 @@
 - [x] Rebuild CVC Live Scoring as a WRC-style current-week-only head-to-head interface with matchup rail, live team totals, and side-by-side starter rows.
 - [x] Populate or derive current-week CVC lineup assignments so Live Scoring renders real side-by-side starter rows and Tank01 totals instead of zero configured starters.
 - [ ] Verify a production CVC Tank01 Heartbeat run returns updated or finalized provider data and persists the resulting matchup and standings changes.
+- [x] Verify the CVC Tank01 Heartbeat reaches the deployed handler successfully and safely skips when provider box-score data is not yet available.
 - [ ] Verify the live CVC product no longer offers commissioner manual result entry and renders the new populated starters in the Live Scoring interface on desktop and mobile.
 - [x] Fix the CVC Live Scoring response transform so populated starter assignments retain player identities and exclude bench rows from the submitted-starter board.
 - [x] Improve the CVC Live Scoring mobile player-row layout so populated starter names are legible rather than excessively truncated.
@@ -129,6 +130,7 @@
 - [x] Map, store, and apply the supplied CVC franchise logos across primary owner/team contexts including signed-in team identity, standings, rosters, matchup cards, Live Scoring, Lineup, and Schedule & Results.
 - [x] Store and map the supplied Xavier Musketeers logo so every active CVC franchise has a team mark.
 - [ ] Extend the shared CVC franchise-logo treatment into the detailed Auction Room and authenticated Trade Desk workflows.
+- [x] Rebuild the CVC Playoffs route from the WRC postseason hierarchy using live CVC season configuration and an explicit preseason state until CVC seeds and results exist.
 - [ ] Audit and rebuild every CVC route from its corresponding WRC page structure, interaction pattern, responsive layout, and information density before adding further generic interfaces.
 - [ ] Use WRC source components and route structures directly as the baseline for each CVC page, substituting only CVC-specific branding, teams, rules, authentication, and dynamic data.
 - [x] Rebuild CVC Free Agents and FAAB from the WRC player-pool structure with position tabs, sortable data-backed columns, owner bid flow, and commissioner queue context.
