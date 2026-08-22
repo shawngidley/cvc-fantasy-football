@@ -37,9 +37,9 @@
 - [x] Inspect and reproduce the WRC login experience for CVC using CVC-controlled authentication and role data.
 - [x] Implement a CVC owner-selection dropdown and PIN login that grants owner, commissioner, or administrator access without Manus sign-in.
 - [x] Add commissioner or administrator PIN reset controls to the CVC owner-selector access model.
-- [ ] Configure Jonas and Justin as CVC co-commissioners and add a distinct administrator account for the project owner through the owner-selector/PIN access model.
-- [ ] Map Jonas to The Super Snuffleupagus and Justin to DS Warteaters as the confirmed CVC co-commissioner franchise assignments.
-- [ ] Create the separate CVC administrator owner-selector account with the display name Administrator.
+- [x] Configure Jonas and Justin as CVC co-commissioners and add a distinct administrator account for the project owner through the owner-selector/PIN access model.
+- [x] Map Jonas to The Super Snuffleupagus and Justin to DS Warteaters as the confirmed CVC co-commissioner franchise assignments.
+- [x] Create the separate CVC administrator owner-selector account with the display name Administrator.
 - [x] Build a WRC-style CVC owner Settings page where authenticated owners can securely change their own four-digit PIN.
 - [ ] Complete real CVC Owner Settings logo management and device-sign-in setup readiness controls.
 - [x] Replace the current placeholder owner and franchise rows with the validated 2026 CVC owner and franchise records before assigning co-commissioner roles.
@@ -93,3 +93,5 @@
 - [x] Register a CVC service worker so the branded manifest and supplied crest icons are available to supported PWA installation flows.
 - [x] Synchronize the cached FantasyPros player pool through a commissioner-controlled, non-destructive CVC workflow while excluding active roster identity duplicates from free agents and the regular auction pool.
 - [x] Add bounded live player-name and position filtering to CVC Free Agents and commissioner Auction Room eligibility selection.
+- [x] Add bounded live player-directory search and position filtering with stable public player-detail navigation.
+- [x] Add an owner-PIN-protected CVC FAAB waiver workflow with commissioner-opened periods, owner claim submission, audited resolution, roster assignment, and transaction reconciliation.

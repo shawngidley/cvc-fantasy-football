@@ -63,4 +63,11 @@ describe("CVC public league procedures", () => {
     expect(player.id).toBe(directory[0].id);
     expect(player.display_name).toBe(directory[0].display_name);
   });
+
+  it("accepts bounded name and position filters for the player directory", async () => {
+    const players = await appRouter.createCaller(createPublicContext()).league.playerDirectory({ search: "A.J.", position: "WR", limit: 25 });
+
+    expect(players.length).toBeLessThanOrEqual(25);
+    expect(players.every(player => player.display_name.toLowerCase().includes("a.j.") && player.position === "WR")).toBe(true);
+  });
 });

@@ -174,8 +174,12 @@ export const leagueRouter = router({
     return { franchise, players: assignments.map(assignment => ({ ...assignment, player: playerById.get(assignment.player_id) ?? null, contract: contractByPlayerId.get(assignment.player_id) ?? null, rights: rightsByPlayerId.get(assignment.player_id) ?? [] })) };
   }),
 
-  playerDirectory: publicProcedure.query(async () => {
-    const players = unwrap(await supabase.from("player").select("id, display_name, position, nfl_team, status, metadata").order("display_name").limit(250)) ?? [];
+  playerDirectory: publicProcedure.input(z.object({ search: z.string().trim().max(64).optional(), position: z.string().trim().max(12).optional(), limit: z.number().int().min(1).max(150).optional() }).optional()).query(async ({ input }) => {
+    const limit = input?.limit ?? 75;
+    let query = supabase.from("player").select("id, display_name, position, nfl_team, status, metadata").order("display_name").limit(limit);
+    if (input?.search) query = query.ilike("display_name", `%${input.search.replace(/[%_]/g, "")}%`);
+    if (input?.position) query = query.eq("position", input.position);
+    const players = unwrap(await query) ?? [];
     return players;
   }),
 
@@ -220,6 +224,81 @@ export const leagueRouter = router({
     const adapter = getFantasyProsDataAdapter();
     if (!adapter) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "FantasyPros is not configured for CVC." });
     return syncFantasyProsSnapshot(await adapter.listPlayerSnapshot());
+  }),
+
+  waiverStatus: publicProcedure.query(async () => {
+    const { season } = await getCurrentLeagueAndSeason();
+    const now = new Date().toISOString();
+    const period = unwrap(await supabase.from("waiver_period").select("id, label, opens_at, closes_at, status").eq("season_id", season.id).eq("status", "open").lte("opens_at", now).gte("closes_at", now).order("closes_at").limit(1).maybeSingle());
+    return { period };
+  }),
+
+  createWaiverPeriod: protectedProcedure.input(z.object({ label: z.string().min(2).max(100), opensAt: z.string().datetime(), closesAt: z.string().datetime() }).refine(value => new Date(value.closesAt) > new Date(value.opensAt), { message: "A waiver period must close after it opens." })).mutation(async ({ ctx, input }) => {
+    const commissioner = await requireCommissioner({ openId: ctx.user.openId });
+    const { league, season } = await getCurrentLeagueAndSeason();
+    const period = unwrap(await supabase.from("waiver_period").insert({ season_id: season.id, label: input.label, opens_at: input.opensAt, closes_at: input.closesAt, status: "open" }).select("id, label, opens_at, closes_at, status").single());
+    if (!period) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "CVC waiver period could not be created." });
+    await createAuditEvent(league.id, season.id, commissioner.id, "waiver_period", period.id, "created", `Opened waiver period ${period.label}`);
+    return period;
+  }),
+
+  submitFaabBid: protectedProcedure.input(z.object({ playerId: z.string().uuid(), amount: z.number().int().min(0).max(10000), priority: z.number().int().min(1).max(99).default(1), dropPlayerId: z.string().uuid().optional() })).mutation(async ({ ctx, input }) => {
+    const owner = await getOwnerAccess({ openId: ctx.user.openId });
+    if (!owner) throw new TRPCError({ code: "FORBIDDEN", message: "A CVC owner session is required to submit a waiver claim." });
+    const { league, season } = await getCurrentLeagueAndSeason();
+    const franchise = unwrap(await supabase.from("franchise").select("id, name").eq("current_owner_id", owner.id).eq("is_active", true).limit(1).maybeSingle());
+    if (!franchise) throw new TRPCError({ code: "FORBIDDEN", message: "Only an owner with an active CVC franchise may submit a waiver claim." });
+    const now = new Date().toISOString();
+    const period = unwrap(await supabase.from("waiver_period").select("id, label").eq("season_id", season.id).eq("status", "open").lte("opens_at", now).gte("closes_at", now).order("closes_at").limit(1).maybeSingle());
+    if (!period) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "There is no open CVC waiver period." });
+    const [player, activeAssignment] = await Promise.all([
+      supabase.from("player").select("id, display_name").eq("id", input.playerId).maybeSingle(),
+      supabase.from("roster_assignment").select("id").eq("season_id", season.id).eq("player_id", input.playerId).is("released_at", null).limit(1).maybeSingle(),
+    ]);
+    const playerRow = unwrap(player);
+    if (!playerRow) throw new TRPCError({ code: "NOT_FOUND", message: "CVC player was not found." });
+    if (unwrap(activeAssignment)) throw new TRPCError({ code: "BAD_REQUEST", message: "Rostered players cannot be claimed through waivers." });
+    if (input.dropPlayerId) {
+      const drop = unwrap(await supabase.from("roster_assignment").select("id").eq("season_id", season.id).eq("franchise_id", franchise.id).eq("player_id", input.dropPlayerId).is("released_at", null).maybeSingle());
+      if (!drop) throw new TRPCError({ code: "BAD_REQUEST", message: "The selected drop player is not on your active CVC roster." });
+    }
+    const bid = unwrap(await supabase.from("faab_bid").upsert({ waiver_period_id: period.id, franchise_id: franchise.id, player_id: input.playerId, drop_player_id: input.dropPlayerId ?? null, amount: input.amount, priority: input.priority, status: "pending" }, { onConflict: "waiver_period_id,franchise_id,player_id" }).select("id, amount, priority, status").single());
+    if (!bid) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "CVC waiver claim could not be saved." });
+    await createAuditEvent(league.id, season.id, owner.id, "faab_bid", bid.id, "submitted", `Submitted ${period.label} claim for ${playerRow.display_name}`);
+    return bid;
+  }),
+
+  myFaabBids: protectedProcedure.query(async ({ ctx }) => {
+    const owner = await getOwnerAccess({ openId: ctx.user.openId });
+    if (!owner) throw new TRPCError({ code: "FORBIDDEN", message: "A CVC owner session is required." });
+    const franchise = unwrap(await supabase.from("franchise").select("id").eq("current_owner_id", owner.id).eq("is_active", true).limit(1).maybeSingle());
+    if (!franchise) return [];
+    return unwrap(await supabase.from("faab_bid").select("id, amount, priority, status, submitted_at, player:player_id(id, display_name, position, nfl_team), period:waiver_period_id(label, closes_at, status)").eq("franchise_id", franchise.id).order("submitted_at", { ascending: false }).limit(100)) ?? [];
+  }),
+
+  waiverBidQueue: protectedProcedure.query(async ({ ctx }) => {
+    await requireCommissioner({ openId: ctx.user.openId });
+    const { season } = await getCurrentLeagueAndSeason();
+    return unwrap(await supabase.from("faab_bid").select("id, amount, priority, status, submitted_at, player:player_id(id, display_name, position, nfl_team), franchise:franchise_id(id, name), period:waiver_period_id(id, label, closes_at, status)").eq("period.season_id", season.id).eq("status", "pending").order("amount", { ascending: false }).order("priority").limit(200)) ?? [];
+  }),
+
+  resolveFaabBid: protectedProcedure.input(z.object({ bidId: z.string().uuid(), outcome: z.enum(["won", "lost"]) })).mutation(async ({ ctx, input }) => {
+    const commissioner = await requireCommissioner({ openId: ctx.user.openId });
+    const { league, season } = await getCurrentLeagueAndSeason();
+    const bid = unwrap(await supabase.from("faab_bid").select("id, waiver_period_id, franchise_id, player_id, drop_player_id, amount, status, player:player_id(display_name), franchise:franchise_id(name)").eq("id", input.bidId).maybeSingle());
+    if (!bid) throw new TRPCError({ code: "NOT_FOUND", message: "CVC waiver bid was not found." });
+    if (bid.status !== "pending") throw new TRPCError({ code: "BAD_REQUEST", message: "Only pending CVC waiver bids may be resolved." });
+    if (input.outcome === "won") {
+      const active = unwrap(await supabase.from("roster_assignment").select("id").eq("season_id", season.id).eq("player_id", bid.player_id).is("released_at", null).limit(1).maybeSingle());
+      if (active) throw new TRPCError({ code: "BAD_REQUEST", message: "This player is no longer available for a CVC waiver award." });
+      if (bid.drop_player_id) unwrap(await supabase.from("roster_assignment").update({ roster_state: "released", released_at: new Date().toISOString() }).eq("season_id", season.id).eq("franchise_id", bid.franchise_id).eq("player_id", bid.drop_player_id).is("released_at", null).select("id"));
+      unwrap(await supabase.from("roster_assignment").insert({ season_id: season.id, franchise_id: bid.franchise_id, player_id: bid.player_id, roster_state: "waivers" }).select("id").single());
+      unwrap(await supabase.from("faab_bid").update({ status: "lost", resolved_at: new Date().toISOString() }).eq("waiver_period_id", bid.waiver_period_id).eq("player_id", bid.player_id).eq("status", "pending").neq("id", bid.id).select("id"));
+      unwrap(await supabase.from("transaction").insert({ season_id: season.id, franchise_id: bid.franchise_id, actor_owner_id: commissioner.id, transaction_type: "waiver", status: "final", summary: `${bid.franchise?.[0]?.name ?? "CVC franchise"} won ${bid.player?.[0]?.display_name ?? "a player"} for $${bid.amount} FAAB`, details: { faab_bid_id: bid.id, player_id: bid.player_id, amount: bid.amount } }).select("id").single());
+    }
+    const resolved = unwrap(await supabase.from("faab_bid").update({ status: input.outcome, resolved_at: new Date().toISOString() }).eq("id", bid.id).select("id, status").single());
+    await createAuditEvent(league.id, season.id, commissioner.id, "faab_bid", bid.id, input.outcome, `Resolved waiver bid as ${input.outcome}`);
+    return resolved;
   }),
 
   myFranchise: protectedProcedure.query(async ({ ctx }) => {
