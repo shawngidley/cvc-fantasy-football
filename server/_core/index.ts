@@ -49,6 +49,10 @@ async function findAvailablePort(startPort: number = 3000): Promise<number> {
 
 async function startServer() {
   const app = express();
+  // CVC is deployed behind a TLS-terminating proxy. Trust its forwarded
+  // protocol so secure session cookies and scheduled callbacks are handled
+  // consistently in production.
+  app.set("trust proxy", 1);
   const server = createServer(app);
   // Configure body parser with larger size limit for file uploads
   app.use(express.json({ limit: "50mb" }));

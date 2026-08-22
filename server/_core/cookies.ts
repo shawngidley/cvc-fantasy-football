@@ -42,7 +42,10 @@ export function getSessionCookieOptions(
   return {
     httpOnly: true,
     path: "/",
-    sameSite: "none",
-    secure: isSecureRequest(req),
+    // First-party CVC owner and platform sessions do not require a third-party
+    // cookie. Lax is compatible with the production scheduler and avoids an
+    // invalid SameSite=None cookie when proxy metadata is unavailable.
+    sameSite: "lax",
+    secure: isSecureRequest(req) || process.env.NODE_ENV === "production",
   };
 }

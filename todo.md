@@ -128,3 +128,4 @@
 - [x] Rebuild CVC Trades from the WRC owner proposal and trade-inbox workspace while preserving CVC player, FAAB, and commissioner-execution rules.
 - [ ] Verify the WRC-style CVC Trade Desk with authenticated owner proposal, recipient response, and commissioner execution before treating trade parity as complete.
 - [x] Rebuild CVC Weekly Rundown from the WRC week selector, owner matchup marker, league median, and Tank01-only matchup-card structure.
+- [ ] Rebuild CVC Player News from the WRC source and position-filtered news-feed structure using server-only CVC provider data and owner roster context.
