@@ -24,3 +24,60 @@
 - [ ] Expand commissioner schedule configuration to support validated matchup entry and a matching CSV import template.
 - [ ] Add Vitest route-map coverage and commissioner happy-path/core mutation coverage.
 - [x] Prepare CVC metadata, canonical-domain assumptions, and custom-domain handoff notes for cvcfantasyfootball.com without publishing or changing DNS.
+- [ ] Define a commissioner-friendly CVC auction draft operating model covering setup, nominations, bidding, timing, roster enforcement, pauses, corrections, and post-draft reconciliation.
+- [ ] Design the CVC auction as a commissioner-operated in-room console with a projected public board and no owner self-service bidding requirement.
+- [ ] Enforce the CVC auction rules: $1 minimum bid, variable franchise budgets capped at $120, 15-player maximum roster, and a $1 reserve for every unfilled roster spot.
+- [ ] Correct the CVC auction constraints to a $115 starting-budget cap, a 15-player minimum roster, and a 22-player maximum roster, with reserve math based on the minimum roster target.
+- [ ] Enforce only the total 15-to-22 player roster range during the CVC auction, with no position-specific auction caps.
+- [ ] Restrict the CVC auction pool to unrostered non-rookie players and defer rookies to a future rookie-draft module.
+- [ ] Provide a commissioner spreadsheet import template for player, rostered-franchise, and rookie-status data so CVC can assemble the auction pool automatically.
+- [x] Prepare the blank CVC auction player-pool spreadsheet template and document the player eligibility import rules.
+- [ ] Build the commissioner-operated CVC auction console with projected public board, manual nomination and award controls, budget ledger, roster safeguards, correction flow, and audit history.
+- [ ] Replace Manus-based login with independent CVC Supabase authentication and map CVC member, commissioner, and administrator access without exposing Manus sign-in to league users.
+- [ ] Inspect and reproduce the WRC login experience for CVC using CVC-controlled authentication and role data.
+- [ ] Implement a CVC owner-selection dropdown and PIN login that grants owner, commissioner, or administrator access without Manus sign-in.
+- [ ] Initialize the CVC owner selector login with a commissioner-resettable four-digit default PIN of 1234.
+- [ ] Configure Jonas and Justin as CVC co-commissioners and add a distinct administrator account for the project owner through the owner-selector/PIN access model.
+- [ ] Map Jonas to The Super Snuffleupagus and Justin to DS Warteaters as the confirmed CVC co-commissioner franchise assignments.
+- [ ] Create the separate CVC administrator owner-selector account with the display name Administrator.
+- [ ] Build a WRC-style CVC owner Settings page where authenticated owners can securely change their own four-digit PIN.
+- [ ] Model the CVC owner Settings page on WRC with Team Information, device sign-in readiness, Change PIN, and Team Logo management cards.
+- [x] Replace the current placeholder owner and franchise rows with the validated 2026 CVC owner and franchise records before assigning co-commissioner roles.
+- [x] Apply the approved 2026 CVC owner-access mapping: Jonas/Super Snuffleupagus and Justin/DS Warteaters as co-commissioners, plus Administrator as standalone administrator.
+- [ ] Inspect and map the supplied CVCFootballFolder(2026) workbook into CVC owner, franchise, roster, player-pool, and auction-import records.
+- [x] Extract and validate owners, franchise rosters, and season schedule data from the supplied CVC 2026 workbook before any database import.
+- [x] Review the CVC workbook rules sheet and owner protection mechanics, including rookie, waiver, and matching rights, before defining the protections module.
+- [ ] Verify the WRC Tank01 and FantasyPros integration pattern, then add secure CVC server-side provider adapters for a dynamic NFL player pool and fantasy data refreshes.
+- [x] Import validated CVC owners, franchises, rosters, and schedule data from the supplied 2026 workbook into the CVC data layer.
+- [x] Prioritize the validated 2026 CVC roster and schedule import before remaining owner settings, protections, and Auction Room enhancements.
+- [x] Import workbook-derived CVC franchise, transition, rookie, waiver, and matching rights into the live player_right table where present.
+- [x] Confirm the supplied CVC workbook has no populated historical player-right rows to import automatically.
+- [ ] Verify and document the resulting CVC rights-record counts and sample mappings after import.
+- [ ] Build all provider-independent CVC dynamics now, while keeping the Tank01 and FantasyPros adapters ready for credential configuration later.
+- [ ] Configure the supplied Tank01 RapidAPI credential as a server-only CVC secret, verify it, and build the player-pool adapter without exposing provider access in the browser.
+- [ ] Configure the supplied FantasyPros API key as a server-only shared provider credential and enforce cached, rate-limited CVC refresh behavior compatible with WRC usage.
+- [x] Verify and report the final Tank01 and FantasyPros credential status using each provider’s documented authentication method.
+- [x] Verify Tank01 against its official RapidAPI documentation or dashboard reference, then align the production CVC adapter to the documented host, headers, and endpoint conventions.
+- [x] Inspect and align the live CVC Tank01 adapter host, headers, and endpoint paths with the verified RapidAPI documentation.
+- [x] Add tests for the production Tank01 adapter methods used by CVC player-data workflows, then re-run type and test checks.
+- [ ] Complete the end-to-end dynamic CVC release: owner/PIN access, 2026 data import, protections, Auction Room controls, cached provider data, validation, and operating guidance.
+- [ ] Build an owner-facing CVC Protections page for franchise, transition, rookie, and waiver-right decisions.
+- [ ] Reconcile finalized protection decisions dynamically into CVC Rosters, Lineup, Free Agents, and Auction Room eligibility views.
+- [ ] Replace the Protections page placeholder player rows with imported 2026 owner roster, contract, salary, and rights records.
+- [x] Replace Schedule & Results placeholder matchup cards and setup copy with the imported 2026 CVC schedule weeks and 70 live matchups.
+- [x] Sort the imported CVC schedule view chronologically by week and group matchups consistently within each week.
+- [ ] Group the imported CVC schedule UI into chronological week sections so each week’s five matchups display together.
+- [ ] Verify the public Schedule & Results page renders imported matchups in chronological week groups.
+- [ ] Complete independent owner-PIN session resolution so the Protections page can load the authenticated owner’s imported franchise roster.
+- [ ] Allow owners to cut contracted players through Protections with an audited roster release and free-agent transition.
+- [ ] Enforce the confirmed CVC contract-cut outcome: no dead-cap penalty, immediate roster release, and normal unrestricted free-agent or auction eligibility.
+- [ ] Allow owners to assign Franchise and Transition tags through Protections using CVC tier, term, and availability validation.
+- [ ] Allow owners to designate restricted free-agent rights through Protections for eligible rookie and waiver players.
+- [x] Map the workbook’s Twinsburg Tribe roster block to Stapel’s The Rusty Trombones franchise during the CVC 2026 import.
+- [x] Document the workbook-derived CVC roster, salary-cap, franchise, transition, rookie-right, waiver-right, and matching-right mechanics for commissioner review.
+- [x] Revise the CVC in-room auction playbook to reflect the confirmed $115 budget cap and 15-to-22 player roster range.
+- [ ] Provide commissioner configuration for per-franchise starting auction budgets, with each budget validated at $120 or below.
+- [ ] Make the CVC auction close commissioner-controlled, with no automatic bidding timer and an explicit award action required to record each sale.
+- [ ] Let the commissioner select the nominating franchise manually for every CVC auction nomination.
+- [ ] Allow the commissioner to record any legal winning bid above $1 rather than enforcing fixed bid increments.
+- [x] Document the CVC in-room auction operating playbook, control surface, reserve formula, and end-of-draft reconciliation workflow.

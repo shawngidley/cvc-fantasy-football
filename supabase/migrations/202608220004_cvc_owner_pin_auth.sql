@@ -1,0 +1,13 @@
+alter table public.owner add column if not exists pin_hash text;
+alter table public.owner add column if not exists pin_updated_at timestamptz;
+create table if not exists public.owner_session (
+  id uuid primary key default gen_random_uuid(),
+  owner_id uuid not null references public.owner(id) on delete cascade,
+  token_hash text not null unique,
+  expires_at timestamptz not null,
+  created_at timestamptz not null default now()
+);
+create index if not exists owner_session_owner_idx on public.owner_session(owner_id, expires_at desc);
+alter table public.owner_session enable row level security;
+revoke all on table public.owner_session from anon, authenticated;
+grant select, insert, update, delete on table public.owner_session to service_role;

@@ -1,0 +1,34 @@
+create table if not exists public.player_contract (
+  id uuid primary key default gen_random_uuid(),
+  season_id uuid not null references public.season(id) on delete cascade,
+  franchise_id uuid not null references public.franchise(id) on delete cascade,
+  player_id uuid not null references public.player(id) on delete cascade,
+  salary numeric(10,2) not null default 0,
+  expires_year integer,
+  source_marker text,
+  contract_status text not null default 'active' check (contract_status in ('active','expiring','released','expired')),
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  unique(season_id, franchise_id, player_id)
+);
+create table if not exists public.player_right (
+  id uuid primary key default gen_random_uuid(),
+  season_id uuid not null references public.season(id) on delete cascade,
+  franchise_id uuid not null references public.franchise(id) on delete cascade,
+  player_id uuid not null references public.player(id) on delete cascade,
+  right_type text not null check (right_type in ('franchise','transition','rookie_match','waiver_match','rookie_pick_match')),
+  status text not null default 'active' check (status in ('active','exercised','declined','expired','revoked')),
+  salary_basis numeric(10,2),
+  contract_years integer,
+  expires_year integer,
+  metadata jsonb not null default '{}'::jsonb,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  unique(season_id, franchise_id, player_id, right_type)
+);
+create index if not exists player_contract_season_franchise_idx on public.player_contract(season_id, franchise_id);
+create index if not exists player_right_season_player_idx on public.player_right(season_id, player_id, status);
+alter table public.player_contract enable row level security;
+alter table public.player_right enable row level security;
+revoke all on table public.player_contract, public.player_right from anon, authenticated;
+grant select,insert,update,delete on table public.player_contract, public.player_right to service_role;
