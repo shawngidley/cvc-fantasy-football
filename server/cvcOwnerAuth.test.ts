@@ -24,4 +24,16 @@ describe("CVC owner PIN authentication", () => {
     expect(owners.some(owner => owner.displayName === "Administrator")).toBe(true);
     expect(owners.some(owner => owner.displayName === "Jonas" && owner.role === "commissioner")).toBe(true);
   });
+
+  it("clears the CVC owner-session cookie on sign out", async () => {
+    const cleared: Array<{ name: string; options: Record<string, unknown> }> = [];
+    const ctx: TrpcContext = {
+      user: null,
+      req: { protocol: "https", headers: {} } as TrpcContext["req"],
+      res: { clearCookie: (name: string, options: Record<string, unknown>) => cleared.push({ name, options }) } as TrpcContext["res"],
+    };
+    await expect(appRouter.createCaller(ctx).ownerAuth.signOut()).resolves.toEqual({ success: true });
+    expect(cleared[0]?.name).toBe("cvc_owner_session");
+    expect(cleared[0]?.options).toMatchObject({ maxAge: -1, httpOnly: true, path: "/" });
+  });
 });

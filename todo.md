@@ -41,6 +41,8 @@
 - [x] Map Jonas to The Super Snuffleupagus and Justin to DS Warteaters as the confirmed CVC co-commissioner franchise assignments.
 - [x] Create the separate CVC administrator owner-selector account with the display name Administrator.
 - [x] Build a WRC-style CVC owner Settings page where authenticated owners can securely change their own four-digit PIN.
+- [ ] Add a secure owner-session Sign Out control to the CVC Team Settings page that returns the user to owner sign-in.
+- [ ] Add Team Settings sign-out failure feedback and verify in the browser that a signed-in owner session is cleared, protected routes gate correctly, and the user lands on owner sign-in.
 - [ ] Complete real CVC Owner Settings logo management and device-sign-in setup readiness controls.
 - [x] Replace the current placeholder owner and franchise rows with the validated 2026 CVC owner and franchise records before assigning co-commissioner roles.
 - [x] Apply the approved 2026 CVC owner-access mapping: Jonas/Super Snuffleupagus and Justin/DS Warteaters as co-commissioners, plus Administrator as standalone administrator.
@@ -93,6 +95,7 @@
 - [x] Register a CVC service worker so the branded manifest and supplied crest icons are available to supported PWA installation flows.
 - [x] Synchronize the cached FantasyPros player pool through a commissioner-controlled, non-destructive CVC workflow while excluding active roster identity duplicates from free agents and the regular auction pool.
 - [x] Add bounded live player-name and position filtering to CVC Free Agents and commissioner Auction Room eligibility selection.
+- [x] Restrict CVC Free Agents to QB, RB, WR, TE, K, and D/ST only; exclude individual defensive-player positions from server eligibility and UI filters.
 - [x] Add bounded live player-directory search and position filtering with stable public player-detail navigation.
 - [x] Add an owner-PIN-protected CVC FAAB waiver workflow with commissioner-opened periods, owner claim submission, audited resolution, roster assignment, and transaction reconciliation.
 - [x] Add a live CVC transaction feed and protected commissioner audit timeline for protections, auction, waiver, and configuration activity.
@@ -121,6 +124,7 @@
 - [x] Replace the flat CVC Lineup roster table with WRC-style position-grouped starter and bench sections, player imagery, and dense weekly/season stat columns using CVC data and truthful unavailable states.
 - [x] Correct CVC’s active lineup to QB, 2 RB, 2 WR, TE, FLEX (RB/WR/TE), K, and D/ST only; assign one valid starter at every configured slot for all franchises.
 - [x] Order CVC starting offense as QB, RB, RB, WR, WR, TE before bench players, and normalize imported KI labels to K across lineup grouping and display.
+- [x] Normalize imported DE labels to D/ST across CVC player data, lineup grouping, and display.
 - [x] Remove the Money Owed and Tm # columns from the CVC standings tables while retaining owner, team, record, points, and division-record data.
 - [x] Rebuild CVC Standings to the direct WRC 2026 structure: compact CVC Fantasy Football 2026 header, current-week matchup card, and dense East/West division tables with no generic introduction or configuration controls.
 - [x] Display the Week 1 CVC matchup on the Standings card during the 2026 pre-season rather than a later scheduled week.
@@ -149,6 +153,8 @@
 - [ ] Enforce the supplied CVC Transition and Franchise contract rules: term eligibility, salary adjustments, future tag restrictions, one franchise tag per 2-year and 3-year contract tier, and off-season franchise/transition trade handling.
 - [ ] Verify the WRC-style CVC Protections page using an authenticated owner franchise before treating protections parity as complete.
 - [x] Rebuild CVC Rosters from the WRC division-filtered franchise-card structure with real owner, player, contract, and public-lineup data.
+- [x] Add a live Contract column to CVC Roster player tables using active contract and protection-right data.
+- [x] Sort CVC Roster players by position and then descending live contract salary within each position group.
 - [x] Rebuild CVC Transactions from the WRC filtered add, drop, trade, and FAAB activity-feed structure with real CVC audit-aware transaction data.
 - [x] Rebuild CVC Schedule & Results from the WRC combined current-week, final-results, future-schedule, and owner-filter game-center structure using Tank01-only result data.
 - [x] Rebuild CVC Trades from the WRC owner proposal and trade-inbox workspace while preserving CVC player, FAAB, and commissioner-execution rules.

@@ -40,5 +40,6 @@ describe("CVC lineup grouping", () => {
     expect(group[0]?.bench.map(row => row.player?.display_name)).toEqual(["Bench Quarterback", "Bench Wide"]);
     expect(group[1]?.starters.map(row => row.player?.display_name)).toEqual(["Kicker"]);
     expect(normalizeCvcPosition("KI")).toBe("K");
+    expect(normalizeCvcPosition("DE")).toBe("DST");
   });
 });

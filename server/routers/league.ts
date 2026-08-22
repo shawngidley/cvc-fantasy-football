@@ -246,9 +246,11 @@ export const leagueRouter = router({
   freeAgents: publicProcedure.input(z.object({ search: z.string().trim().max(64).optional(), position: z.string().trim().max(12).optional(), limit: z.number().int().min(1).max(150).optional() }).optional()).query(async ({ input }) => {
     const { season } = await getCurrentLeagueAndSeason();
     const limit = input?.limit ?? 75;
-    let playerQuery = supabase.from("player").select("id, provider, display_name, position, nfl_team, status, metadata").neq("provider", "placeholder").order("display_name").limit(limit + 220);
+    const eligiblePositions = ["QB", "RB", "WR", "TE", "K", "DST"];
+    if (input?.position && !eligiblePositions.includes(input.position.toUpperCase())) throw new TRPCError({ code: "BAD_REQUEST", message: "CVC Free Agents are limited to QB, RB, WR, TE, K, and D/ST." });
+    let playerQuery = supabase.from("player").select("id, provider, display_name, position, nfl_team, status, metadata").neq("provider", "placeholder").in("position", eligiblePositions).order("display_name").limit(limit + 220);
     if (input?.search) playerQuery = playerQuery.ilike("display_name", `%${input.search.replace(/[%_]/g, "")}%`);
-    if (input?.position) playerQuery = playerQuery.eq("position", input.position);
+    if (input?.position) playerQuery = playerQuery.eq("position", input.position.toUpperCase());
     const [playersResult, activeAssignmentsResult] = await Promise.all([
       playerQuery,
       supabase.from("roster_assignment").select("player_id").eq("season_id", season.id).is("released_at", null),

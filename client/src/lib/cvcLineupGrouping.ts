@@ -22,7 +22,9 @@ function orderLineupRows(rows: CvcLineupAssignment[]) {
 
 export function normalizeCvcPosition(position: string | null | undefined) {
   const normalized = (position ?? "").trim().toUpperCase();
-  return normalized === "KI" ? "K" : normalized;
+  if (normalized === "KI") return "K";
+  if (normalized === "DE") return "DST";
+  return normalized;
 }
 
 export function groupCvcLineup(assignments: CvcLineupAssignment[]): CvcLineupGroup[] {
