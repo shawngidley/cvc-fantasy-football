@@ -78,3 +78,9 @@ The live-scoring and player-news views have a provider-neutral boundary. Before 
 | Financial entries reviewed and privacy expectations communicated. | Complete |
 | NFL data provider configured, or live-data pages intentionally remain in provider-ready mode. | Complete |
 | Desktop and mobile routes reviewed after real league data is loaded. | Complete |
+
+## Custom domain handoff: cvcfantasyfootball.com
+
+The CVC site is prepared to use `https://cvcfantasyfootball.com/` as its canonical public address. In the project management interface, open **Settings → Domains**, add `cvcfantasyfootball.com`, and follow the displayed DNS instructions at the domain registrar. Do not remove the Manus-provided project domain; it remains useful as a recovery and preview address.
+
+After DNS verification completes, visit both `cvcfantasyfootball.com` and `www.cvcfantasyfootball.com` (if you choose to configure the `www` host) and select one as the canonical redirect destination. Publishing remains a separate user-controlled action.

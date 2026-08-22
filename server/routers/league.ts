@@ -2,6 +2,7 @@ import { TRPCError } from "@trpc/server";
 import { z } from "zod";
 import { ENV } from "../_core/env";
 import { protectedProcedure, publicProcedure, router } from "../_core/trpc";
+import { getNFLDataAdapter } from "../nflDataAdapter";
 import { supabase, unwrap } from "../supabase";
 
 type CurrentUser = { openId: string };
@@ -149,6 +150,39 @@ export const leagueRouter = router({
     return { ...draft, picks: picks.map(pick => ({ ...pick, originalFranchise: franchiseById.get(pick.original_franchise_id)?.name ?? "Unknown", currentFranchise: franchiseById.get(pick.current_franchise_id)?.name ?? "Unknown" })) };
   }),
 
+  franchiseRoster: publicProcedure.input(z.object({ franchiseId: z.string().uuid() })).query(async ({ input }) => {
+    const { data: franchise, error: franchiseError } = await supabase.from("franchise").select("id, name, abbreviation, division_name, brand_color, current_owner_id").eq("id", input.franchiseId).single();
+    if (franchiseError || !franchise) throw new TRPCError({ code: "NOT_FOUND", message: "CVC franchise was not found." });
+    const { data: season, error: seasonError } = await supabase.from("season").select("id").order("year", { ascending: false }).limit(1).single();
+    if (seasonError || !season) throw new TRPCError({ code: "NOT_FOUND", message: "CVC season was not found." });
+    const assignments = unwrap(await supabase.from("roster_assignment").select("id, player_id, roster_state, assigned_slot_code, acquired_at").eq("season_id", season.id).eq("franchise_id", franchise.id).is("released_at", null).order("acquired_at")) ?? [];
+    const playerIds = assignments.map(item => item.player_id);
+    const players = playerIds.length ? unwrap(await supabase.from("player").select("id, display_name, position, nfl_team, status").in("id", playerIds)) ?? [] : [];
+    const playerById = new Map(players.map(player => [player.id, player]));
+    return { franchise, players: assignments.map(assignment => ({ ...assignment, player: playerById.get(assignment.player_id) ?? null })) };
+  }),
+
+  playerDirectory: publicProcedure.query(async () => {
+    const players = unwrap(await supabase.from("player").select("id, display_name, position, nfl_team, status, metadata").order("display_name").limit(250)) ?? [];
+    return players;
+  }),
+
+  playerDetail: publicProcedure.input(z.object({ playerId: z.string().uuid() })).query(async ({ input }) => {
+    const player = unwrap(await supabase.from("player").select("id, provider, external_id, display_name, position, nfl_team, status, metadata, created_at, updated_at").eq("id", input.playerId).maybeSingle());
+    if (!player) throw new TRPCError({ code: "NOT_FOUND", message: "CVC player was not found." });
+    return player;
+  }),
+
+  nflProviderStatus: publicProcedure.query(async () => getNFLDataAdapter().status()),
+
+  myFranchise: protectedProcedure.query(async ({ ctx }) => {
+    const owner = await getOwnerAccess({ openId: ctx.user.openId });
+    if (!owner) throw new TRPCError({ code: "FORBIDDEN", message: "Your account is not associated with a CVC owner record." });
+    const franchise = unwrap(await supabase.from("franchise").select("id, name, abbreviation, division_name").eq("current_owner_id", owner.id).eq("is_active", true).limit(1).maybeSingle());
+    if (!franchise) throw new TRPCError({ code: "NOT_FOUND", message: "No active CVC franchise is assigned to your owner record." });
+    return franchise;
+  }),
+
   access: protectedProcedure.query(async ({ ctx }) => {
     const owner = await getOwnerAccess({ openId: ctx.user.openId });
     return {
@@ -213,6 +247,17 @@ export const leagueRouter = router({
     const item = unwrap(await supabase.from("schedule_week").upsert({ season_id: season.id, week_number: input.weekNumber, label: input.label, status: input.status }, { onConflict: "season_id,week_number" }).select("id").single());
     if (!item) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Schedule week could not be saved." });
     await createAuditEvent(league.id, season.id, commissioner.id, "schedule_week", item.id, "saved", `Saved ${input.label}`); return item;
+  }),
+
+  saveMatchup: protectedProcedure.input(z.object({ weekNumber: z.number().int().min(1).max(30), homeFranchiseId: z.string().uuid(), awayFranchiseId: z.string().uuid(), resultState: z.enum(["upcoming", "live", "final", "corrected"]) }).refine(value => value.homeFranchiseId !== value.awayFranchiseId, { message: "A franchise cannot play itself." })).mutation(async ({ ctx, input }) => {
+    const commissioner = await requireCommissioner({ openId: ctx.user.openId }); const { league, season } = await getCurrentLeagueAndSeason();
+    const week = unwrap(await supabase.from("schedule_week").select("id, label").eq("season_id", season.id).eq("week_number", input.weekNumber).maybeSingle());
+    if (!week) throw new TRPCError({ code: "BAD_REQUEST", message: "Save the CVC schedule week before adding its matchup." });
+    const franchises = unwrap(await supabase.from("franchise").select("id, name").in("id", [input.homeFranchiseId, input.awayFranchiseId]).eq("league_id", league.id)) ?? [];
+    if (franchises.length !== 2) throw new TRPCError({ code: "BAD_REQUEST", message: "Both CVC franchises must exist before scheduling a matchup." });
+    const item = unwrap(await supabase.from("matchup").upsert({ schedule_week_id: week.id, home_franchise_id: input.homeFranchiseId, away_franchise_id: input.awayFranchiseId, result_state: input.resultState }, { onConflict: "schedule_week_id,home_franchise_id" }).select("id").single());
+    if (!item) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "CVC matchup could not be saved." });
+    await createAuditEvent(league.id, season.id, commissioner.id, "matchup", item.id, "saved", `Saved ${week.label} matchup`); return item;
   }),
 
   saveRuleDocument: protectedProcedure.input(z.object({ title: z.string().min(2).max(120), slug: z.string().regex(/^[a-z0-9-]+$/), versionLabel: z.string().min(1).max(40), contentMarkdown: z.string().min(1).max(100000) })).mutation(async ({ ctx, input }) => {
