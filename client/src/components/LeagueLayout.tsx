@@ -38,7 +38,7 @@ export function LeagueLayout({ children }: { children: React.ReactNode }) {
       <header className="cvc-nav">
         <div className="mx-auto flex h-[72px] max-w-[1440px] items-center gap-4 px-4 sm:px-6">
           <Link href="/standings" className="flex shrink-0 items-center gap-3 text-left">
-            <span className="cvc-mark">CVC</span>
+            <img src="/manus-storage/cvc-header-crest_5a1114ba.png" alt="CVC Fantasy Football crest" className="h-12 w-12 object-contain" />
             <span className="hidden leading-none sm:block">
               <strong className="block font-display text-lg tracking-[0.12em] text-white">CVC</strong>
               <small className="mt-1 block text-[9px] font-bold uppercase tracking-[0.24em] text-cvc-muted">Fantasy Football</small>

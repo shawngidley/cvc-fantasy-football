@@ -1,0 +1,29 @@
+{
+  "name": "CVC Fantasy Football",
+  "short_name": "CVC Fantasy",
+  "description": "CVC Fantasy Football league operations, standings, rosters, drafts, and commissioner tools.",
+  "start_url": "/standings",
+  "display": "standalone",
+  "background_color": "#071827",
+  "theme_color": "#071827",
+  "icons": [
+    {
+      "src": "/manus-storage/cvc-pwa-192-clean_c8e39f50.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/manus-storage/cvc-pwa-512-clean_9ae190a5.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/manus-storage/cvc-pwa-maskable-512-clean_6056ae8c.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ]
+}

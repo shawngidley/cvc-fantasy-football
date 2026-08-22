@@ -69,7 +69,7 @@
 - [x] Sort the imported CVC schedule view chronologically by week and group matchups consistently within each week.
 - [x] Group the imported CVC schedule UI into chronological week sections so each week’s five matchups display together.
 - [x] Verify the public Schedule & Results page renders imported matchups in chronological week groups.
-- [ ] Replace placeholder standings names, divisions, records, and foundation copy with the imported CVC franchise and season data.
+- [x] Replace placeholder standings names, divisions, records, and foundation copy with the imported CVC franchise and season data.
 - [x] Complete independent owner-PIN session resolution so the Protections page can load the authenticated owner’s imported franchise roster.
 - [x] Allow owners to cut contracted players through Protections with an audited roster release and free-agent transition.
 - [x] Enforce the confirmed CVC contract-cut outcome: no dead-cap penalty, immediate roster release, and normal unrestricted free-agent or auction eligibility.
@@ -88,3 +88,4 @@
 - [x] Connect the Protections release control to independent CVC owner-PIN access before it is available to league owners.
 - [x] Complete the waiver-right workflow after importing historical waiver acquisition eligibility or adding a commissioner-reviewed eligibility path.
 - [ ] Add happy-path CVC tests for franchise tags, transition tags, rookie rights, and a verified waiver-right candidate.
+- [x] Apply the supplied CVC league crest across the site header, PWA icons, favicon, and Open Graph/Twitter metadata images.
