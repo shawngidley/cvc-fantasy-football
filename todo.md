@@ -153,6 +153,7 @@
 - [x] Enforce the supplied CVC Transition and Franchise contract rules: term eligibility, salary adjustments, future tag restrictions, one franchise tag per 2-year and 3-year contract tier, and off-season franchise/transition trade handling.
 - [x] Order CVC Protections as QB, RB, WR, TE, K, D/ST with descending salary within each group and render player portraits in the position bubble.
 - [x] Calculate CVC Transition salary from prior-season salary basis, not the already updated 2026 displayed contract salary.
+- [x] Clarify the CVC Rules page so Transition salary calculations explicitly use prior-season salary rather than the displayed current-season salary.
 - [ ] Verify the WRC-style CVC Protections page using an authenticated owner franchise before treating protections parity as complete.
 - [x] Rebuild CVC Rosters from the WRC division-filtered franchise-card structure with real owner, player, contract, and public-lineup data.
 - [x] Add a live Contract column to CVC Roster player tables using active contract and protection-right data.
