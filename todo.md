@@ -83,6 +83,7 @@
 - [x] Let the commissioner select the nominating franchise manually for every CVC auction nomination.
 - [x] Allow the commissioner to record any legal winning bid above $1 rather than enforcing fixed bid increments.
 - [ ] Add CVC auction happy-path coverage for commissioner budget setup, manual nomination, award, and correction workflows.
+- [x] Add isolated CVC auction coverage for regular-pool eligibility and the 15-player reserve calculation without mutating live league data.
 - [x] Document the CVC in-room auction operating playbook, control surface, reserve formula, and end-of-draft reconciliation workflow.
 - [x] Return live imported contracts and active protection-right records with each CVC franchise roster response.
 - [x] Connect the Protections release control to independent CVC owner-PIN access before it is available to league owners.

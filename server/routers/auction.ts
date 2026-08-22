@@ -3,6 +3,10 @@ import { z } from "zod";
 import { supabase, unwrap } from "../supabase";
 import { protectedProcedure, publicProcedure, router } from "../_core/trpc";
 
+export function calculateAuctionLegalMaxBid(startingBudget: number, spentBudget: number, rosterCount: number) {
+  return startingBudget - spentBudget - Math.max(0, 14 - rosterCount);
+}
+
 async function context() {
   const season = unwrap(await supabase.from("season").select("id, league_id").order("year", { ascending: false }).limit(1).single());
   if (!season) throw new TRPCError({ code: "NOT_FOUND", message: "CVC season was not found." });
@@ -61,7 +65,7 @@ export const auctionRouter = router({
     const nomination = unwrap(await supabase.from("auction_nomination").select("id, player_id").eq("draft_id", draft.id).eq("status", "active").single());
     const state = unwrap(await supabase.from("auction_team_state").select("starting_budget, spent_budget, roster_count").eq("draft_id", draft.id).eq("franchise_id", input.franchiseId).single());
     if (!season || !nomination || !state) throw new TRPCError({ code: "NOT_FOUND", message: "Required CVC auction record was not found." });
-    const legalMax = state.starting_budget - state.spent_budget - Math.max(0, 14 - state.roster_count);
+    const legalMax = calculateAuctionLegalMaxBid(state.starting_budget, state.spent_budget, state.roster_count);
     if (state.roster_count >= 22) throw new TRPCError({ code: "BAD_REQUEST", message: "This franchise has reached 22 players." });
     if (input.amount > legalMax) throw new TRPCError({ code: "BAD_REQUEST", message: `Maximum legal bid is $${legalMax}.` });
     unwrap(await supabase.from("auction_nomination").update({ high_franchise_id: input.franchiseId, high_bid: input.amount, status: "awarded", awarded_at: new Date().toISOString() }).eq("id", nomination.id));
