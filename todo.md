@@ -61,18 +61,20 @@
 - [x] Inspect and align the live CVC Tank01 adapter host, headers, and endpoint paths with the verified RapidAPI documentation.
 - [x] Add tests for the production Tank01 adapter methods used by CVC player-data workflows, then re-run type and test checks.
 - [ ] Complete the end-to-end dynamic CVC release: owner/PIN access, 2026 data import, protections, Auction Room controls, cached provider data, validation, and operating guidance.
-- [ ] Build an owner-facing CVC Protections page for franchise, transition, rookie, and waiver-right decisions.
-- [ ] Reconcile finalized protection decisions dynamically into CVC Rosters, Lineup, Free Agents, and Auction Room eligibility views.
-- [ ] Replace the Protections page placeholder player rows with imported 2026 owner roster, contract, salary, and rights records.
+- [x] Build an owner-facing CVC Protections page for franchise, transition, rookie, and waiver-right decisions.
+- [ ] Prioritize the dynamic CVC Protections page so imported rostered players are shown in draft-position order with live contract and rights eligibility.
+- [x] Reconcile finalized protection decisions dynamically into CVC Rosters, Lineup, Free Agents, and Auction Room eligibility views.
+- [x] Replace the Protections page placeholder player rows with imported 2026 owner roster, contract, salary, and rights records.
 - [x] Replace Schedule & Results placeholder matchup cards and setup copy with the imported 2026 CVC schedule weeks and 70 live matchups.
 - [x] Sort the imported CVC schedule view chronologically by week and group matchups consistently within each week.
 - [ ] Group the imported CVC schedule UI into chronological week sections so each week’s five matchups display together.
 - [ ] Verify the public Schedule & Results page renders imported matchups in chronological week groups.
+- [ ] Replace placeholder standings names, divisions, records, and foundation copy with the imported CVC franchise and season data.
 - [ ] Complete independent owner-PIN session resolution so the Protections page can load the authenticated owner’s imported franchise roster.
-- [ ] Allow owners to cut contracted players through Protections with an audited roster release and free-agent transition.
-- [ ] Enforce the confirmed CVC contract-cut outcome: no dead-cap penalty, immediate roster release, and normal unrestricted free-agent or auction eligibility.
-- [ ] Allow owners to assign Franchise and Transition tags through Protections using CVC tier, term, and availability validation.
-- [ ] Allow owners to designate restricted free-agent rights through Protections for eligible rookie and waiver players.
+- [x] Allow owners to cut contracted players through Protections with an audited roster release and free-agent transition.
+- [x] Enforce the confirmed CVC contract-cut outcome: no dead-cap penalty, immediate roster release, and normal unrestricted free-agent or auction eligibility.
+- [x] Allow owners to assign Franchise and Transition tags through Protections using CVC tier, term, and availability validation.
+- [x] Allow owners to designate restricted free-agent rights through Protections for eligible rookie and waiver players.
 - [x] Map the workbook’s Twinsburg Tribe roster block to Stapel’s The Rusty Trombones franchise during the CVC 2026 import.
 - [x] Document the workbook-derived CVC roster, salary-cap, franchise, transition, rookie-right, waiver-right, and matching-right mechanics for commissioner review.
 - [x] Revise the CVC in-room auction playbook to reflect the confirmed $115 budget cap and 15-to-22 player roster range.
@@ -81,3 +83,7 @@
 - [ ] Let the commissioner select the nominating franchise manually for every CVC auction nomination.
 - [ ] Allow the commissioner to record any legal winning bid above $1 rather than enforcing fixed bid increments.
 - [x] Document the CVC in-room auction operating playbook, control surface, reserve formula, and end-of-draft reconciliation workflow.
+- [x] Return live imported contracts and active protection-right records with each CVC franchise roster response.
+- [ ] Connect the Protections release control to independent CVC owner-PIN access before it is available to league owners.
+- [x] Complete the waiver-right workflow after importing historical waiver acquisition eligibility or adding a commissioner-reviewed eligibility path.
+- [ ] Add happy-path CVC tests for franchise tags, transition tags, rookie rights, and a verified waiver-right candidate.

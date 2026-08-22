@@ -30,4 +30,10 @@ describe("CVC public league procedures", () => {
     expect(populated.get("transaction")).toBeGreaterThan(0);
     expect(populated.get("league_financial_entry")).toBeGreaterThan(0);
   });
+
+  it("exposes only real unrostered CVC players in the free-agent pool", async () => {
+    const players = await appRouter.createCaller(createPublicContext()).league.freeAgents();
+
+    expect(players.every(player => player.provider !== "placeholder")).toBe(true);
+  });
 });
