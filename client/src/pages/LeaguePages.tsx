@@ -6,6 +6,7 @@ import { useCvcOwnerAuth } from "@/hooks/useCvcOwnerAuth";
 import { getCvcLivePoints, useCvcTank01LiveScores } from "@/hooks/useCvcTank01LiveScores";
 import { CommissionerPanel } from "@/components/CommissionerPanel";
 import { CvcWrcLiveScoring } from "@/components/CvcWrcLiveScoring";
+import { CvcWrcOwnerLineup } from "@/components/CvcWrcOwnerLineup";
 import { Activity, ArrowRight, BadgeDollarSign, BookOpen, CalendarDays, Check, ChevronRight, ClipboardList, Crown, FileText, Gavel, LayoutDashboard, ListFilter, Newspaper, Plus, Radio, ReceiptText, Scale, Settings2, ShieldCheck, Sparkles, Trophy, Upload, UsersRound, WalletCards } from "lucide-react";
 import { useMemo, useState } from "react";
 import { Link, useRoute } from "wouter";
@@ -162,7 +163,7 @@ export default function LeaguePage({ kind }: { kind: PageKind }) {
   let body: React.ReactNode;
   if (kind === "standings") body = <Standings />;
   else if (kind === "live") body = <CvcWrcLiveScoring />;
-  else if (kind === "lineup") body = <Lineup />;
+  else if (kind === "lineup") body = <CvcWrcOwnerLineup />;
   else if (kind === "draft" || kind === "draft-lottery" || kind === "draft-recap") body = <Draft mode={kind === "draft" ? "hub" : kind === "draft-lottery" ? "lottery" : "recap"} />;
   else if (kind === "trades") body = <TradesDesk />;
   else if (kind === "transactions" || kind === "free-agents") body = <Transactions kind={kind} />;

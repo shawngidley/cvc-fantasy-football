@@ -109,3 +109,8 @@
 - [x] Rebuild CVC Live Scoring as a WRC-style current-week-only head-to-head interface with matchup rail, live team totals, and side-by-side starter rows.
 - [ ] Populate or derive current-week CVC lineup assignments so Live Scoring renders real side-by-side starter rows and Tank01 totals instead of zero configured starters.
 - [ ] Verify the WRC-style CVC Live Scoring structure with populated current-week matchups on desktop and mobile before treating the live experience as complete.
+- [x] Rebuild the CVC owner Lineup page as a WRC-style mobile-first workspace with team context, live metrics, weekly decisions, and a dense real-roster lineup table.
+- [x] Show each owner-lineup player’s Tank01 live fantasy points, CVC scoring-relevant stat line, NFL matchup context, and shared lineup total.
+- [ ] Verify the WRC-style CVC owner Lineup page using an authenticated owner roster on desktop and mobile before treating the owner experience as complete.
+- [ ] Audit and rebuild every CVC route from its corresponding WRC page structure, interaction pattern, responsive layout, and information density before adding further generic interfaces.
+- [ ] Use WRC source components and route structures directly as the baseline for each CVC page, substituting only CVC-specific branding, teams, rules, authentication, and dynamic data.

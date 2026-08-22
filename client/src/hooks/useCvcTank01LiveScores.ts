@@ -6,6 +6,7 @@ const POLL_INTERVAL_MS = 30_000;
 
 type TankGame = { gameID?: string; away?: string; home?: string; gameDate?: string; gameTime?: string };
 type LiveScoreMap = Record<string, number>;
+export type LiveStatMap = Record<string, Tank01LiveStats>;
 export type CvcNflMatchup = { opponent: string; isHome: boolean; gameTime: string; gameDate: string; gameId: string };
 
 const normalize = (value: string) => value.toLowerCase().replace(/[^a-z0-9]/g, "");
@@ -29,6 +30,7 @@ export function useCvcTank01LiveScores(week: number | undefined, season: number 
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [nflMatchups, setNflMatchups] = useState<Record<string, CvcNflMatchup>>({});
+  const [statLines, setStatLines] = useState<LiveStatMap>({});
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const load = useCallback(async () => {
@@ -54,6 +56,7 @@ export function useCvcTank01LiveScores(week: number | undefined, season: number 
       setIsPolling(true);
       setError(null);
       const next: LiveScoreMap = {};
+      const nextStatLines: LiveStatMap = {};
       await Promise.all(activeGames.map(async game => {
         const response = await fetch(`${TANK01_BASE_URL}/getNFLBoxScore?gameID=${encodeURIComponent(game.gameID ?? "")}`);
         if (!response.ok) throw new Error(`Tank01 box-score request failed (${response.status})`);
@@ -61,11 +64,16 @@ export function useCvcTank01LiveScores(week: number | undefined, season: number 
         for (const stat of Object.values(payload.body?.playerStats ?? {})) {
           const name = String(stat.longName ?? "");
           const position = String(stat.pos ?? "");
-          if (name && position) next[normalize(name)] = calculateCvcFantasyPoints(stat as Tank01LiveStats, position, rules);
+          if (name && position) { next[normalize(name)] = calculateCvcFantasyPoints(stat as Tank01LiveStats, position, rules); nextStatLines[normalize(name)] = stat as Tank01LiveStats; }
         }
-        for (const [team, stat] of Object.entries(payload.body?.teamStats ?? {})) next[`dst:${normalizeTeam(team)}`] = calculateCvcFantasyPoints({ Defense: stat as unknown as Record<string, string | number> }, "DST", rules);
+        for (const [team, stat] of Object.entries(payload.body?.teamStats ?? {})) {
+          const key = `dst:${normalizeTeam(team)}`;
+          next[key] = calculateCvcFantasyPoints({ Defense: stat as unknown as Record<string, string | number> }, "DST", rules);
+          nextStatLines[key] = { Defense: stat as unknown as Record<string, string | number> };
+        }
       }));
       setScores(next);
+      setStatLines(nextStatLines);
       setLastUpdated(new Date());
       return true;
     } catch (cause) {
@@ -82,7 +90,7 @@ export function useCvcTank01LiveScores(week: number | undefined, season: number 
     return () => { active = false; if (timer.current) clearTimeout(timer.current); };
   }, [refresh]);
 
-  return { scores, nflMatchups, isPolling, lastUpdated, error };
+  return { scores, statLines, nflMatchups, isPolling, lastUpdated, error };
 }
 
 export function getCvcLivePoints(scores: LiveScoreMap, playerName: string, position: string, nflTeam: string | null | undefined): number | null {
