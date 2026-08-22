@@ -158,4 +158,5 @@
 - [x] Rebuild CVC Franchise History from the WRC champions, selector, standings, playoff results, and all-time-records hierarchy using truthful CVC configuration states until historical records are approved and imported.
 - [ ] Verify populated Tank01 player-stat and current-matchup details in the WRC-style CVC Player Profile during an active provider window.
 - [ ] Diagnose and correct the reported mismatch between published CVC features and what is visible on the live production domain; verify owner roster and Protections routes live.
+- [x] Diagnose and correct the repeated report that newly published CVC checkpoints are not visible on the live domain; verify fresh Draft Hub and Draft Recap content on both production hostnames.
 - [ ] Consolidate the completed CVC implementation into a fresh production checkpoint and verify the owner and commissioner review paths on cvcfantasyfootball.com.
