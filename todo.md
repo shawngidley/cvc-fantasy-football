@@ -162,6 +162,8 @@
 - [x] Keep current 2026 CVC salaries unchanged for Franchise and all non-Transition decisions; change salary only when Transition is selected.
 - [x] Limit Protections decisions for 2027 and 2028 contract players to Cut only; treat W as the 2026/expiring contract designation eligible for protection decisions.
 - [x] Split Protections contract display into Salary, Year, and Status columns, with Status rendered as F, R, T, or W.
+- [x] Correct Protections Status to display only actual F/R/T/W markers and leave the field blank for players without a tag.
+- [x] Limit expiring R contracts in Protections to Rookie Right as their only non-cut decision.
 - [x] Clarify the CVC Rules page so Transition salary calculations explicitly use prior-season salary rather than the displayed current-season salary.
 - [ ] Verify the WRC-style CVC Protections page using an authenticated owner franchise before treating protections parity as complete.
 - [x] Rebuild CVC Rosters from the WRC division-filtered franchise-card structure with real owner, player, contract, and public-lineup data.
@@ -181,4 +183,6 @@
 - [ ] Verify populated Tank01 player-stat and current-matchup details in the WRC-style CVC Player Profile during an active provider window.
 - [ ] Diagnose and correct the reported mismatch between published CVC features and what is visible on the live production domain; verify owner roster and Protections routes live.
 - [x] Diagnose and correct the repeated report that newly published CVC checkpoints are not visible on the live domain; verify fresh Draft Hub and Draft Recap content on both production hostnames.
+- [ ] Diagnose and correct the screenshot-confirmed stale Protections shell so the live browser renders the latest Salary, Year, Status, undo, and review-list release.
 - [ ] Consolidate the completed CVC implementation into a fresh production checkpoint and verify the owner and commissioner review paths on cvcfantasyfootball.com.
+- [ ] Confirm the latest CVC Protections checkpoint is visible on the production domain for immediate owner review.

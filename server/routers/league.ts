@@ -250,13 +250,19 @@ export const leagueRouter = router({
       const contract = contractByPlayerId.get(assignment.player_id) ?? null; const activeRights = rightsByPlayerId.get(assignment.player_id) ?? []; const history = historicalByPlayerId.get(assignment.player_id) ?? [];
       const actions: Array<"cut" | "franchise_2" | "franchise_3" | "transition" | "rookie_match" | "waiver_match"> = [];
       if (contract && !activeRights.length) {
-        actions.push("cut");
-        if (isCvcProtectionYear(contract.expires_year, season.year)) {
-          const termTier = cvcContractTier(Number(contract.salary), contract.source_marker);
-          const highTransition = history.some(isCvcHighSalaryTransition); const hasTransition = history.some(right => right.right_type === "transition"); const hasFranchise = history.some(right => right.right_type === "franchise");
-          if (!highTransition && (termTier === "two_year" ? !twoYearTagTaken : !threeYearTagTaken)) actions.push(termTier === "two_year" ? "franchise_2" : "franchise_3");
-          if (!hasTransition && !hasFranchise) actions.push("transition");
-          const marker = (contract.source_marker ?? "").toUpperCase(); if (marker.includes("R")) actions.push("rookie_match"); if (marker.includes("W")) actions.push("waiver_match");
+        const marker = (contract.source_marker ?? "").trim().toUpperCase();
+        const expiring = isCvcProtectionYear(contract.expires_year, season.year);
+        if (expiring && marker === "R") {
+          actions.push("rookie_match");
+        } else {
+          actions.push("cut");
+          if (expiring) {
+            const termTier = cvcContractTier(Number(contract.salary), contract.source_marker);
+            const highTransition = history.some(isCvcHighSalaryTransition); const hasTransition = history.some(right => right.right_type === "transition"); const hasFranchise = history.some(right => right.right_type === "franchise");
+            if (!highTransition && (termTier === "two_year" ? !twoYearTagTaken : !threeYearTagTaken)) actions.push(termTier === "two_year" ? "franchise_2" : "franchise_3");
+            if (!hasTransition && !hasFranchise) actions.push("transition");
+            if (marker === "W") actions.push("waiver_match");
+          }
         }
       }
       return { ...assignment, player: playerById.get(assignment.player_id) ?? null, contract, rights: activeRights, protectionEligibility: { availableActions: actions } };
