@@ -105,6 +105,7 @@
 - [x] Inspect the WRC reference build’s live-scoring and data-refresh implementation before selecting the matching CVC Tank01 synchronization architecture.
 - [ ] Replicate the confirmed WRC Tank01-powered live-scoring model in CVC; manual commissioner score entry must not be used.
 - [ ] Implement the confirmed CVC Tank01 mode: 30-second live browser polling during active games plus automatic persisted final-result and standings reconciliation.
+- [ ] Add isolated Tank01 finalizer coverage for the CVC correction-window timing that determines provisional live versus finalized result state.
 - [x] Replace the incomplete temporary scoring configuration with the supplied CVC QB, RB/WR/TE, PK, and D/ST scoring specification before automated Tank01 calculations run.
 - [x] Rebuild CVC Live Scoring as a WRC-style current-week-only head-to-head interface with matchup rail, live team totals, and side-by-side starter rows.
 - [ ] Populate or derive current-week CVC lineup assignments so Live Scoring renders real side-by-side starter rows and Tank01 totals instead of zero configured starters.
@@ -112,6 +113,7 @@
 - [x] Rebuild the CVC owner Lineup page as a WRC-style mobile-first workspace with team context, live metrics, weekly decisions, and a dense real-roster lineup table.
 - [x] Show each owner-lineup player’s Tank01 live fantasy points, CVC scoring-relevant stat line, NFL matchup context, and shared lineup total.
 - [ ] Verify the WRC-style CVC owner Lineup page using an authenticated owner roster on desktop and mobile before treating the owner experience as complete.
+- [x] Replace the flat CVC Lineup roster table with WRC-style position-grouped starter and bench sections, player imagery, and dense weekly/season stat columns using CVC data and truthful unavailable states.
 - [ ] Audit and rebuild every CVC route from its corresponding WRC page structure, interaction pattern, responsive layout, and information density before adding further generic interfaces.
 - [ ] Use WRC source components and route structures directly as the baseline for each CVC page, substituting only CVC-specific branding, teams, rules, authentication, and dynamic data.
 - [x] Rebuild CVC Free Agents and FAAB from the WRC player-pool structure with position tabs, sortable data-backed columns, owner bid flow, and commissioner queue context.

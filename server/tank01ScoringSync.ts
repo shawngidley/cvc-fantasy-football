@@ -4,7 +4,7 @@ import { supabase, unwrap } from "./supabase";
 
 const normalize = (value: string) => value.toLowerCase().replace(/[^a-z0-9]/g, "");
 const normalizeTeam = (value: string) => ({ kan: "kc", tam: "tb", arz: "ari", jax: "jac", was: "wsh" }[value.toLowerCase()] ?? value.toLowerCase());
-const correctionWindowClosed = (now = new Date()) => now.getUTCDay() === 5 && now.getUTCHours() >= 16;
+export const correctionWindowClosed = (now = new Date()) => now.getUTCDay() === 5 && now.getUTCHours() >= 16;
 
 export type Tank01SyncSummary = {
   status: "skipped" | "updated" | "finalized";
