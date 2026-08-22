@@ -194,5 +194,5 @@
 - [x] Diagnose and correct the repeated report that newly published CVC checkpoints are not visible on the live domain; verify fresh Draft Hub and Draft Recap content on both production hostnames.
 - [ ] Diagnose and correct the screenshot-confirmed stale Protections shell so the live browser renders the latest Salary, Year, Status, undo, and review-list release.
 - [ ] Consolidate the completed CVC implementation into a fresh production checkpoint and verify the owner and commissioner review paths on cvcfantasyfootball.com.
-- [ ] Create or connect a private GitHub repository for the CVC Fantasy Football project and push the current application source.
+- [x] Create or connect a private GitHub repository for the CVC Fantasy Football project and push the current application source.
 - [ ] Confirm the latest CVC Protections checkpoint is visible on the production domain for immediate owner review.
