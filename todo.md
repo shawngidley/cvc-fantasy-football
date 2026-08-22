@@ -118,3 +118,5 @@
 - [x] Port the WRC centered team-selector and PIN login structure into CVC while retaining the secure independent CVC owner-session backend.
 - [x] Rebuild the CVC Auction Room as a WRC Draft Hub-style workspace with sticky auction tabs, public board, player pool, protections context, and a protected commissioner console.
 - [ ] Verify the WRC Draft Hub-style commissioner auction console using an authenticated commissioner session and real auction state before treating auction parity as complete.
+- [x] Rebuild the CVC Protections page from the WRC owner-workspace structure while preserving CVC contract cuts, franchise/transition tags, and restricted-right rules.
+- [ ] Verify the WRC-style CVC Protections page using an authenticated owner franchise before treating protections parity as complete.
