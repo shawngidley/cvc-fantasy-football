@@ -11,6 +11,10 @@ export function cvcFranchiseTerms(tier: CvcContractTier) {
   return tier === "two_year" ? 2 : 3;
 }
 
+export function cvcPriorSeasonSalary(displayedCurrentSalary: number) {
+  return Math.max(0, displayedCurrentSalary - 1);
+}
+
 export function cvcTransitionSalary(salary: number, tier: CvcContractTier) {
   return tier === "two_year" ? salary * 2 : salary + 10;
 }

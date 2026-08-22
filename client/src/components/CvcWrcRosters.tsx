@@ -10,13 +10,10 @@ const posTone: Record<string, string> = { QB: "bg-violet-100 text-violet-800", R
 const order: Record<string, number> = { QB: 0, RB: 1, WR: 2, TE: 3, K: 4, DST: 5 };
 
 function contractLabel(item: any) {
-  const right = item.rights?.[0]?.right_type;
-  if (right === "franchise") return "Franchise";
-  if (right === "transition") return "Transition";
-  if (right === "rookie_match") return "Rookie right";
-  if (right === "waiver_match") return "Waiver right";
-  const status = item.contract?.contract_status;
-  return status ? status.replaceAll("_", " ") : "—";
+  const year = item.contract?.expires_year;
+  if (!year) return "—";
+  const marker = (item.contract?.source_marker ?? "").trim().toUpperCase();
+  return `${year}${marker.startsWith("F") ? "-F" : ""}`;
 }
 
 function RosterCard({ franchise, mine }: { franchise: any; mine?: boolean }) {
@@ -26,8 +23,8 @@ function RosterCard({ franchise, mine }: { franchise: any; mine?: boolean }) {
     <div className="h-1.5 bg-cvc-accent" />
     <div className="flex items-center gap-3 px-4 pb-3 pt-4"><TeamLogo name={franchise.name} abbreviation={franchise.abbreviation} logoUrl={franchise.logo_url} size="md" className="rounded-lg border-cvc-deep/20"/><div className="min-w-0 flex-1"><p className="truncate font-display text-xl uppercase tracking-[.04em] text-cvc-deep">{franchise.name}</p><p className="mt-0.5 text-xs text-slate-500">{franchise.owner} · {players.length} players</p></div>{mine ? <span className="rounded bg-cvc-accent px-2 py-1 text-[9px] font-bold uppercase tracking-[.09em] text-cvc-deep">My team</span> : null}<Link href={`/lineup/${franchise.id}`} className="rounded bg-cvc-deep px-2 py-1.5 text-[9px] font-bold uppercase tracking-[.08em] text-white hover:bg-cvc-accent hover:text-cvc-deep">View lineup</Link></div>
     <div className="border-t border-slate-200">
-      <div className="grid grid-cols-[2.25rem_minmax(0,1fr)_2.25rem_5.5rem] gap-2 bg-slate-100 px-4 py-2 text-[9px] font-black uppercase tracking-[.08em] text-slate-500"><span>Pos</span><span>Player</span><span>NFL</span><span>Contract</span></div>
-      {roster.isLoading ? <p className="px-4 py-8 text-center text-sm text-slate-400">Loading roster…</p> : players.length ? players.map((item, index) => <div className={index % 2 ? "grid grid-cols-[2.25rem_minmax(0,1fr)_2.25rem_5.5rem] items-center gap-2 bg-slate-50 px-4 py-2" : "grid grid-cols-[2.25rem_minmax(0,1fr)_2.25rem_5.5rem] items-center gap-2 bg-white px-4 py-2"} key={item.id}><span className={`rounded px-1.5 py-0.5 text-center text-[10px] font-bold ${posTone[item.player?.position] ?? "bg-slate-100 text-slate-700"}`}>{item.player?.position ?? "—"}</span><Link href={`/player/${item.player_id}`} className="min-w-0 truncate text-sm font-semibold text-cvc-deep hover:text-cvc-accent">{item.player?.display_name ?? "Player unavailable"}</Link><span className="text-xs font-semibold text-slate-500">{item.player?.nfl_team ?? "FA"}</span><span className="min-w-0 text-right text-[10px] font-bold uppercase leading-4 text-slate-600">{item.contract ? <><span className="block text-cvc-deep">${Number(item.contract.salary).toFixed(0)}</span><span className="block truncate">{contractLabel(item)}</span></> : "—"}</span></div>) : <p className="px-4 py-8 text-center text-sm text-slate-400">No active roster assignments.</p>}
+      <div className="grid grid-cols-[2.25rem_minmax(0,1fr)_2.25rem_3.75rem_4.5rem] gap-2 bg-slate-100 px-4 py-2 text-[9px] font-black uppercase tracking-[.08em] text-slate-500"><span>Pos</span><span>Player</span><span>NFL</span><span className="text-right">Salary</span><span className="text-right">Contract</span></div>
+      {roster.isLoading ? <p className="px-4 py-8 text-center text-sm text-slate-400">Loading roster…</p> : players.length ? players.map((item, index) => <div className={index % 2 ? "grid grid-cols-[2.25rem_minmax(0,1fr)_2.25rem_3.75rem_4.5rem] items-center gap-2 bg-slate-50 px-4 py-2" : "grid grid-cols-[2.25rem_minmax(0,1fr)_2.25rem_3.75rem_4.5rem] items-center gap-2 bg-white px-4 py-2"} key={item.id}><span className={`rounded px-1.5 py-0.5 text-center text-[10px] font-bold ${posTone[item.player?.position] ?? "bg-slate-100 text-slate-700"}`}>{item.player?.position ?? "—"}</span><Link href={`/player/${item.player_id}`} className="min-w-0 truncate text-sm font-semibold text-cvc-deep hover:text-cvc-accent">{item.player?.display_name ?? "Player unavailable"}</Link><span className="text-xs font-semibold text-slate-500">{item.player?.nfl_team ?? "FA"}</span><span className="text-right text-[10px] font-bold text-cvc-deep">{item.contract ? `$${Number(item.contract.salary).toFixed(0)}` : "—"}</span><span className="text-right text-[10px] font-bold uppercase text-slate-600">{contractLabel(item)}</span></div>) : <p className="px-4 py-8 text-center text-sm text-slate-400">No active roster assignments.</p>}
     </div>
   </section>;
 }

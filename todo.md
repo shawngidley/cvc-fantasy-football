@@ -151,10 +151,13 @@
 - [x] Rebuild the CVC Protections page from the WRC owner-workspace structure while preserving CVC contract cuts, franchise/transition tags, and restricted-right rules.
 - [x] Replace CVC Protections action buttons with one owner decision dropdown per player that exposes only currently eligible cut, franchise, transition, rookie-right, or waiver-right actions.
 - [x] Enforce the supplied CVC Transition and Franchise contract rules: term eligibility, salary adjustments, future tag restrictions, one franchise tag per 2-year and 3-year contract tier, and off-season franchise/transition trade handling.
+- [ ] Order CVC Protections as QB, RB, WR, TE, K, D/ST with descending salary within each group and render player portraits in the position bubble.
+- [x] Calculate CVC Transition salary from prior-season salary basis, not the already updated 2026 displayed contract salary.
 - [ ] Verify the WRC-style CVC Protections page using an authenticated owner franchise before treating protections parity as complete.
 - [x] Rebuild CVC Rosters from the WRC division-filtered franchise-card structure with real owner, player, contract, and public-lineup data.
 - [x] Add a live Contract column to CVC Roster player tables using active contract and protection-right data.
 - [x] Sort CVC Roster players by position and then descending live contract salary within each position group.
+- [x] Render CVC Roster columns in POS, PLAYER, NFL, SALARY, CONTRACT order; show actual contract end year plus franchise marker (for example 2028-F) and place dollar salary in Salary.
 - [x] Rebuild CVC Transactions from the WRC filtered add, drop, trade, and FAAB activity-feed structure with real CVC audit-aware transaction data.
 - [x] Rebuild CVC Schedule & Results from the WRC combined current-week, final-results, future-schedule, and owner-filter game-center structure using Tank01-only result data.
 - [x] Rebuild CVC Trades from the WRC owner proposal and trade-inbox workspace while preserving CVC player, FAAB, and commissioner-execution rules.
