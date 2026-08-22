@@ -84,6 +84,9 @@
 - [x] Provide commissioner configuration for per-franchise starting auction budgets, with each budget validated at the confirmed $115 cap.
 - [x] Make the CVC auction close commissioner-controlled, with no automatic bidding timer and an explicit award action required to record each sale.
 - [x] Let the commissioner select the nominating franchise manually for every CVC auction nomination.
+- [ ] Verify in the browser as Jonas that the Auction Night Console no longer shows a nominating-franchise selector and Nominate Player starts a legal nomination.
+- [ ] Verify the simplified nomination workflow as Administrator, including the server-side nominating-franchise attribution fallback when no franchise is assigned.
+- [ ] Publish the simplified CVC Auction Night Console after Jonas and Administrator nomination-flow verification.
 - [x] Allow the commissioner to record any legal winning bid above $1 rather than enforcing fixed bid increments.
 - [ ] Add CVC auction happy-path coverage for commissioner budget setup, manual nomination, award, and correction workflows.
 - [x] Add isolated CVC auction coverage for regular-pool eligibility and the 15-player reserve calculation without mutating live league data.

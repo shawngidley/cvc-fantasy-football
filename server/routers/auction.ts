@@ -57,12 +57,14 @@ export const auctionRouter = router({
     await commissioner(c.user.openId); const { draft } = await context();
     return unwrap(await supabase.from("auction_team_state").upsert({ draft_id: draft.id, franchise_id: input.franchiseId, starting_budget: input.startingBudget }, { onConflict: "draft_id,franchise_id" }).select().single());
   }),
-  nominate: protectedProcedure.input(z.object({ playerId: z.string().uuid(), nominatingFranchiseId: z.string().uuid() })).mutation(async ({ ctx: c, input }) => {
-    await commissioner(c.user.openId); const auctionContext = await context(); const { draft, season } = auctionContext;
+  nominate: protectedProcedure.input(z.object({ playerId: z.string().uuid() })).mutation(async ({ ctx: c, input }) => {
+    const actor = await commissioner(c.user.openId); const auctionContext = await context(); const { draft, season } = auctionContext;
     const existing = unwrap(await supabase.from("auction_nomination").select("id").eq("draft_id", draft.id).eq("status", "active").maybeSingle());
     if (existing) throw new TRPCError({ code: "CONFLICT", message: "Award or pass the active player first." });
-    const nominatorState = unwrap(await supabase.from("auction_team_state").select("franchise_id").eq("draft_id", draft.id).eq("franchise_id", input.nominatingFranchiseId).maybeSingle());
-    if (!nominatorState) throw new TRPCError({ code: "BAD_REQUEST", message: "Set this franchise’s starting budget before using it as a nominator." });
+    const ownedFranchise = unwrap(await supabase.from("franchise").select("id").eq("current_owner_id", actor.id).eq("is_active", true).maybeSingle());
+    const nominatorState = unwrap(await supabase.from("auction_team_state").select("franchise_id").eq("draft_id", draft.id).eq("franchise_id", ownedFranchise?.id ?? "").maybeSingle())
+      ?? unwrap(await supabase.from("auction_team_state").select("franchise_id").eq("draft_id", draft.id).order("franchise_id").limit(1).maybeSingle());
+    if (!nominatorState) throw new TRPCError({ code: "BAD_REQUEST", message: "Configure at least one franchise budget before starting the CVC auction." });
     if (!season) throw new TRPCError({ code: "NOT_FOUND", message: "CVC season was not found." });
     const rostered = unwrap(await supabase.from("roster_assignment").select("id").eq("season_id", season.id).eq("player_id", input.playerId).is("released_at", null).limit(1));
     if ((rostered ?? []).length) throw new TRPCError({ code: "BAD_REQUEST", message: "Rostered players are not auction eligible." });
@@ -70,7 +72,7 @@ export const auctionRouter = router({
     if (!player || player.provider === "placeholder") throw new TRPCError({ code: "BAD_REQUEST", message: "Only imported CVC player records are auction eligible." });
     if (!isCvcAuctionPosition(player.position)) throw new TRPCError({ code: "BAD_REQUEST", message: "Only QB, RB, WR, TE, K, and D/ST players are eligible for the CVC auction." });
     if (((player.metadata ?? {}) as { is_rookie?: boolean }).is_rookie) throw new TRPCError({ code: "BAD_REQUEST", message: "Rookies are not eligible for the regular CVC auction." });
-    return unwrap(await supabase.from("auction_nomination").insert({ draft_id: draft.id, player_id: input.playerId, nominating_franchise_id: input.nominatingFranchiseId }).select().single());
+    return unwrap(await supabase.from("auction_nomination").insert({ draft_id: draft.id, player_id: input.playerId, nominating_franchise_id: nominatorState.franchise_id }).select().single());
   }),
   award: protectedProcedure.input(z.object({ franchiseId: z.string().uuid(), amount: z.number().int().min(1) })).mutation(async ({ ctx: c, input }) => {
     const actor = await commissioner(c.user.openId); const { season, draft } = await context();
