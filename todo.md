@@ -33,15 +33,15 @@
 - [ ] Provide a commissioner spreadsheet import template for player, rostered-franchise, and rookie-status data so CVC can assemble the auction pool automatically.
 - [x] Prepare the blank CVC auction player-pool spreadsheet template and document the player eligibility import rules.
 - [ ] Build the commissioner-operated CVC auction console with projected public board, manual nomination and award controls, budget ledger, roster safeguards, correction flow, and audit history.
-- [ ] Replace Manus-based login with independent CVC Supabase authentication and map CVC member, commissioner, and administrator access without exposing Manus sign-in to league users.
-- [ ] Inspect and reproduce the WRC login experience for CVC using CVC-controlled authentication and role data.
-- [ ] Implement a CVC owner-selection dropdown and PIN login that grants owner, commissioner, or administrator access without Manus sign-in.
-- [ ] Initialize the CVC owner selector login with a commissioner-resettable four-digit default PIN of 1234.
+- [x] Complete removal of remaining legacy sign-in dependencies from active CVC access paths.
+- [x] Inspect and reproduce the WRC login experience for CVC using CVC-controlled authentication and role data.
+- [x] Implement a CVC owner-selection dropdown and PIN login that grants owner, commissioner, or administrator access without Manus sign-in.
+- [x] Add commissioner or administrator PIN reset controls to the CVC owner-selector access model.
 - [ ] Configure Jonas and Justin as CVC co-commissioners and add a distinct administrator account for the project owner through the owner-selector/PIN access model.
 - [ ] Map Jonas to The Super Snuffleupagus and Justin to DS Warteaters as the confirmed CVC co-commissioner franchise assignments.
 - [ ] Create the separate CVC administrator owner-selector account with the display name Administrator.
-- [ ] Build a WRC-style CVC owner Settings page where authenticated owners can securely change their own four-digit PIN.
-- [ ] Model the CVC owner Settings page on WRC with Team Information, device sign-in readiness, Change PIN, and Team Logo management cards.
+- [x] Build a WRC-style CVC owner Settings page where authenticated owners can securely change their own four-digit PIN.
+- [ ] Complete real CVC Owner Settings logo management and device-sign-in setup readiness controls.
 - [x] Replace the current placeholder owner and franchise rows with the validated 2026 CVC owner and franchise records before assigning co-commissioner roles.
 - [x] Apply the approved 2026 CVC owner-access mapping: Jonas/Super Snuffleupagus and Justin/DS Warteaters as co-commissioners, plus Administrator as standalone administrator.
 - [ ] Inspect and map the supplied CVCFootballFolder(2026) workbook into CVC owner, franchise, roster, player-pool, and auction-import records.
@@ -70,7 +70,7 @@
 - [ ] Group the imported CVC schedule UI into chronological week sections so each week’s five matchups display together.
 - [ ] Verify the public Schedule & Results page renders imported matchups in chronological week groups.
 - [ ] Replace placeholder standings names, divisions, records, and foundation copy with the imported CVC franchise and season data.
-- [ ] Complete independent owner-PIN session resolution so the Protections page can load the authenticated owner’s imported franchise roster.
+- [x] Complete independent owner-PIN session resolution so the Protections page can load the authenticated owner’s imported franchise roster.
 - [x] Allow owners to cut contracted players through Protections with an audited roster release and free-agent transition.
 - [x] Enforce the confirmed CVC contract-cut outcome: no dead-cap penalty, immediate roster release, and normal unrestricted free-agent or auction eligibility.
 - [x] Allow owners to assign Franchise and Transition tags through Protections using CVC tier, term, and availability validation.
@@ -84,6 +84,6 @@
 - [ ] Allow the commissioner to record any legal winning bid above $1 rather than enforcing fixed bid increments.
 - [x] Document the CVC in-room auction operating playbook, control surface, reserve formula, and end-of-draft reconciliation workflow.
 - [x] Return live imported contracts and active protection-right records with each CVC franchise roster response.
-- [ ] Connect the Protections release control to independent CVC owner-PIN access before it is available to league owners.
+- [x] Connect the Protections release control to independent CVC owner-PIN access before it is available to league owners.
 - [x] Complete the waiver-right workflow after importing historical waiver acquisition eligibility or adding a commissioner-reviewed eligibility path.
 - [ ] Add happy-path CVC tests for franchise tags, transition tags, rookie rights, and a verified waiver-right candidate.

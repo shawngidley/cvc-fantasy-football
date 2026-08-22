@@ -6,6 +6,7 @@ import LeaguePage, { PublicFranchiseLineup } from "@/pages/LeaguePages";
 import Login from "@/pages/Login";
 import Auction from "@/pages/Auction";
 import Protections from "@/pages/Protections";
+import OwnerSettings from "@/pages/OwnerSettings";
 import { Route, Switch, useLocation } from "wouter";
 import ErrorBoundary from "./components/ErrorBoundary";
 import { ThemeProvider } from "./contexts/ThemeContext";
@@ -28,6 +29,7 @@ function Router() {
       <Route path="/lineup"><ProtectedPage><LeaguePage kind="lineup" /></ProtectedPage></Route>
       <Route path="/lineup/:franchiseId" component={PublicFranchiseLineup} />
       <Route path="/protections"><ProtectedPage><Protections /></ProtectedPage></Route>
+      <Route path="/owner-settings"><ProtectedPage><OwnerSettings /></ProtectedPage></Route>
       <Route path="/draft" component={() => <LeaguePage kind="draft" />} />
       <Route path="/auction" component={() => <Auction />} />
       <Route path="/auction/control"><ProtectedPage commissioner><Auction controls /></ProtectedPage></Route>

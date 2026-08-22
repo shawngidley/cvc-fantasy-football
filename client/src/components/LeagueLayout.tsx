@@ -1,4 +1,4 @@
-import { useAuth } from "@/_core/hooks/useAuth";
+import { useCvcOwnerAuth } from "@/hooks/useCvcOwnerAuth";
 import { leagueMeta } from "@/lib/leagueData";
 import { cn } from "@/lib/utils";
 import { Menu, ShieldCheck, UserRound } from "lucide-react";
@@ -23,12 +23,13 @@ const moreLinks = [
   { href: "/free-agents", label: "Free agents" },
   { href: "/history", label: "History" },
   { href: "/money", label: "League finance" },
+  { href: "/owner-settings", label: "Owner settings" },
   { href: "/nfl-sites", label: "NFL sites" },
 ];
 
 export function LeagueLayout({ children }: { children: React.ReactNode }) {
   const [location] = useLocation();
-  const { user } = useAuth();
+  const { owner } = useCvcOwnerAuth();
   const [open, setOpen] = useState(false);
 
   return (
@@ -53,9 +54,9 @@ export function LeagueLayout({ children }: { children: React.ReactNode }) {
           </nav>
 
           <div className="ml-auto flex items-center gap-2">
-            <Link href={user ? "/lineup" : "/login"} className="cvc-owner-link">
+            <Link href={owner ? (owner.franchise ? "/lineup" : "/settings") : "/login"} className="cvc-owner-link">
               <UserRound size={15} />
-              <span className="hidden sm:inline">{user ? "My lineup" : "Owner sign in"}</span>
+              <span className="hidden sm:inline">{owner ? (owner.franchise ? "My lineup" : "Commissioner") : "Owner sign in"}</span>
             </Link>
             <button className="cvc-menu-button lg:hidden" onClick={() => setOpen(value => !value)} aria-expanded={open} aria-label="Toggle league menu">
               <Menu size={20} />

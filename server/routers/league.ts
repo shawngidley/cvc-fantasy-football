@@ -8,24 +8,22 @@ import { supabase, unwrap } from "../supabase";
 type CurrentUser = { openId: string };
 
 async function getOwnerAccess(user: CurrentUser) {
+  const cvcOwnerId = user.openId.startsWith("cvc:") ? user.openId.slice(4) : null;
+  if (cvcOwnerId) {
+    return unwrap(await supabase
+      .from("owner")
+      .select("id, league_id, display_name, role")
+      .eq("id", cvcOwnerId)
+      .eq("is_active", true)
+      .limit(1)
+      .maybeSingle());
+  }
   const owner = unwrap(await supabase
     .from("owner")
     .select("id, league_id, display_name, role")
     .eq("user_open_id", user.openId)
     .limit(1)
     .maybeSingle());
-  if (!owner && ENV.ownerOpenId && user.openId === ENV.ownerOpenId) {
-    const commissioner = unwrap(await supabase
-      .from("owner")
-      .select("id, league_id, display_name, role")
-      .eq("display_name", "Commissioner Placeholder")
-      .limit(1)
-      .maybeSingle());
-    if (commissioner) {
-      unwrap(await supabase.from("owner").update({ user_open_id: user.openId }).eq("id", commissioner.id).select("id").single());
-      return commissioner;
-    }
-  }
   return owner;
 }
 

@@ -11,7 +11,8 @@ async function context() {
   return { season, draft };
 }
 async function commissioner(openId: string) {
-  const owner = unwrap(await supabase.from("owner").select("id, role").eq("user_open_id", openId).maybeSingle());
+  const ownerId = openId.startsWith("cvc:") ? openId.slice(4) : null;
+  const owner = unwrap(await supabase.from("owner").select("id, role").eq(ownerId ? "id" : "user_open_id", ownerId ?? openId).eq("is_active", true).maybeSingle());
   if (!owner || !["commissioner", "administrator"].includes(owner.role)) throw new TRPCError({ code: "FORBIDDEN", message: "Commissioner access is required." });
   return owner;
 }

@@ -1,6 +1,6 @@
 import type { CreateExpressContextOptions } from "@trpc/server/adapters/express";
 import type { User } from "../../drizzle/schema";
-import { sdk } from "./sdk";
+import { getCvcOwnerSession } from "../cvcOwnerAuth";
 
 export type TrpcContext = {
   req: CreateExpressContextOptions["req"];
@@ -14,8 +14,22 @@ export async function createContext(
   let user: User | null = null;
 
   try {
-    user = await sdk.authenticateRequest(opts.req);
-  } catch (error) {
+    const cvcSession = await getCvcOwnerSession(opts.req);
+    if (cvcSession) {
+      const now = new Date();
+      user = {
+        id: 0,
+        openId: `cvc:${cvcSession.owner.id}`,
+        name: cvcSession.owner.display_name,
+        email: null,
+        loginMethod: "cvc_pin",
+        role: ["commissioner", "administrator"].includes(cvcSession.owner.role) ? "admin" : "user",
+        createdAt: now,
+        updatedAt: now,
+        lastSignedIn: now,
+      };
+    }
+  } catch {
     // Authentication is optional for public procedures.
     user = null;
   }
