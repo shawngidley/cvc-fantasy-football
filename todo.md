@@ -1,0 +1,21 @@
+# Project TODO
+
+- [ ] Align project title, metadata, and all visible league labels to WRC while retaining CVC-neutral semantic design tokens.
+- [x] Create the CVC-neutral sports-stadium visual system with dark/accent tokens, Barlow Condensed and DM Sans typography, themed backgrounds, sticky navigation, ticker, cards, and tables.
+- [x] Build the full multi-page WRC route shell with public and protected route boundaries.
+- [x] Create Supabase-ready configurable league-domain tables for league, season, franchise, owner, roster slots, scoring, scheduling, matchups, players, rosters, transactions, drafts, waivers, rules, and financial entries.
+- [ ] Add safe placeholder seed data and demonstrable empty/loading states for every league module.
+- [x] Establish owner, commissioner, and administrator roles with protected lineup, settings, and commissioner-management flows.
+- [ ] Implement standings, schedule/results, roster, lineup, live-scoring, and player-detail views against the configurable data layer.
+- [ ] Implement a provider-neutral NFL data adapter boundary with no hard-coded live-data provider dependency.
+- [ ] Implement draft hub, draft lottery, protections, draft recap, and configuration-driven draft settings.
+- [ ] Implement transactions, trades, free agents, FAAB waivers, audit history, and commissioner override controls.
+- [ ] Implement commissioner configuration forms and import templates for teams, owners, scoring, roster slots, schedule, rules, and finances.
+- [ ] Add responsive behavior, accessibility states, validation, and error handling throughout the application.
+- [ ] Write and run Vitest coverage for routes, role permissions, configuration validation, and core league-domain behavior.
+- [x] Verify the visual result across desktop and mobile previews, then prepare league-data onboarding guidance.
+- [x] Correct all new-project identity, metadata, placeholder copy, and data namespaces to CVC Fantasy Football; use WRC solely as a non-modified reference implementation.
+- [x] Fix the public franchise lineup route so it renders the selected franchise lineup rather than the roster directory, and verify every page-map route resolves to its intended view.
+- [ ] Add explicit loading, empty, and error states across every CVC league module page and verify them in the browser.
+- [x] Create commissioner onboarding guidance for setup order, required CVC inputs, CSV templates, role mapping, placeholder replacement, and live-data activation.
+- [x] Run route-by-route verification for the full CVC page map, including public and protected variants, and document or fix any mismatches.

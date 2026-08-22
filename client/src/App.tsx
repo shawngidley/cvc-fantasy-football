@@ -1,20 +1,51 @@
 import { Toaster } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import NotFound from "@/pages/NotFound";
-import { Route, Switch } from "wouter";
+import { ProtectedPage } from "@/components/ProtectedPage";
+import LeaguePage, { PublicFranchiseLineup } from "@/pages/LeaguePages";
+import Login from "@/pages/Login";
+import { Route, Switch, useLocation } from "wouter";
 import ErrorBoundary from "./components/ErrorBoundary";
 import { ThemeProvider } from "./contexts/ThemeContext";
-import Home from "./pages/Home";
+import { useEffect } from "react";
+
+function ScrollToTop() {
+  const [location] = useLocation();
+  useEffect(() => { window.scrollTo({ top: 0, left: 0, behavior: "instant" }); }, [location]);
+  return null;
+}
 
 function Router() {
-  // make sure to consider if you need authentication for certain routes
   return (
-    <Switch>
-      <Route path={"/"} component={Home} />
-      <Route path={"/404"} component={NotFound} />
-      {/* Final fallback route */}
+    <><ScrollToTop /><Switch>
+      <Route path="/" component={() => <LeaguePage kind="standings" />} />
+      <Route path="/login" component={Login} />
+      <Route path="/standings" component={() => <LeaguePage kind="standings" />} />
+      <Route path="/live" component={() => <LeaguePage kind="live" />} />
+      <Route path="/rosters" component={() => <LeaguePage kind="rosters" />} />
+      <Route path="/lineup"><ProtectedPage><LeaguePage kind="lineup" /></ProtectedPage></Route>
+      <Route path="/lineup/:franchiseId" component={PublicFranchiseLineup} />
+      <Route path="/draft" component={() => <LeaguePage kind="draft" />} />
+      <Route path="/draft-lottery" component={() => <LeaguePage kind="draft-lottery" />} />
+      <Route path="/draft-recap" component={() => <LeaguePage kind="draft-recap" />} />
+      <Route path="/rundown" component={() => <LeaguePage kind="rundown" />} />
+      <Route path="/news" component={() => <LeaguePage kind="news" />} />
+      <Route path="/transactions" component={() => <LeaguePage kind="transactions" />} />
+      <Route path="/trades" component={() => <LeaguePage kind="trades" />} />
+      <Route path="/free-agents" component={() => <LeaguePage kind="free-agents" />} />
+      <Route path="/results" component={() => <LeaguePage kind="results" />} />
+      <Route path="/schedule" component={() => <LeaguePage kind="results" />} />
+      <Route path="/history" component={() => <LeaguePage kind="history" />} />
+      <Route path="/playoffs" component={() => <LeaguePage kind="playoffs" />} />
+      <Route path="/rules" component={() => <LeaguePage kind="rules" />} />
+      <Route path="/nfl-sites" component={() => <LeaguePage kind="nfl-sites" />} />
+      <Route path="/money" component={() => <LeaguePage kind="money" />} />
+      <Route path="/player/:playerName" component={() => <LeaguePage kind="player" />} />
+      <Route path="/settings"><ProtectedPage commissioner><LeaguePage kind="settings" /></ProtectedPage></Route>
+      <Route path="/commissioner"><ProtectedPage commissioner><LeaguePage kind="settings" /></ProtectedPage></Route>
+      <Route path="/404" component={NotFound} />
       <Route component={NotFound} />
-    </Switch>
+    </Switch></>
   );
 }
 
@@ -26,10 +57,7 @@ function Router() {
 function App() {
   return (
     <ErrorBoundary>
-      <ThemeProvider
-        defaultTheme="light"
-        // switchable
-      >
+      <ThemeProvider defaultTheme="dark">
         <TooltipProvider>
           <Toaster />
           <Router />
