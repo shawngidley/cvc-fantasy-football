@@ -98,6 +98,9 @@
 - [x] Add bounded live player-name and position filtering to CVC Free Agents and commissioner Auction Room eligibility selection.
 - [x] Restrict CVC Free Agents to QB, RB, WR, TE, K, and D/ST only; exclude individual defensive-player positions from server eligibility and UI filters.
 - [x] Enforce CVC Auction Players server-side eligibility as QB, RB, WR, TE, K, and D/ST only, rejecting individual defensive positions from player-pool queries and nominations.
+- [ ] Verify in the browser as Jonas on the standard Auction Room page that the Auction Night Console and Nominate Player controls are visible; correct any remaining role-gating issue.
+- [ ] Verify in the browser as Administrator on the standard Auction Room page that commissioner controls are visible without a separate control URL.
+- [ ] Publish and confirm the live Auction Room role-aware console update after authenticated commissioner verification.
 - [x] Restrict Auction Room position-filter UI to QB, RB, WR, TE, K, and D/ST only and visually verify no individual defensive players appear.
 - [x] Add bounded live player-directory search and position filtering with stable public player-detail navigation.
 - [x] Add an owner-PIN-protected CVC FAAB waiver workflow with commissioner-opened periods, owner claim submission, audited resolution, roster assignment, and transaction reconciliation.
@@ -166,6 +169,7 @@
 - [x] Correct Protections Status to display only actual F/R/T/W markers and leave the field blank for players without a tag.
 - [x] Remove the Cut Penalty summary header from the CVC Protections workspace.
 - [x] Limit expiring R contracts in Protections to Rookie Right as their only non-cut decision.
+- [x] Limit expiring W contracts in Protections to Waiver Right as their only non-cut decision.
 - [x] Clarify the CVC Rules page so Transition salary calculations explicitly use prior-season salary rather than the displayed current-season salary.
 - [ ] Verify the WRC-style CVC Protections page using an authenticated owner franchise before treating protections parity as complete.
 - [x] Rebuild CVC Rosters from the WRC division-filtered franchise-card structure with real owner, player, contract, and public-lineup data.

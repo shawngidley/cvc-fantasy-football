@@ -254,6 +254,8 @@ export const leagueRouter = router({
         const expiring = isCvcProtectionYear(contract.expires_year, season.year);
         if (expiring && marker === "R") {
           actions.push("rookie_match");
+        } else if (expiring && marker === "W") {
+          actions.push("waiver_match");
         } else {
           actions.push("cut");
           if (expiring) {
@@ -261,7 +263,6 @@ export const leagueRouter = router({
             const highTransition = history.some(isCvcHighSalaryTransition); const hasTransition = history.some(right => right.right_type === "transition"); const hasFranchise = history.some(right => right.right_type === "franchise");
             if (!highTransition && (termTier === "two_year" ? !twoYearTagTaken : !threeYearTagTaken)) actions.push(termTier === "two_year" ? "franchise_2" : "franchise_3");
             if (!hasTransition && !hasFranchise) actions.push("transition");
-            if (marker === "W") actions.push("waiver_match");
           }
         }
       }
@@ -699,7 +700,7 @@ export const leagueRouter = router({
     const wasWaiverAcquired = (unwrap(waiverTransactions) ?? []).some(transaction => (transaction.details as { player_id?: string } | null)?.player_id === input.playerId);
     const isCommissioner = ["commissioner", "administrator"].includes(actor.role);
     if (input.waiverEligibilityOverride && !isCommissioner) throw new TRPCError({ code: "FORBIDDEN", message: "Only a CVC commissioner may approve legacy waiver eligibility." });
-    if (input.rightType === "waiver_match" && !wasWaiverAcquired && !input.waiverEligibilityOverride) throw new TRPCError({ code: "BAD_REQUEST", message: "A waiver matching right requires a recorded CVC waiver or free-agent acquisition, or commissioner-reviewed legacy eligibility." });
+    if (input.rightType === "waiver_match" && marker !== "W" && !wasWaiverAcquired && !input.waiverEligibilityOverride) throw new TRPCError({ code: "BAD_REQUEST", message: "A waiver matching right requires a recorded CVC waiver or free-agent acquisition, or commissioner-reviewed legacy eligibility." });
     if (input.rightType === "waiver_match" && (unwrap(waiverRights) ?? []).length) throw new TRPCError({ code: "BAD_REQUEST", message: "Each franchise may hold one active waiver matching right per season." });
     const waiverEligibilitySource = wasWaiverAcquired ? "recorded_transaction" : input.waiverEligibilityOverride ? "commissioner_review" : null;
     const right = unwrap(await supabase.from("player_right").insert({ season_id: season.id, franchise_id: franchise.id, player_id: input.playerId, right_type: input.rightType, salary_basis: Number(activeContract.salary), expires_year: activeContract.expires_year ?? season.year, metadata: { original_franchise_id: franchise.id, designated_season: season.year, source_marker: activeContract.source_marker, waiver_eligibility_source: waiverEligibilitySource } }).select("id").single());
