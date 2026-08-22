@@ -8,6 +8,8 @@ export function calculateAuctionLegalMaxBid(startingBudget: number, spentBudget:
 }
 
 const playerIdentity = (name: string | null | undefined) => (name ?? "").trim().toLowerCase().replace(/\s+/g, " ");
+export const CVC_AUCTION_POSITIONS = ["QB", "RB", "WR", "TE", "K", "DST", "D/ST"] as const;
+const isCvcAuctionPosition = (position: string | null | undefined) => CVC_AUCTION_POSITIONS.includes((position ?? "").toUpperCase() as typeof CVC_AUCTION_POSITIONS[number]);
 
 async function context() {
   const season = unwrap(await supabase.from("season").select("id, league_id").order("year", { ascending: false }).limit(1).single());
@@ -33,7 +35,8 @@ export const auctionRouter = router({
   eligiblePlayers: publicProcedure.input(z.object({ search: z.string().trim().max(64).optional(), position: z.string().trim().max(12).optional(), limit: z.number().int().min(1).max(150).optional() }).optional()).query(async ({ input }) => {
     const { season, draft } = await context();
     const limit = input?.limit ?? 75;
-    let playerQuery = supabase.from("player").select("id, display_name, position, nfl_team, status, metadata").neq("provider", "placeholder").order("display_name").limit(limit + 220);
+    if (input?.position && !isCvcAuctionPosition(input.position)) return [];
+    let playerQuery = supabase.from("player").select("id, display_name, position, nfl_team, status, metadata").neq("provider", "placeholder").in("position", input?.position ? [input.position] : CVC_AUCTION_POSITIONS).order("display_name").limit(limit + 220);
     if (input?.search) playerQuery = playerQuery.ilike("display_name", `%${input.search.replace(/[%_]/g, "")}%`);
     if (input?.position) playerQuery = playerQuery.eq("position", input.position);
     const [playersResult, activeAssignmentsResult, awardedResult] = await Promise.all([
@@ -63,8 +66,9 @@ export const auctionRouter = router({
     if (!season) throw new TRPCError({ code: "NOT_FOUND", message: "CVC season was not found." });
     const rostered = unwrap(await supabase.from("roster_assignment").select("id").eq("season_id", season.id).eq("player_id", input.playerId).is("released_at", null).limit(1));
     if ((rostered ?? []).length) throw new TRPCError({ code: "BAD_REQUEST", message: "Rostered players are not auction eligible." });
-    const player = unwrap(await supabase.from("player").select("provider, metadata").eq("id", input.playerId).maybeSingle());
+    const player = unwrap(await supabase.from("player").select("provider, position, metadata").eq("id", input.playerId).maybeSingle());
     if (!player || player.provider === "placeholder") throw new TRPCError({ code: "BAD_REQUEST", message: "Only imported CVC player records are auction eligible." });
+    if (!isCvcAuctionPosition(player.position)) throw new TRPCError({ code: "BAD_REQUEST", message: "Only QB, RB, WR, TE, K, and D/ST players are eligible for the CVC auction." });
     if (((player.metadata ?? {}) as { is_rookie?: boolean }).is_rookie) throw new TRPCError({ code: "BAD_REQUEST", message: "Rookies are not eligible for the regular CVC auction." });
     return unwrap(await supabase.from("auction_nomination").insert({ draft_id: draft.id, player_id: input.playerId, nominating_franchise_id: input.nominatingFranchiseId }).select().single());
   }),

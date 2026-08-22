@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { appRouter } from "./routers";
 import type { TrpcContext } from "./_core/context";
-import { calculateAuctionLegalMaxBid } from "./routers/auction";
+import { CVC_AUCTION_POSITIONS, calculateAuctionLegalMaxBid } from "./routers/auction";
 
 function createPublicContext(): TrpcContext {
   return { user: null, req: { protocol: "https", headers: {} } as TrpcContext["req"], res: {} as TrpcContext["res"] };
@@ -13,6 +13,7 @@ describe("CVC auction eligibility", () => {
 
     expect(players.every(player => player.provider !== "placeholder")).toBe(true);
     expect(players.every(player => !((player.metadata ?? {}) as { is_rookie?: boolean }).is_rookie)).toBe(true);
+    expect(players.every(player => CVC_AUCTION_POSITIONS.includes(player.position as typeof CVC_AUCTION_POSITIONS[number]))).toBe(true);
   });
 
   it("preserves the required $1 reserve for every open roster spot through the 15-player minimum", () => {
@@ -27,5 +28,10 @@ describe("CVC auction eligibility", () => {
 
     expect(players.length).toBeLessThanOrEqual(25);
     expect(players.every(player => player.display_name.toLowerCase().includes("a.j.") && player.position === "WR")).toBe(true);
+  });
+
+  it("returns no auction players for an individual defensive position filter", async () => {
+    const players = await appRouter.createCaller(createPublicContext()).auction.eligiblePlayers({ position: "CB" });
+    expect(players).toEqual([]);
   });
 });

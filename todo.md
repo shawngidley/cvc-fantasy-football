@@ -43,6 +43,7 @@
 - [x] Build a WRC-style CVC owner Settings page where authenticated owners can securely change their own four-digit PIN.
 - [x] Add a secure owner-session Sign Out control to the CVC Team Settings page that returns the user to owner sign-in.
 - [ ] Add Team Settings sign-out failure feedback and verify in the browser that a signed-in owner session is cleared, protected routes gate correctly, and the user lands on owner sign-in.
+- [ ] Verify in the browser as Administrator that Owner Settings is reachable, Sign Out clears the session, protected routes re-gate, and the user lands on owner sign-in; correct any remaining failure.
 - [ ] Complete real CVC Owner Settings logo management and device-sign-in setup readiness controls.
 - [x] Replace the current placeholder owner and franchise rows with the validated 2026 CVC owner and franchise records before assigning co-commissioner roles.
 - [x] Apply the approved 2026 CVC owner-access mapping: Jonas/Super Snuffleupagus and Justin/DS Warteaters as co-commissioners, plus Administrator as standalone administrator.
@@ -96,7 +97,8 @@
 - [x] Synchronize the cached FantasyPros player pool through a commissioner-controlled, non-destructive CVC workflow while excluding active roster identity duplicates from free agents and the regular auction pool.
 - [x] Add bounded live player-name and position filtering to CVC Free Agents and commissioner Auction Room eligibility selection.
 - [x] Restrict CVC Free Agents to QB, RB, WR, TE, K, and D/ST only; exclude individual defensive-player positions from server eligibility and UI filters.
-- [ ] Restrict CVC Auction Players in Draft Hub and Auction Room to QB, RB, WR, TE, K, and D/ST only; exclude individual defensive-player positions from server eligibility and UI filters.
+- [x] Enforce CVC Auction Players server-side eligibility as QB, RB, WR, TE, K, and D/ST only, rejecting individual defensive positions from player-pool queries and nominations.
+- [x] Restrict Auction Room position-filter UI to QB, RB, WR, TE, K, and D/ST only and visually verify no individual defensive players appear.
 - [x] Add bounded live player-directory search and position filtering with stable public player-detail navigation.
 - [x] Add an owner-PIN-protected CVC FAAB waiver workflow with commissioner-opened periods, owner claim submission, audited resolution, roster assignment, and transaction reconciliation.
 - [x] Add a live CVC transaction feed and protected commissioner audit timeline for protections, auction, waiver, and configuration activity.
