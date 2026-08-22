@@ -32,6 +32,21 @@ export type Tank01RosterPlayer = {
   [key: string]: unknown;
 };
 
+export type Tank01Game = {
+  gameID?: string;
+  away?: string;
+  home?: string;
+  gameDate?: string;
+  gameTime?: string;
+  [key: string]: unknown;
+};
+
+export type Tank01BoxScore = {
+  playerStats?: Record<string, Record<string, unknown>>;
+  teamStats?: Record<string, Record<string, unknown>>;
+  [key: string]: unknown;
+};
+
 class UnconfiguredNFLDataAdapter implements NFLDataAdapter {
   async status(): Promise<NFLAdapterStatus> {
     return { provider: null, configured: false, message: "No CVC NFL data provider has been configured." };
@@ -69,6 +84,23 @@ export class Tank01NFLDataAdapter implements NFLDataAdapter {
     const payload = await response.json() as { body?: { roster?: Tank01RosterPlayer[] }; error?: string };
     if (payload.error) throw new Error(`Tank01 getNFLTeamRoster returned ${payload.error}`);
     return payload.body?.roster ?? [];
+  }
+
+  async listGamesForWeek(week: number, season: number) {
+    const params = new URLSearchParams({ week: String(week), season: String(season), seasonType: "Regular Season" });
+    const response = await fetch(`https://${this.host}/getNFLGamesForWeek?${params.toString()}`, { headers: this.headers() });
+    if (!response.ok) throw new Error(`Tank01 getNFLGamesForWeek failed with status ${response.status}`);
+    const payload = await response.json() as { body?: Tank01Game[]; error?: string };
+    if (payload.error) throw new Error(`Tank01 getNFLGamesForWeek returned ${payload.error}`);
+    return payload.body ?? [];
+  }
+
+  async getBoxScore(gameId: string) {
+    const response = await fetch(`https://${this.host}/getNFLBoxScore?gameID=${encodeURIComponent(gameId)}`, { headers: this.headers() });
+    if (!response.ok) throw new Error(`Tank01 getNFLBoxScore failed with status ${response.status}`);
+    const payload = await response.json() as { body?: Tank01BoxScore; error?: string };
+    if (payload.error) throw new Error(`Tank01 getNFLBoxScore returned ${payload.error}`);
+    return payload.body ?? {};
   }
 }
 

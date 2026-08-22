@@ -101,3 +101,11 @@
 - [x] Focus CVC Live Scoring on the current live or next scheduled week and add explicit loading, empty, and error states to the core Standings and Live Scoring modules.
 - [x] Add owner-PIN-protected CVC lineup-slot assignment with commissioner-configured position eligibility, slot-capacity validation, transaction records, and audit events.
 - [x] Rebuild the CVC standings page as East and West division tables with verified owner/franchise ordering and dynamic Money Owed, W–L, GB, PF, PA, and division-record columns.
+- [ ] Replace all commissioner-entered matchup results with Tank01-driven live scoring, final result detection, and automatic CVC standings reconciliation.
+- [x] Inspect the WRC reference build’s live-scoring and data-refresh implementation before selecting the matching CVC Tank01 synchronization architecture.
+- [ ] Replicate the confirmed WRC Tank01-powered live-scoring model in CVC; manual commissioner score entry must not be used.
+- [ ] Implement the confirmed CVC Tank01 mode: 30-second live browser polling during active games plus automatic persisted final-result and standings reconciliation.
+- [x] Replace the incomplete temporary scoring configuration with the supplied CVC QB, RB/WR/TE, PK, and D/ST scoring specification before automated Tank01 calculations run.
+- [x] Rebuild CVC Live Scoring as a WRC-style current-week-only head-to-head interface with matchup rail, live team totals, and side-by-side starter rows.
+- [ ] Populate or derive current-week CVC lineup assignments so Live Scoring renders real side-by-side starter rows and Tank01 totals instead of zero configured starters.
+- [ ] Verify the WRC-style CVC Live Scoring structure with populated current-week matchups on desktop and mobile before treating the live experience as complete.

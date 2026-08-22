@@ -3,11 +3,30 @@ import express from "express";
 import { createServer } from "http";
 import net from "net";
 import { createExpressMiddleware } from "@trpc/server/adapters/express";
+import type { Request, Response } from "express";
 import { registerOAuthRoutes } from "./oauth";
 import { registerStorageProxy } from "./storageProxy";
 import { appRouter } from "../routers";
 import { createContext } from "./context";
 import { serveStatic, setupVite } from "./vite";
+import { proxyTank01Request } from "../tank01Proxy";
+import { sdk } from "./sdk";
+import { supabase, unwrap } from "../supabase";
+import { syncTank01Scores } from "../tank01ScoringSync";
+
+async function runTank01ScoringSync(req: Request, res: Response) {
+  try {
+    const user = await sdk.authenticateRequest(req);
+    if (!user.isCron || !user.taskUid) return res.status(403).json({ error: "cron-only" });
+    const state = unwrap(await supabase.from("tank01_scoring_sync_state").select("id").eq("schedule_cron_task_uid", user.taskUid).maybeSingle());
+    if (!state) return res.json({ ok: true, skipped: "orphan" });
+    res.json({ ok: true, ...(await syncTank01Scores()) });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.error("Tank01 scoring sync failed", error);
+    res.status(500).json({ error: message, timestamp: new Date().toISOString() });
+  }
+}
 
 function isPortAvailable(port: number): Promise<boolean> {
   return new Promise(resolve => {
@@ -36,6 +55,8 @@ async function startServer() {
   app.use(express.urlencoded({ limit: "50mb", extended: true }));
   registerStorageProxy(app);
   registerOAuthRoutes(app);
+  app.get("/api/tank01/:endpoint", proxyTank01Request);
+  app.post("/api/scheduled/tank01-scoring-sync", runTank01ScoringSync);
   // tRPC API
   app.use(
     "/api/trpc",

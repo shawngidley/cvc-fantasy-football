@@ -442,6 +442,32 @@ export const leagueRouter = router({
     return unwrap(await supabase.from("roster_slot").select("id, code, label, eligible_positions, slot_group, minimum_count, maximum_count, display_order").eq("season_id", season.id).order("display_order").order("code")) ?? [];
   }),
 
+  scoringRules: publicProcedure.query(async () => {
+    const { season } = await getCurrentLeagueAndSeason();
+    return unwrap(await supabase.from("scoring_rule").select("category, stat_key, label, value, applies_to_positions").eq("season_id", season.id).order("category").order("stat_key")) ?? [];
+  }),
+
+  liveScoringBoard: publicProcedure.query(async () => {
+    const { season } = await getCurrentLeagueAndSeason();
+    const weeks = unwrap(await supabase.from("schedule_week").select("id, week_number, label, status").eq("season_id", season.id).order("week_number")) ?? [];
+    const week = weeks.find(item => item.status === "live") ?? weeks.find(item => item.status === "upcoming") ?? null;
+    if (!week) return { week: null, matchups: [] };
+    const matchups = unwrap(await supabase.from("matchup").select("id, home_franchise_id, away_franchise_id, home_score, away_score, result_state, home:home_franchise_id(id, name), away:away_franchise_id(id, name)").eq("schedule_week_id", week.id).order("created_at")) ?? [];
+    const franchiseIds = Array.from(new Set(matchups.flatMap(item => [item.home_franchise_id, item.away_franchise_id])));
+    const assignments = franchiseIds.length ? unwrap(await supabase.from("roster_assignment").select("id, franchise_id, assigned_slot_code, player:player_id(id, display_name, position, nfl_team)").eq("season_id", season.id).in("franchise_id", franchiseIds).is("released_at", null).not("assigned_slot_code", "is", null)) ?? [] : [];
+    const lineupFor = (franchiseId: string) => assignments.filter(item => item.franchise_id === franchiseId).map(item => ({ id: item.id, slot: item.assigned_slot_code, player: item.player?.[0] ?? null })).filter(item => item.player);
+    const franchiseName = (value: unknown) => Array.isArray(value) ? value[0]?.name : (value as { name?: string } | null)?.name;
+    return {
+      week: { weekNumber: week.week_number, label: week.label, status: week.status },
+      matchups: matchups.map(item => ({
+        id: item.id,
+        home: franchiseName(item.home) ?? "Home", away: franchiseName(item.away) ?? "Away",
+        homeScore: item.home_score, awayScore: item.away_score, resultState: item.result_state,
+        homeLineup: lineupFor(item.home_franchise_id), awayLineup: lineupFor(item.away_franchise_id),
+      })),
+    };
+  }),
+
   setLineupSlot: protectedProcedure.input(z.object({ assignmentId: z.string().uuid(), slotCode: z.string().trim().min(1).max(40) })).mutation(async ({ ctx, input }) => {
     const owner = await getOwnerAccess({ openId: ctx.user.openId });
     if (!owner) throw new TRPCError({ code: "FORBIDDEN", message: "A CVC owner session is required to update a lineup." });
@@ -671,17 +697,6 @@ export const leagueRouter = router({
     const item = unwrap(await supabase.from("matchup").upsert({ schedule_week_id: week.id, home_franchise_id: input.homeFranchiseId, away_franchise_id: input.awayFranchiseId, result_state: input.resultState }, { onConflict: "schedule_week_id,home_franchise_id" }).select("id").single());
     if (!item) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "CVC matchup could not be saved." });
     await createAuditEvent(league.id, season.id, commissioner.id, "matchup", item.id, "saved", `Saved ${week.label} matchup`); return item;
-  }),
-
-  recordMatchupResult: protectedProcedure.input(z.object({ matchupId: z.string().uuid(), homeScore: z.number().min(0).max(500).finite(), awayScore: z.number().min(0).max(500).finite(), resultState: z.enum(["upcoming", "live", "final"]) })).mutation(async ({ ctx, input }) => {
-    const commissioner = await requireCommissioner({ openId: ctx.user.openId }); const { league, season } = await getCurrentLeagueAndSeason();
-    const matchup = unwrap(await supabase.from("matchup").select("id, schedule_week_id, home_franchise_id, away_franchise_id, week:schedule_week_id(season_id, label), home:home_franchise_id(name), away:away_franchise_id(name)").eq("id", input.matchupId).maybeSingle());
-    if (!matchup || matchup.week?.[0]?.season_id !== season.id) throw new TRPCError({ code: "NOT_FOUND", message: "CVC matchup was not found for the current season." });
-    unwrap(await supabase.from("matchup").update({ home_score: input.homeScore, away_score: input.awayScore, result_state: input.resultState, updated_at: new Date().toISOString() }).eq("id", matchup.id).select("id").single());
-    const summary = `${matchup.week?.[0]?.label ?? "CVC week"}: ${matchup.away?.[0]?.name ?? "Away"} ${input.awayScore} – ${matchup.home?.[0]?.name ?? "Home"} ${input.homeScore}`;
-    unwrap(await supabase.from("transaction").insert({ season_id: season.id, actor_owner_id: commissioner.id, transaction_type: "commissioner_adjustment", status: "final", summary: `Recorded ${input.resultState} result — ${summary}`, details: { matchup_id: matchup.id, home_score: input.homeScore, away_score: input.awayScore, result_state: input.resultState } }).select("id").single());
-    await createAuditEvent(league.id, season.id, commissioner.id, "matchup", matchup.id, "result_recorded", `Recorded ${input.resultState} result — ${summary}`);
-    return { matchupId: matchup.id, homeScore: input.homeScore, awayScore: input.awayScore, resultState: input.resultState };
   }),
 
   saveRuleDocument: protectedProcedure.input(z.object({ title: z.string().min(2).max(120), slug: z.string().regex(/^[a-z0-9-]+$/), versionLabel: z.string().min(1).max(40), contentMarkdown: z.string().min(1).max(100000) })).mutation(async ({ ctx, input }) => {
