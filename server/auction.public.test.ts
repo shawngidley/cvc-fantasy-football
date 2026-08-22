@@ -21,4 +21,11 @@ describe("CVC auction eligibility", () => {
     expect(calculateAuctionLegalMaxBid(115, 60, 14)).toBe(55);
     expect(calculateAuctionLegalMaxBid(115, 60, 15)).toBe(55);
   });
+
+  it("accepts bounded name and position filters for the regular auction pool", async () => {
+    const players = await appRouter.createCaller(createPublicContext()).auction.eligiblePlayers({ search: "A.J.", position: "WR", limit: 25 });
+
+    expect(players.length).toBeLessThanOrEqual(25);
+    expect(players.every(player => player.display_name.toLowerCase().includes("a.j.") && player.position === "WR")).toBe(true);
+  });
 });

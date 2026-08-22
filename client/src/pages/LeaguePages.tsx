@@ -71,7 +71,10 @@ function Draft({ mode }: { mode: "hub" | "lottery" | "recap" }) { const board = 
 
 function Transactions({ kind }: { kind: "transactions" | "trades" | "free-agents" }) {
   const activity = trpc.league.activity.useQuery();
-  const freeAgents = trpc.league.freeAgents.useQuery(undefined, { enabled: kind === "free-agents" });
+  const [playerSearch, setPlayerSearch] = useState("");
+  const [playerPosition, setPlayerPosition] = useState("");
+  const freeAgentInput = useMemo(() => ({ search: playerSearch.trim() || undefined, position: playerPosition || undefined, limit: 75 }), [playerPosition, playerSearch]);
+  const freeAgents = trpc.league.freeAgents.useQuery(freeAgentInput, { enabled: kind === "free-agents" });
   const heading = kind === "trades" ? "Trade desk" : kind === "free-agents" ? "Free agents & FAAB" : "League activity";
   const filtered = (activity.data ?? []).filter(item => kind === "trades" ? item.transaction_type === "trade" : true);
   const isFreeAgents = kind === "free-agents";
@@ -79,7 +82,8 @@ function Transactions({ kind }: { kind: "transactions" | "trades" | "free-agents
   return <div className="grid gap-6 xl:grid-cols-[1.25fr_0.75fr]">
     <Card title={heading}>
       {isFreeAgents ? <>
-        <p className="mb-5 text-sm leading-6 text-slate-600">This is the live CVC player pool: any player without a current roster assignment appears here. A Protections release is immediately eligible as an unrestricted free agent and can later be filtered into the regular auction pool.</p>
+        <p className="mb-5 text-sm leading-6 text-slate-600">This is the live CVC player pool: any player without a current roster assignment appears here. Search the synchronized pool by name or position. A Protections release is immediately eligible as an unrestricted free agent and can later be filtered into the regular auction pool.</p>
+        <div className="mb-5 grid gap-3 sm:grid-cols-[1fr_150px]"><input value={playerSearch} onChange={event => setPlayerSearch(event.target.value)} placeholder="Search player name" className="rounded-md border border-slate-200 bg-white px-3 py-2 text-sm text-cvc-deep outline-none focus:border-cvc-accent" /><select value={playerPosition} onChange={event => setPlayerPosition(event.target.value)} className="rounded-md border border-slate-200 bg-white px-3 py-2 text-sm text-cvc-deep outline-none focus:border-cvc-accent"><option value="">All positions</option>{["QB", "RB", "WR", "TE", "K", "DST"].map(position => <option key={position} value={position}>{position}</option>)}</select></div>
         {freeAgents.isLoading ? <ModuleState label="Loading CVC free-agent pool…" /> : freeAgents.error ? <ModuleState label={freeAgents.error.message} /> : freeAgents.data?.length ? <div className="overflow-x-auto"><table className="cvc-table"><thead><tr><th>Player</th><th>Position</th><th>NFL team</th><th>Status</th></tr></thead><tbody>{freeAgents.data.map(player => <tr key={player.id}><td className="font-semibold">{player.display_name}</td><td>{player.position ?? "—"}</td><td>{player.nfl_team ?? "—"}</td><td><StatusPill state={player.status} /></td></tr>)}</tbody></table></div> : <ModuleState label="No CVC players are currently unrostered. Released players will appear here immediately." />}
       </> : activity.isLoading ? <ModuleState label="Loading CVC activity ledger…" /> : filtered.length ? <div className="divide-y divide-slate-100">{filtered.map(item => <div key={item.id} className="flex gap-4 py-4 first:pt-0 last:pb-0"><span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-cvc-tint text-xs font-bold text-cvc-accent">{item.transaction_type.slice(0, 2).toUpperCase()}</span><div className="min-w-0 flex-1"><p className="text-sm font-semibold capitalize text-cvc-deep">{item.transaction_type.replace("_", " ")}</p><p className="mt-1 text-sm text-slate-600">{item.summary}</p><p className="mt-1.5 text-xs text-slate-400">{new Date(item.occurred_at).toLocaleString()}</p></div><StatusPill state={item.status} /></div>)}</div> : <ModuleState label={kind === "trades" ? "No CVC trades have been recorded yet." : "No CVC transaction activity has been recorded yet."} />}
     </Card>

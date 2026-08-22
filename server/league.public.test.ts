@@ -47,4 +47,11 @@ describe("CVC public league procedures", () => {
 
     expect(freeAgents.every(player => !activeNames.has(player.display_name.trim().toLowerCase()))).toBe(true);
   });
+
+  it("accepts bounded name and position filters for the live free-agent pool", async () => {
+    const players = await appRouter.createCaller(createPublicContext()).league.freeAgents({ search: "A.J.", position: "WR", limit: 25 });
+
+    expect(players.length).toBeLessThanOrEqual(25);
+    expect(players.every(player => player.display_name.toLowerCase().includes("a.j.") && player.position === "WR")).toBe(true);
+  });
 });

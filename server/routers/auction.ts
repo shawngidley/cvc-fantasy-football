@@ -30,10 +30,14 @@ export const auctionRouter = router({
     const recent = unwrap(await supabase.from("auction_nomination").select("id, high_bid, player(display_name), leader:franchise!auction_nomination_high_franchise_id_fkey(name)").eq("draft_id", draft.id).eq("status", "awarded").order("awarded_at", { ascending: false }).limit(8));
     return { draft, states, active, recent };
   }),
-  eligiblePlayers: publicProcedure.query(async () => {
+  eligiblePlayers: publicProcedure.input(z.object({ search: z.string().trim().max(64).optional(), position: z.string().trim().max(12).optional(), limit: z.number().int().min(1).max(150).optional() }).optional()).query(async ({ input }) => {
     const { season, draft } = await context();
+    const limit = input?.limit ?? 75;
+    let playerQuery = supabase.from("player").select("id, display_name, position, nfl_team, status, metadata").neq("provider", "placeholder").order("display_name").limit(limit + 220);
+    if (input?.search) playerQuery = playerQuery.ilike("display_name", `%${input.search.replace(/[%_]/g, "")}%`);
+    if (input?.position) playerQuery = playerQuery.eq("position", input.position);
     const [playersResult, activeAssignmentsResult, awardedResult] = await Promise.all([
-      supabase.from("player").select("id, display_name, position, nfl_team, status, metadata").neq("provider", "placeholder").order("display_name").limit(1000),
+      playerQuery,
       supabase.from("roster_assignment").select("player_id").eq("season_id", season.id).is("released_at", null),
       supabase.from("auction_nomination").select("player_id").eq("draft_id", draft.id).eq("status", "awarded"),
     ]);
@@ -44,7 +48,7 @@ export const auctionRouter = router({
     return (unwrap(playersResult) ?? []).filter(player => {
       const metadata = (player.metadata ?? {}) as { is_rookie?: boolean };
       return !activePlayerIds.has(player.id) && !activePlayerNames.has(playerIdentity(player.display_name)) && !awardedPlayerIds.has(player.id) && !metadata.is_rookie;
-    });
+    }).slice(0, limit);
   }),
   setBudget: protectedProcedure.input(z.object({ franchiseId: z.string().uuid(), startingBudget: z.number().int().min(0).max(115) })).mutation(async ({ ctx: c, input }) => {
     await commissioner(c.user.openId); const { draft } = await context();

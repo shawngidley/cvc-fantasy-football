@@ -172,17 +172,21 @@ export const leagueRouter = router({
     return players;
   }),
 
-  freeAgents: publicProcedure.query(async () => {
+  freeAgents: publicProcedure.input(z.object({ search: z.string().trim().max(64).optional(), position: z.string().trim().max(12).optional(), limit: z.number().int().min(1).max(150).optional() }).optional()).query(async ({ input }) => {
     const { season } = await getCurrentLeagueAndSeason();
+    const limit = input?.limit ?? 75;
+    let playerQuery = supabase.from("player").select("id, provider, display_name, position, nfl_team, status, metadata").neq("provider", "placeholder").order("display_name").limit(limit + 220);
+    if (input?.search) playerQuery = playerQuery.ilike("display_name", `%${input.search.replace(/[%_]/g, "")}%`);
+    if (input?.position) playerQuery = playerQuery.eq("position", input.position);
     const [playersResult, activeAssignmentsResult] = await Promise.all([
-      supabase.from("player").select("id, provider, display_name, position, nfl_team, status, metadata").neq("provider", "placeholder").order("display_name").limit(1000),
+      playerQuery,
       supabase.from("roster_assignment").select("player_id").eq("season_id", season.id).is("released_at", null),
     ]);
     const players = unwrap(playersResult) ?? [];
     const activePlayerIds = new Set((unwrap(activeAssignmentsResult) ?? []).map(assignment => assignment.player_id));
     const rosteredPlayers = activePlayerIds.size ? unwrap(await supabase.from("player").select("display_name").in("id", Array.from(activePlayerIds))) ?? [] : [];
     const activePlayerNames = new Set(rosteredPlayers.map(player => player.display_name.trim().toLowerCase().replace(/\s+/g, " ")));
-    return players.filter(player => !activePlayerIds.has(player.id) && !activePlayerNames.has(player.display_name.trim().toLowerCase().replace(/\s+/g, " ")));
+    return players.filter(player => !activePlayerIds.has(player.id) && !activePlayerNames.has(player.display_name.trim().toLowerCase().replace(/\s+/g, " "))).slice(0, limit);
   }),
 
   playerDetail: publicProcedure.input(z.object({ playerId: z.string().uuid() })).query(async ({ input }) => {
