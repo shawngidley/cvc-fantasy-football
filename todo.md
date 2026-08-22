@@ -112,6 +112,7 @@
 - [ ] Verify a production CVC Tank01 Heartbeat run returns updated or finalized provider data and persists the resulting matchup and standings changes.
 - [ ] Verify the live CVC product no longer offers commissioner manual result entry and renders the new populated starters in the Live Scoring interface on desktop and mobile.
 - [x] Fix the CVC Live Scoring response transform so populated starter assignments retain player identities and exclude bench rows from the submitted-starter board.
+- [x] Improve the CVC Live Scoring mobile player-row layout so populated starter names are legible rather than excessively truncated.
 - [ ] Verify the WRC-style CVC Live Scoring structure with populated current-week matchups on desktop and mobile before treating the live experience as complete.
 - [x] Rebuild the CVC owner Lineup page as a WRC-style mobile-first workspace with team context, live metrics, weekly decisions, and a dense real-roster lineup table.
 - [x] Show each owner-lineup player’s Tank01 live fantasy points, CVC scoring-relevant stat line, NFL matchup context, and shared lineup total.
