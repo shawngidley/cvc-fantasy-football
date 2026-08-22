@@ -131,6 +131,7 @@
 - [x] Store and map the supplied Xavier Musketeers logo so every active CVC franchise has a team mark.
 - [ ] Extend the shared CVC franchise-logo treatment into the detailed Auction Room and authenticated Trade Desk workflows.
 - [x] Rebuild the CVC Playoffs route from the WRC postseason hierarchy using live CVC season configuration and an explicit preseason state until CVC seeds and results exist.
+- [x] Rebuild the CVC NFL Sites route from the WRC reference-resource structure using official resources and CVC-specific provider context without generic placeholder layout.
 - [ ] Audit and rebuild every CVC route from its corresponding WRC page structure, interaction pattern, responsive layout, and information density before adding further generic interfaces.
 - [ ] Use WRC source components and route structures directly as the baseline for each CVC page, substituting only CVC-specific branding, teams, rules, authentication, and dynamic data.
 - [x] Rebuild CVC Free Agents and FAAB from the WRC player-pool structure with position tabs, sortable data-backed columns, owner bid flow, and commissioner queue context.
