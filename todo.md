@@ -114,3 +114,4 @@
 - [ ] Verify the WRC-style CVC owner Lineup page using an authenticated owner roster on desktop and mobile before treating the owner experience as complete.
 - [ ] Audit and rebuild every CVC route from its corresponding WRC page structure, interaction pattern, responsive layout, and information density before adding further generic interfaces.
 - [ ] Use WRC source components and route structures directly as the baseline for each CVC page, substituting only CVC-specific branding, teams, rules, authentication, and dynamic data.
+- [x] Port the WRC shared navigation hierarchy into CVC with compact header, route order, live indicator, ticker, team context, League menu, and mobile overlay drawer.
