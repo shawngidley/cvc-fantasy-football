@@ -8,7 +8,7 @@ import "./index.css";
 
 if (import.meta.env.PROD && "serviceWorker" in navigator) {
   window.addEventListener("load", () => {
-    navigator.serviceWorker.register("/sw.js", { updateViaCache: "none" }).then(registration => registration.update()).catch(error => console.warn("CVC PWA service worker registration failed", error));
+    navigator.serviceWorker.register("/sw-v2.js", { updateViaCache: "none" }).then(registration => registration.update()).catch(error => console.warn("CVC PWA service worker registration failed", error));
   });
 }
 
