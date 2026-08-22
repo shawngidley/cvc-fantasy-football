@@ -125,3 +125,4 @@
 - [x] Rebuild CVC Rosters from the WRC division-filtered franchise-card structure with real owner, player, contract, and public-lineup data.
 - [x] Rebuild CVC Transactions from the WRC filtered add, drop, trade, and FAAB activity-feed structure with real CVC audit-aware transaction data.
 - [x] Rebuild CVC Schedule & Results from the WRC combined current-week, final-results, future-schedule, and owner-filter game-center structure using Tank01-only result data.
+- [ ] Rebuild CVC Trades from the WRC owner proposal and trade-inbox workspace while preserving CVC player, FAAB, and commissioner-execution rules.

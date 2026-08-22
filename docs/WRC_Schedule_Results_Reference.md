@@ -18,3 +18,7 @@ The WRC page is a combined **Schedule & Results** game-center route. It uses a c
 ## CVC data substitutions
 
 Use CVC imported schedule weeks and matchups, CVC franchises/owners, the current CVC season, and the Tank01 reconciliation output. Do not bring WRC static schedule data, manual score-entry controls, or WRC teams into CVC.
+
+## CVC implementation verification
+
+The public CVC route now uses the direct WRC-style game-center structure with a current-week selector, prior/next week controls, Tank01-only result states, and a direct Live Scoring handoff. Mobile verification confirmed that real CVC franchise names wrap across two lines rather than truncate in the compact matchup cards.

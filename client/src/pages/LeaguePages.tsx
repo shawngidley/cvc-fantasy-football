@@ -10,6 +10,7 @@ import { CvcWrcOwnerLineup } from "@/components/CvcWrcOwnerLineup";
 import { CvcWrcFreeAgents } from "@/components/CvcWrcFreeAgents";
 import { CvcWrcRosters } from "@/components/CvcWrcRosters";
 import { CvcWrcTransactions } from "@/components/CvcWrcTransactions";
+import { CvcWrcScheduleResults } from "@/components/CvcWrcScheduleResults";
 import { Activity, ArrowRight, BadgeDollarSign, BookOpen, CalendarDays, Check, ChevronRight, ClipboardList, Crown, FileText, Gavel, LayoutDashboard, ListFilter, Newspaper, Plus, Radio, ReceiptText, Scale, Settings2, ShieldCheck, Sparkles, Trophy, Upload, UsersRound, WalletCards } from "lucide-react";
 import { useMemo, useState } from "react";
 import { Link, useRoute } from "wouter";
@@ -172,13 +173,13 @@ export default function LeaguePage({ kind }: { kind: PageKind }) {
   else if (kind === "draft" || kind === "draft-lottery" || kind === "draft-recap") body = <Draft mode={kind === "draft" ? "hub" : kind === "draft-lottery" ? "lottery" : "recap"} />;
   else if (kind === "trades") body = <TradesDesk />;
   else if (kind === "transactions" || kind === "free-agents") body = <Transactions kind={kind} />;
-  else if (kind === "results") body = <ScheduleResults />;
+  else if (kind === "results") body = <CvcWrcScheduleResults />;
   else if (kind === "rundown") body = <Rundown />;
   else if (kind === "news") body = <NewsOrPlayer kind={kind} />;
   else if (kind === "player") body = <PlayerDetail />;
   else if (kind === "rosters") body = <CvcWrcRosters />;
   else if (kind === "settings") body = <CommissionerPanel />;
   else body = <Informational kind={kind as "history" | "playoffs" | "rules" | "nfl-sites" | "money"} />;
-  const usesDirectWrcWorkspace = kind === "live" || kind === "lineup" || kind === "free-agents" || kind === "rosters" || kind === "transactions";
+  const usesDirectWrcWorkspace = kind === "live" || kind === "lineup" || kind === "free-agents" || kind === "rosters" || kind === "transactions" || kind === "results";
   return <LeagueLayout>{usesDirectWrcWorkspace ? null : <PageHeader kind={kind} action={kind === "standings" ? <Link href="/settings" className="cvc-button-compact"><Settings2 size={14} /> Configure CVC</Link> : undefined} />}{body}</LeagueLayout>;
 }

@@ -73,12 +73,12 @@ export function CvcWrcScheduleResults() {
             const away = Number(matchup.away_score ?? 0);
             const home = Number(matchup.home_score ?? 0);
             return <article key={matchup.id} className="group grid grid-cols-[1fr_auto_1fr] items-center gap-3 px-4 py-5 text-cvc-deep transition hover:bg-cvc-tint sm:px-6">
-              <div className="min-w-0"><p className={`truncate font-display text-2xl uppercase sm:text-3xl ${isFinal && away < home ? "text-slate-400" : ""}`}>{matchup.away}</p><p className="mt-1 text-[10px] font-black uppercase tracking-[0.15em] text-slate-500">Away</p></div>
+              <div className="min-w-0"><p className={`font-display text-xl leading-[0.9] uppercase sm:text-3xl ${isFinal && away < home ? "text-slate-400" : ""}`}>{matchup.away}</p><p className="mt-2 text-[10px] font-black uppercase tracking-[0.15em] text-slate-500">Away</p></div>
               <div className="min-w-[102px] text-center">
                 {isFinal ? <div className="font-display text-4xl sm:text-5xl"><span className={away > home ? "text-cvc-deep" : "text-slate-400"}>{away.toFixed(1)}</span><span className="mx-1 text-cvc-accent">–</span><span className={home > away ? "text-cvc-deep" : "text-slate-400"}>{home.toFixed(1)}</span></div> : matchup.result_state === "live" ? <Link href="/live" className="inline-flex items-center gap-1 rounded-lg bg-cvc-deep px-3 py-2 text-xs font-black uppercase tracking-[0.12em] text-white">Live</Link> : <CalendarDays className="mx-auto text-slate-400" size={22} />}
                 <div className="mt-2"><ResultState state={matchup.result_state} /></div>
               </div>
-              <div className="min-w-0 text-right"><p className={`truncate font-display text-2xl uppercase sm:text-3xl ${isFinal && home < away ? "text-slate-400" : ""}`}>{matchup.home}</p><p className="mt-1 text-[10px] font-black uppercase tracking-[0.15em] text-slate-500">Home</p></div>
+              <div className="min-w-0 text-right"><p className={`font-display text-xl leading-[0.9] uppercase sm:text-3xl ${isFinal && home < away ? "text-slate-400" : ""}`}>{matchup.home}</p><p className="mt-2 text-[10px] font-black uppercase tracking-[0.15em] text-slate-500">Home</p></div>
             </article>;
           })}
         </div>
