@@ -424,6 +424,31 @@ export const leagueRouter = router({
     };
   }),
 
+  rosterSlots: publicProcedure.query(async () => {
+    const { season } = await getCurrentLeagueAndSeason();
+    return unwrap(await supabase.from("roster_slot").select("id, code, label, eligible_positions, slot_group, minimum_count, maximum_count, display_order").eq("season_id", season.id).order("display_order").order("code")) ?? [];
+  }),
+
+  setLineupSlot: protectedProcedure.input(z.object({ assignmentId: z.string().uuid(), slotCode: z.string().trim().min(1).max(40) })).mutation(async ({ ctx, input }) => {
+    const owner = await getOwnerAccess({ openId: ctx.user.openId });
+    if (!owner) throw new TRPCError({ code: "FORBIDDEN", message: "A CVC owner session is required to update a lineup." });
+    const { league, season } = await getCurrentLeagueAndSeason();
+    const assignment = unwrap(await supabase.from("roster_assignment").select("id, franchise_id, player_id, assigned_slot_code, player:player_id(display_name, position)").eq("id", input.assignmentId).eq("season_id", season.id).is("released_at", null).maybeSingle());
+    if (!assignment) throw new TRPCError({ code: "NOT_FOUND", message: "CVC roster assignment was not found." });
+    const franchise = unwrap(await supabase.from("franchise").select("id, name, current_owner_id").eq("id", assignment.franchise_id).maybeSingle());
+    if (!franchise || (franchise.current_owner_id !== owner.id && !["commissioner", "administrator"].includes(owner.role))) throw new TRPCError({ code: "FORBIDDEN", message: "You may only update your own CVC franchise lineup." });
+    const slot = unwrap(await supabase.from("roster_slot").select("code, label, eligible_positions, maximum_count").eq("season_id", season.id).eq("code", input.slotCode).maybeSingle());
+    if (!slot) throw new TRPCError({ code: "BAD_REQUEST", message: "That CVC roster slot is not configured for this season." });
+    const player = assignment.player?.[0];
+    if (slot.eligible_positions?.length && player?.position && !slot.eligible_positions.includes(player.position)) throw new TRPCError({ code: "BAD_REQUEST", message: `${player.position} is not eligible for the ${slot.label} CVC roster slot.` });
+    const occupied = unwrap(await supabase.from("roster_assignment").select("id").eq("season_id", season.id).eq("franchise_id", assignment.franchise_id).eq("assigned_slot_code", slot.code).is("released_at", null).neq("id", assignment.id)) ?? [];
+    if (occupied.length >= slot.maximum_count) throw new TRPCError({ code: "BAD_REQUEST", message: `The ${slot.label} CVC roster slot is already at capacity.` });
+    unwrap(await supabase.from("roster_assignment").update({ assigned_slot_code: slot.code, updated_at: new Date().toISOString() }).eq("id", assignment.id).select("id").single());
+    unwrap(await supabase.from("transaction").insert({ season_id: season.id, franchise_id: franchise.id, actor_owner_id: owner.id, transaction_type: "lineup_move", status: "final", summary: `${franchise.name} assigned ${player?.display_name ?? "a player"} to ${slot.label}.`, details: { roster_assignment_id: assignment.id, previous_slot: assignment.assigned_slot_code, slot_code: slot.code } }).select("id").single());
+    await createAuditEvent(league.id, season.id, owner.id, "roster_assignment", assignment.id, "lineup_slot_updated", `${franchise.name} assigned ${player?.display_name ?? "a player"} to ${slot.label}.`);
+    return { assignmentId: assignment.id, slotCode: slot.code };
+  }),
+
   cutContractPlayer: protectedProcedure.input(z.object({
     franchiseId: z.string().uuid(),
     playerId: z.string().uuid(),
