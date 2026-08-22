@@ -98,3 +98,4 @@
 - [x] Add a live CVC transaction feed and protected commissioner audit timeline for protections, auction, waiver, and configuration activity.
 - [x] Add an owner-PIN-protected CVC player-trade workflow with proposal, recipient response, commissioner execution, roster validation, transaction records, and audit events.
 - [x] Add a commissioner-configured CVC rookie-draft foundation with transparent public board state, franchise pick ownership, and audited rookie selection procedures.
+- [x] Focus CVC Live Scoring on the current live or next scheduled week and add explicit loading, empty, and error states to the core Standings and Live Scoring modules.
