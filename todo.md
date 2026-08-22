@@ -27,9 +27,9 @@
 - [ ] Define a commissioner-friendly CVC auction draft operating model covering setup, nominations, bidding, timing, roster enforcement, pauses, corrections, and post-draft reconciliation.
 - [ ] Design the CVC auction as a commissioner-operated in-room console with a projected public board and no owner self-service bidding requirement.
 - [ ] Enforce the CVC auction rules: $1 minimum bid, variable franchise budgets capped at $120, 15-player maximum roster, and a $1 reserve for every unfilled roster spot.
-- [ ] Correct the CVC auction constraints to a $115 starting-budget cap, a 15-player minimum roster, and a 22-player maximum roster, with reserve math based on the minimum roster target.
-- [ ] Enforce only the total 15-to-22 player roster range during the CVC auction, with no position-specific auction caps.
-- [ ] Restrict the CVC auction pool to unrostered non-rookie players and defer rookies to a future rookie-draft module.
+- [x] Correct the CVC auction constraints to a $115 starting-budget cap, a 15-player minimum roster, and a 22-player maximum roster, with reserve math based on the minimum roster target.
+- [x] Enforce only the total 15-to-22 player roster range during the CVC auction, with no position-specific auction caps.
+- [x] Restrict the CVC auction pool to unrostered non-rookie players and defer rookies to a future rookie-draft module.
 - [ ] Provide a commissioner spreadsheet import template for player, rostered-franchise, and rookie-status data so CVC can assemble the auction pool automatically.
 - [x] Prepare the blank CVC auction player-pool spreadsheet template and document the player eligibility import rules.
 - [ ] Build the commissioner-operated CVC auction console with projected public board, manual nomination and award controls, budget ledger, roster safeguards, correction flow, and audit history.
@@ -78,10 +78,11 @@
 - [x] Map the workbook’s Twinsburg Tribe roster block to Stapel’s The Rusty Trombones franchise during the CVC 2026 import.
 - [x] Document the workbook-derived CVC roster, salary-cap, franchise, transition, rookie-right, waiver-right, and matching-right mechanics for commissioner review.
 - [x] Revise the CVC in-room auction playbook to reflect the confirmed $115 budget cap and 15-to-22 player roster range.
-- [ ] Provide commissioner configuration for per-franchise starting auction budgets, with each budget validated at $120 or below.
-- [ ] Make the CVC auction close commissioner-controlled, with no automatic bidding timer and an explicit award action required to record each sale.
-- [ ] Let the commissioner select the nominating franchise manually for every CVC auction nomination.
-- [ ] Allow the commissioner to record any legal winning bid above $1 rather than enforcing fixed bid increments.
+- [x] Provide commissioner configuration for per-franchise starting auction budgets, with each budget validated at the confirmed $115 cap.
+- [x] Make the CVC auction close commissioner-controlled, with no automatic bidding timer and an explicit award action required to record each sale.
+- [x] Let the commissioner select the nominating franchise manually for every CVC auction nomination.
+- [x] Allow the commissioner to record any legal winning bid above $1 rather than enforcing fixed bid increments.
+- [ ] Add CVC auction happy-path coverage for commissioner budget setup, manual nomination, award, and correction workflows.
 - [x] Document the CVC in-room auction operating playbook, control surface, reserve formula, and end-of-draft reconciliation workflow.
 - [x] Return live imported contracts and active protection-right records with each CVC franchise roster response.
 - [x] Connect the Protections release control to independent CVC owner-PIN access before it is available to league owners.

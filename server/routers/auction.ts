@@ -46,6 +46,8 @@ export const auctionRouter = router({
     await commissioner(c.user.openId); const auctionContext = await context(); const { draft, season } = auctionContext;
     const existing = unwrap(await supabase.from("auction_nomination").select("id").eq("draft_id", draft.id).eq("status", "active").maybeSingle());
     if (existing) throw new TRPCError({ code: "CONFLICT", message: "Award or pass the active player first." });
+    const nominatorState = unwrap(await supabase.from("auction_team_state").select("franchise_id").eq("draft_id", draft.id).eq("franchise_id", input.nominatingFranchiseId).maybeSingle());
+    if (!nominatorState) throw new TRPCError({ code: "BAD_REQUEST", message: "Set this franchise’s starting budget before using it as a nominator." });
     if (!season) throw new TRPCError({ code: "NOT_FOUND", message: "CVC season was not found." });
     const rostered = unwrap(await supabase.from("roster_assignment").select("id").eq("season_id", season.id).eq("player_id", input.playerId).is("released_at", null).limit(1));
     if ((rostered ?? []).length) throw new TRPCError({ code: "BAD_REQUEST", message: "Rostered players are not auction eligible." });
@@ -67,5 +69,18 @@ export const auctionRouter = router({
     unwrap(await supabase.from("roster_assignment").insert({ season_id: season.id, franchise_id: input.franchiseId, player_id: nomination.player_id, roster_state: "active" }));
     unwrap(await supabase.from("transaction").insert({ season_id: season.id, franchise_id: input.franchiseId, actor_owner_id: actor.id, transaction_type: "draft_pick", status: "final", summary: `Auction award for $${input.amount}`, details: { nominationId: nomination.id, amount: input.amount } }));
     return { success: true, legalMax };
+  }),
+  correctAward: protectedProcedure.input(z.object({ nominationId: z.string().uuid(), reason: z.string().trim().min(3).max(280) })).mutation(async ({ ctx: c, input }) => {
+    const actor = await commissioner(c.user.openId); const { season, draft } = await context();
+    const nomination = unwrap(await supabase.from("auction_nomination").select("id, player_id, high_franchise_id, high_bid, status").eq("id", input.nominationId).eq("draft_id", draft.id).maybeSingle());
+    if (!nomination || nomination.status !== "awarded" || !nomination.high_franchise_id || !nomination.high_bid) throw new TRPCError({ code: "BAD_REQUEST", message: "Only a completed CVC auction award can be corrected." });
+    const state = unwrap(await supabase.from("auction_team_state").select("spent_budget, roster_count").eq("draft_id", draft.id).eq("franchise_id", nomination.high_franchise_id).maybeSingle());
+    const roster = unwrap(await supabase.from("roster_assignment").select("id").eq("season_id", season.id).eq("franchise_id", nomination.high_franchise_id).eq("player_id", nomination.player_id).is("released_at", null).order("acquired_at", { ascending: false }).limit(1).maybeSingle());
+    if (!state || !roster) throw new TRPCError({ code: "CONFLICT", message: "The award cannot be corrected because its active roster or budget record is unavailable." });
+    unwrap(await supabase.from("roster_assignment").update({ roster_state: "released", released_at: new Date().toISOString() }).eq("id", roster.id).select("id").single());
+    unwrap(await supabase.from("auction_team_state").update({ spent_budget: Math.max(0, state.spent_budget - nomination.high_bid), roster_count: Math.max(0, state.roster_count - 1), updated_at: new Date().toISOString() }).eq("draft_id", draft.id).eq("franchise_id", nomination.high_franchise_id).select("id").single());
+    unwrap(await supabase.from("auction_nomination").update({ status: "corrected", correction_reason: input.reason, updated_at: new Date().toISOString() }).eq("id", nomination.id).select("id").single());
+    unwrap(await supabase.from("transaction").insert({ season_id: season.id, franchise_id: nomination.high_franchise_id, actor_owner_id: actor.id, transaction_type: "commissioner_adjustment", status: "final", summary: `Auction award corrected: $${nomination.high_bid} restored`, details: { nominationId: nomination.id, playerId: nomination.player_id, reason: input.reason } }).select("id").single());
+    return { success: true } as const;
   }),
 });
