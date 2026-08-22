@@ -122,3 +122,4 @@
 - [ ] Verify the WRC Draft Hub-style commissioner auction console using an authenticated commissioner session and real auction state before treating auction parity as complete.
 - [x] Rebuild the CVC Protections page from the WRC owner-workspace structure while preserving CVC contract cuts, franchise/transition tags, and restricted-right rules.
 - [ ] Verify the WRC-style CVC Protections page using an authenticated owner franchise before treating protections parity as complete.
+- [x] Rebuild CVC Rosters from the WRC division-filtered franchise-card structure with real owner, player, contract, and public-lineup data.
