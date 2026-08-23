@@ -164,15 +164,19 @@ export const leagueRouter = router({
     const { data, error } = txResult;
     if (error) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: error.message });
     const drafts = unwrap(draftsResult) ?? [];
-    // Pickups/drops stay off the public board until every configured draft (rookie + auction) for the
-    // season is marked complete; trades and every other transaction type are never gated by this.
+    // The public board only ever surfaces pickups, drops, and trades — nothing else (protection
+    // notes, lineup moves, draft picks, commissioner adjustments, etc. stay off it entirely).
+    // Pickups/drops are further held back until every configured draft (rookie + auction) for the
+    // season is marked complete; trades are always visible.
     const draftsConcluded = drafts.length > 0 && drafts.every(draft => draft.status === "complete");
+    const pickupOrDropTypes = ["add", "drop", "waiver"];
     const legacySummary = /atlas aces|harbor hounds|placeholder/i;
     return (data ?? []).filter((item: any) => {
       const franchise = Array.isArray(item.franchise) ? item.franchise[0] : item.franchise;
       if (franchise?.is_active === false || legacySummary.test(item.summary ?? "")) return false;
-      if (!draftsConcluded && ["add", "drop"].includes(item.transaction_type)) return false;
-      return true;
+      if (item.transaction_type === "trade") return true;
+      if (!pickupOrDropTypes.includes(item.transaction_type)) return false;
+      return draftsConcluded;
     }).map((item: any) => {
       const franchise = Array.isArray(item.franchise) ? item.franchise[0] : item.franchise;
       return { ...item, franchise_name: franchise?.name ?? null };
