@@ -157,12 +157,22 @@ export const leagueRouter = router({
   activity: publicProcedure.query(async () => {
     const { data: season, error: seasonError } = await supabase.from("season").select("id").order("year", { ascending: false }).limit(1).single();
     if (seasonError || !season) throw new TRPCError({ code: "NOT_FOUND", message: "CVC season configuration was not found." });
-    const { data, error } = await supabase.from("transaction").select("id, transaction_type, status, summary, occurred_at, details, franchise_id, franchise:franchise_id(name, is_active)").eq("season_id", season.id).order("occurred_at", { ascending: false }).limit(50);
+    const [txResult, draftsResult] = await Promise.all([
+      supabase.from("transaction").select("id, transaction_type, status, summary, occurred_at, details, franchise_id, franchise:franchise_id(name, is_active)").eq("season_id", season.id).order("occurred_at", { ascending: false }).limit(50),
+      supabase.from("draft").select("status").eq("season_id", season.id),
+    ]);
+    const { data, error } = txResult;
     if (error) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: error.message });
+    const drafts = unwrap(draftsResult) ?? [];
+    // Pickups/drops stay off the public board until every configured draft (rookie + auction) for the
+    // season is marked complete; trades and every other transaction type are never gated by this.
+    const draftsConcluded = drafts.length > 0 && drafts.every(draft => draft.status === "complete");
     const legacySummary = /atlas aces|harbor hounds|placeholder/i;
     return (data ?? []).filter((item: any) => {
       const franchise = Array.isArray(item.franchise) ? item.franchise[0] : item.franchise;
-      return franchise?.is_active !== false && !legacySummary.test(item.summary ?? "");
+      if (franchise?.is_active === false || legacySummary.test(item.summary ?? "")) return false;
+      if (!draftsConcluded && ["add", "drop"].includes(item.transaction_type)) return false;
+      return true;
     }).map((item: any) => {
       const franchise = Array.isArray(item.franchise) ? item.franchise[0] : item.franchise;
       return { ...item, franchise_name: franchise?.name ?? null };
@@ -753,10 +763,10 @@ export const leagueRouter = router({
     const commissioner = await requireCommissioner({ openId: ctx.user.openId });
     const { league, season } = await getCurrentLeagueAndSeason();
     const assignments = unwrap(await supabase.from("roster_assignment").select("id, franchise_id, player_id").eq("season_id", season.id).is("released_at", null)) ?? [];
-    if (!assignments.length) return { cutCount: 0, cuts: [] as { franchiseId: string; franchiseName: string; playerId: string; playerName: string }[] };
+    if (!assignments.length) return { flaggedCount: 0, flagged: [] as { franchiseId: string; franchiseName: string; playerId: string; playerName: string }[] };
     const playerIds = Array.from(new Set(assignments.map(assignment => assignment.player_id)));
     const [contracts, activeRights, activeFranchises] = await Promise.all([
-      supabase.from("player_contract").select("id, franchise_id, player_id, expires_year, contract_status").eq("season_id", season.id).in("player_id", playerIds),
+      supabase.from("player_contract").select("id, franchise_id, player_id, expires_year, contract_status, pending_cut_flagged_at").eq("season_id", season.id).in("player_id", playerIds),
       supabase.from("player_right").select("franchise_id, player_id").eq("season_id", season.id).eq("status", "active").in("player_id", playerIds),
       supabase.from("franchise").select("id, name").eq("league_id", league.id).eq("is_active", true),
     ]);
@@ -770,30 +780,98 @@ export const leagueRouter = router({
         Boolean(entry.contract) &&
         !["released", "expired"].includes(entry.contract!.contract_status) &&
         isCvcProtectionYear(entry.contract!.expires_year, season.year) &&
+        !entry.contract!.pending_cut_flagged_at &&
         !protectedKeys.has(`${entry.assignment.franchise_id}:${entry.assignment.player_id}`));
-    if (!targets.length) return { cutCount: 0, cuts: [] as { franchiseId: string; franchiseName: string; playerId: string; playerName: string }[] };
+    if (!targets.length) return { flaggedCount: 0, flagged: [] as { franchiseId: string; franchiseName: string; playerId: string; playerName: string }[] };
     const players = unwrap(await supabase.from("player").select("id, display_name").in("id", targets.map(target => target.assignment.player_id))) ?? [];
     const playerNameById = new Map(players.map(player => [player.id, player.display_name]));
     const now = new Date().toISOString();
-    const cuts: { franchiseId: string; franchiseName: string; playerId: string; playerName: string }[] = [];
+    const flagged: { franchiseId: string; franchiseName: string; playerId: string; playerName: string }[] = [];
     for (const { assignment, contract } of targets) {
       const franchiseName = franchiseNameById.get(assignment.franchise_id) ?? "a CVC franchise";
       const playerName = playerNameById.get(assignment.player_id) ?? "a player";
-      unwrap(await supabase.from("roster_assignment").update({ roster_state: "released", released_at: now }).eq("id", assignment.id).select("id").single());
-      unwrap(await supabase.from("player_contract").update({ contract_status: "released" }).eq("id", contract.id).select("id").single());
-      unwrap(await supabase.from("transaction").insert({
-        season_id: season.id,
-        franchise_id: assignment.franchise_id,
-        actor_owner_id: commissioner.id,
-        transaction_type: "drop",
-        status: "final",
-        summary: `Auto-cut: unprotected expiring contract — ${franchiseName} released ${playerName}.`,
-        details: { player_id: assignment.player_id, roster_assignment_id: assignment.id, source: "auto_cut_sweep", reason: "unprotected_expiring_contract" },
-      }).select("id").single());
-      await createAuditEvent(league.id, season.id, commissioner.id, "roster_assignment", assignment.id, "auto_cut", `Auto-cut: ${franchiseName} released ${playerName} (unprotected expiring contract).`);
-      cuts.push({ franchiseId: assignment.franchise_id, franchiseName, playerId: assignment.player_id, playerName });
+      unwrap(await supabase.from("player_contract").update({ pending_cut_flagged_at: now }).eq("id", contract.id).select("id").single());
+      await createAuditEvent(league.id, season.id, commissioner.id, "player_contract", contract.id, "pending_cut_flagged", `${franchiseName} - ${playerName} flagged for CVC auto-cut review (unprotected expiring contract).`);
+      flagged.push({ franchiseId: assignment.franchise_id, franchiseName, playerId: assignment.player_id, playerName });
     }
-    return { cutCount: cuts.length, cuts };
+    return { flaggedCount: flagged.length, flagged };
+  }),
+
+  pendingCuts: protectedProcedure.query(async ({ ctx }) => {
+    await requireCommissioner({ openId: ctx.user.openId });
+    const { season } = await getCurrentLeagueAndSeason();
+    const flaggedContracts = unwrap(await supabase.from("player_contract").select("id, franchise_id, player_id, salary, expires_year, pending_cut_flagged_at").eq("season_id", season.id).not("pending_cut_flagged_at", "is", null)) ?? [];
+    if (!flaggedContracts.length) return [];
+    const playerIds = Array.from(new Set(flaggedContracts.map(contract => contract.player_id)));
+    const franchiseIds = Array.from(new Set(flaggedContracts.map(contract => contract.franchise_id)));
+    const [assignments, activeRights, players, franchises] = await Promise.all([
+      supabase.from("roster_assignment").select("franchise_id, player_id").eq("season_id", season.id).in("player_id", playerIds).is("released_at", null),
+      supabase.from("player_right").select("franchise_id, player_id").eq("season_id", season.id).eq("status", "active").in("player_id", playerIds),
+      supabase.from("player").select("id, display_name, position, nfl_team").in("id", playerIds),
+      supabase.from("franchise").select("id, name").in("id", franchiseIds),
+    ]);
+    const activeAssignmentKeys = new Set((unwrap(assignments) ?? []).map(assignment => `${assignment.franchise_id}:${assignment.player_id}`));
+    const protectedKeys = new Set((unwrap(activeRights) ?? []).map(right => `${right.franchise_id}:${right.player_id}`));
+    const playerById = new Map((unwrap(players) ?? []).map(player => [player.id, player]));
+    const franchiseById = new Map((unwrap(franchises) ?? []).map(franchise => [franchise.id, franchise]));
+    return flaggedContracts
+      .filter(contract => activeAssignmentKeys.has(`${contract.franchise_id}:${contract.player_id}`) && !protectedKeys.has(`${contract.franchise_id}:${contract.player_id}`))
+      .map(contract => ({
+        franchiseId: contract.franchise_id,
+        franchiseName: franchiseById.get(contract.franchise_id)?.name ?? "Unknown franchise",
+        playerId: contract.player_id,
+        playerName: playerById.get(contract.player_id)?.display_name ?? "Unknown player",
+        position: playerById.get(contract.player_id)?.position ?? null,
+        nflTeam: playerById.get(contract.player_id)?.nfl_team ?? null,
+        salary: Number(contract.salary ?? 0),
+        expiresYear: contract.expires_year,
+        flaggedAt: contract.pending_cut_flagged_at,
+      }));
+  }),
+
+  processPendingCut: protectedProcedure.input(z.object({ franchiseId: z.string().uuid(), playerId: z.string().uuid() })).mutation(async ({ ctx, input }) => {
+    const commissioner = await requireCommissioner({ openId: ctx.user.openId });
+    const { league, season } = await getCurrentLeagueAndSeason();
+    const contract = unwrap(await supabase.from("player_contract").select("id, pending_cut_flagged_at").eq("season_id", season.id).eq("franchise_id", input.franchiseId).eq("player_id", input.playerId).maybeSingle());
+    if (!contract || !contract.pending_cut_flagged_at) throw new TRPCError({ code: "NOT_FOUND", message: "This player is not on the CVC pending-cuts list." });
+    const activeRight = unwrap(await supabase.from("player_right").select("id").eq("season_id", season.id).eq("franchise_id", input.franchiseId).eq("player_id", input.playerId).eq("status", "active").limit(1).maybeSingle());
+    if (activeRight) {
+      unwrap(await supabase.from("player_contract").update({ pending_cut_flagged_at: null }).eq("id", contract.id).select("id").single());
+      throw new TRPCError({ code: "BAD_REQUEST", message: "This player now has an active CVC protection right and is no longer eligible for auto-cut; the pending flag has been cleared." });
+    }
+    const assignment = unwrap(await supabase.from("roster_assignment").select("id").eq("season_id", season.id).eq("franchise_id", input.franchiseId).eq("player_id", input.playerId).is("released_at", null).maybeSingle());
+    if (!assignment) throw new TRPCError({ code: "NOT_FOUND", message: "This player is not on the active CVC roster." });
+    const [franchise, player] = await Promise.all([
+      supabase.from("franchise").select("name").eq("id", input.franchiseId).maybeSingle(),
+      supabase.from("player").select("display_name").eq("id", input.playerId).maybeSingle(),
+    ]);
+    const franchiseName = unwrap(franchise)?.name ?? "a CVC franchise";
+    const playerName = unwrap(player)?.display_name ?? "a player";
+    const now = new Date().toISOString();
+    unwrap(await supabase.from("roster_assignment").update({ roster_state: "released", released_at: now }).eq("id", assignment.id).select("id").single());
+    unwrap(await supabase.from("player_contract").update({ contract_status: "released", pending_cut_flagged_at: null }).eq("id", contract.id).select("id").single());
+    unwrap(await supabase.from("transaction").insert({
+      season_id: season.id,
+      franchise_id: input.franchiseId,
+      actor_owner_id: commissioner.id,
+      transaction_type: "drop",
+      status: "final",
+      summary: `Auto-cut: unprotected expiring contract — ${franchiseName} released ${playerName}.`,
+      details: { player_id: input.playerId, roster_assignment_id: assignment.id, source: "auto_cut_sweep", reason: "unprotected_expiring_contract" },
+    }).select("id").single());
+    await createAuditEvent(league.id, season.id, commissioner.id, "roster_assignment", assignment.id, "auto_cut_processed", `Auto-cut processed: ${franchiseName} released ${playerName}.`);
+    return { processed: true };
+  }),
+
+  exemptPendingCut: protectedProcedure.input(z.object({ franchiseId: z.string().uuid(), playerId: z.string().uuid() })).mutation(async ({ ctx, input }) => {
+    const commissioner = await requireCommissioner({ openId: ctx.user.openId });
+    const { league, season } = await getCurrentLeagueAndSeason();
+    const contract = unwrap(await supabase.from("player_contract").select("id, pending_cut_flagged_at").eq("season_id", season.id).eq("franchise_id", input.franchiseId).eq("player_id", input.playerId).maybeSingle());
+    if (!contract || !contract.pending_cut_flagged_at) throw new TRPCError({ code: "NOT_FOUND", message: "This player is not on the CVC pending-cuts list." });
+    const player = unwrap(await supabase.from("player").select("display_name").eq("id", input.playerId).maybeSingle());
+    unwrap(await supabase.from("player_contract").update({ pending_cut_flagged_at: null }).eq("id", contract.id).select("id").single());
+    await createAuditEvent(league.id, season.id, commissioner.id, "player_contract", contract.id, "pending_cut_exempted", `Commissioner exempted ${player?.display_name ?? "a player"} from the CVC auto-cut pending list.`);
+    return { exempted: true };
   }),
 
   saveFranchise: protectedProcedure.input(z.object({
