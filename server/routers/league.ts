@@ -176,7 +176,8 @@ export const leagueRouter = router({
   }),
 
   draftBoard: publicProcedure.query(async () => {
-    const { data: draft, error: draftError } = await supabase.from("draft").select("id, label, draft_type, status, pick_timer_seconds, keeper_enabled, lottery_enabled, settings").limit(1).single();
+    const { season } = await getCurrentLeagueAndSeason();
+    const { data: draft, error: draftError } = await supabase.from("draft").select("id, label, draft_type, status, pick_timer_seconds, keeper_enabled, lottery_enabled, settings").eq("season_id", season.id).eq("draft_type", "rookie").maybeSingle();
     if (draftError || !draft) throw new TRPCError({ code: "NOT_FOUND", message: "CVC draft configuration was not found." });
     const [picksResult, franchisesResult] = await Promise.all([
       supabase.from("draft_pick").select("id, round_number, pick_number, original_franchise_id, current_franchise_id, pick_status, is_protected, notes").eq("draft_id", draft.id).order("pick_number").limit(500),
@@ -190,7 +191,7 @@ export const leagueRouter = router({
 
   saveDraft: protectedProcedure.input(z.object({ label: z.string().min(2).max(100), draftType: z.enum(["snake", "linear", "auction", "rookie", "supplemental"]), status: z.enum(["setup", "lottery", "live", "paused", "complete"]), pickTimerSeconds: z.number().int().min(0).max(7200).nullable().optional(), lotteryEnabled: z.boolean(), startsAt: z.string().datetime().nullable().optional() })).mutation(async ({ ctx, input }) => {
     const commissioner = await requireCommissioner({ openId: ctx.user.openId }); const { league, season } = await getCurrentLeagueAndSeason();
-    const draft = unwrap(await supabase.from("draft").upsert({ season_id: season.id, label: input.label, draft_type: input.draftType, status: input.status, pick_timer_seconds: input.pickTimerSeconds ?? null, lottery_enabled: input.lotteryEnabled, starts_at: input.startsAt ?? null, updated_at: new Date().toISOString() }, { onConflict: "season_id" }).select("id, label, draft_type, status").single());
+    const draft = unwrap(await supabase.from("draft").upsert({ season_id: season.id, label: input.label, draft_type: input.draftType, status: input.status, pick_timer_seconds: input.pickTimerSeconds ?? null, lottery_enabled: input.lotteryEnabled, starts_at: input.startsAt ?? null, updated_at: new Date().toISOString() }, { onConflict: "season_id,draft_type" }).select("id, label, draft_type, status").single());
     if (!draft) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "CVC draft could not be saved." });
     await createAuditEvent(league.id, season.id, commissioner.id, "draft", draft.id, "saved", `Saved CVC ${draft.draft_type} draft ${draft.label}.`); return draft;
   }),
