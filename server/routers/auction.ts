@@ -29,7 +29,7 @@ export const auctionRouter = router({
     const { draft } = await context();
     const states = unwrap(await supabase.from("auction_team_state").select("franchise_id, starting_budget, spent_budget, roster_count, franchise(name, abbreviation, brand_color, logo_url)").eq("draft_id", draft.id));
     const active = unwrap(await supabase.from("auction_nomination").select("id, player_id, high_franchise_id, high_bid, status, player(display_name, position, nfl_team), nominator:franchise!auction_nomination_nominating_franchise_id_fkey(name), leader:franchise!auction_nomination_high_franchise_id_fkey(name)").eq("draft_id", draft.id).eq("status", "active").maybeSingle());
-    const recent = unwrap(await supabase.from("auction_nomination").select("id, high_bid, player(display_name), leader:franchise!auction_nomination_high_franchise_id_fkey(name)").eq("draft_id", draft.id).eq("status", "awarded").order("awarded_at", { ascending: false }).limit(8));
+    const recent = unwrap(await supabase.from("auction_nomination").select("id, player_id, high_bid, player(display_name), leader:franchise!auction_nomination_high_franchise_id_fkey(name)").eq("draft_id", draft.id).eq("status", "awarded").order("awarded_at", { ascending: false }).limit(8));
     return { draft, states, active, recent };
   }),
   eligiblePlayers: publicProcedure.input(z.object({ search: z.string().trim().max(64).optional(), position: z.string().trim().max(12).optional(), limit: z.number().int().min(1).max(150).optional() }).optional()).query(async ({ input }) => {
