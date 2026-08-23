@@ -19,6 +19,10 @@ jobs:
         run: npm install --global vercel@latest
       - name: Pull Vercel environment
         run: vercel pull --yes --environment=production --token=${{ secrets.VERCEL_TOKEN }}
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Bundle API function
+        run: pnpm run bundle:api
       - name: Build project
         run: vercel build --prod --token=${{ secrets.VERCEL_TOKEN }}
       - name: Deploy to Vercel
