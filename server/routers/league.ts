@@ -157,7 +157,7 @@ export const leagueRouter = router({
   activity: publicProcedure.query(async () => {
     const { data: season, error: seasonError } = await supabase.from("season").select("id").order("year", { ascending: false }).limit(1).single();
     if (seasonError || !season) throw new TRPCError({ code: "NOT_FOUND", message: "CVC season configuration was not found." });
-    const { data, error } = await supabase.from("transaction").select("id, transaction_type, status, summary, occurred_at, details, franchise:franchise_id(name, is_active)").eq("season_id", season.id).order("occurred_at", { ascending: false }).limit(50);
+    const { data, error } = await supabase.from("transaction").select("id, transaction_type, status, summary, occurred_at, details, franchise_id, franchise:franchise_id(name, is_active)").eq("season_id", season.id).order("occurred_at", { ascending: false }).limit(50);
     if (error) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: error.message });
     const legacySummary = /atlas aces|harbor hounds|placeholder/i;
     return (data ?? []).filter((item: any) => {
@@ -747,6 +747,53 @@ export const leagueRouter = router({
     unwrap(await supabase.from("transaction").insert({ season_id: season.id, franchise_id: franchise.id, actor_owner_id: actor.id, transaction_type: "add", status: "final", summary: `${franchise.name} restored ${player?.display_name ?? "a player"} from Protections.`, details: { player_id: input.playerId, action: "cut_restored" } }).select("id").single());
     await createAuditEvent(league.id, season.id, actor.id, "roster_assignment", assignment.id, "cut_restored", `${franchise.name} restored ${player?.display_name ?? "a player"} from Protections.`);
     return { restored: true };
+  }),
+
+  runAutoCutSweep: protectedProcedure.mutation(async ({ ctx }) => {
+    const commissioner = await requireCommissioner({ openId: ctx.user.openId });
+    const { league, season } = await getCurrentLeagueAndSeason();
+    const assignments = unwrap(await supabase.from("roster_assignment").select("id, franchise_id, player_id").eq("season_id", season.id).is("released_at", null)) ?? [];
+    if (!assignments.length) return { cutCount: 0, cuts: [] as { franchiseId: string; franchiseName: string; playerId: string; playerName: string }[] };
+    const playerIds = Array.from(new Set(assignments.map(assignment => assignment.player_id)));
+    const [contracts, activeRights, activeFranchises] = await Promise.all([
+      supabase.from("player_contract").select("id, franchise_id, player_id, expires_year, contract_status").eq("season_id", season.id).in("player_id", playerIds),
+      supabase.from("player_right").select("franchise_id, player_id").eq("season_id", season.id).eq("status", "active").in("player_id", playerIds),
+      supabase.from("franchise").select("id, name").eq("league_id", league.id).eq("is_active", true),
+    ]);
+    const contractByKey = new Map((unwrap(contracts) ?? []).map(contract => [`${contract.franchise_id}:${contract.player_id}`, contract]));
+    const protectedKeys = new Set((unwrap(activeRights) ?? []).map(right => `${right.franchise_id}:${right.player_id}`));
+    const franchiseNameById = new Map((unwrap(activeFranchises) ?? []).map(franchise => [franchise.id, franchise.name]));
+    const targets = assignments
+      .filter(assignment => franchiseNameById.has(assignment.franchise_id))
+      .map(assignment => ({ assignment, contract: contractByKey.get(`${assignment.franchise_id}:${assignment.player_id}`) }))
+      .filter((entry): entry is { assignment: typeof assignments[number]; contract: NonNullable<typeof entry.contract> } =>
+        Boolean(entry.contract) &&
+        !["released", "expired"].includes(entry.contract!.contract_status) &&
+        isCvcProtectionYear(entry.contract!.expires_year, season.year) &&
+        !protectedKeys.has(`${entry.assignment.franchise_id}:${entry.assignment.player_id}`));
+    if (!targets.length) return { cutCount: 0, cuts: [] as { franchiseId: string; franchiseName: string; playerId: string; playerName: string }[] };
+    const players = unwrap(await supabase.from("player").select("id, display_name").in("id", targets.map(target => target.assignment.player_id))) ?? [];
+    const playerNameById = new Map(players.map(player => [player.id, player.display_name]));
+    const now = new Date().toISOString();
+    const cuts: { franchiseId: string; franchiseName: string; playerId: string; playerName: string }[] = [];
+    for (const { assignment, contract } of targets) {
+      const franchiseName = franchiseNameById.get(assignment.franchise_id) ?? "a CVC franchise";
+      const playerName = playerNameById.get(assignment.player_id) ?? "a player";
+      unwrap(await supabase.from("roster_assignment").update({ roster_state: "released", released_at: now }).eq("id", assignment.id).select("id").single());
+      unwrap(await supabase.from("player_contract").update({ contract_status: "released" }).eq("id", contract.id).select("id").single());
+      unwrap(await supabase.from("transaction").insert({
+        season_id: season.id,
+        franchise_id: assignment.franchise_id,
+        actor_owner_id: commissioner.id,
+        transaction_type: "drop",
+        status: "final",
+        summary: `Auto-cut: unprotected expiring contract — ${franchiseName} released ${playerName}.`,
+        details: { player_id: assignment.player_id, roster_assignment_id: assignment.id, source: "auto_cut_sweep", reason: "unprotected_expiring_contract" },
+      }).select("id").single());
+      await createAuditEvent(league.id, season.id, commissioner.id, "roster_assignment", assignment.id, "auto_cut", `Auto-cut: ${franchiseName} released ${playerName} (unprotected expiring contract).`);
+      cuts.push({ franchiseId: assignment.franchise_id, franchiseName, playerId: assignment.player_id, playerName });
+    }
+    return { cutCount: cuts.length, cuts };
   }),
 
   saveFranchise: protectedProcedure.input(z.object({
