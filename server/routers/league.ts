@@ -324,8 +324,8 @@ export const leagueRouter = router({
     const { season } = await getCurrentLeagueAndSeason();
     const assignment = unwrap(await supabase.from("roster_assignment").select("franchise_id, acquired_at, assigned_slot_code").eq("season_id", season.id).eq("player_id", player.id).eq("roster_state", "active").is("released_at", null).maybeSingle());
     const contract = assignment ? unwrap(await supabase.from("player_contract").select("salary, expires_year, source_marker, contract_status").eq("season_id", season.id).eq("franchise_id", assignment.franchise_id).eq("player_id", player.id).maybeSingle()) : null;
-    const franchise = assignment ? unwrap(await supabase.from("franchise").select("id, name, owner_id").eq("id", assignment.franchise_id).maybeSingle()) : null;
-    const owner = franchise ? unwrap(await supabase.from("owner").select("display_name").eq("id", franchise.owner_id).maybeSingle()) : null;
+    const franchise = assignment ? unwrap(await supabase.from("franchise").select("id, name, current_owner_id").eq("id", assignment.franchise_id).maybeSingle()) : null;
+    const owner = franchise ? unwrap(await supabase.from("owner").select("display_name").eq("id", franchise.current_owner_id).maybeSingle()) : null;
     return {
       ...player,
       season: { id: season.id, year: season.year },

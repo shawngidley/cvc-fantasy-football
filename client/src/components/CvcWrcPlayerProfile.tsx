@@ -1,25 +1,191 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link, useRoute } from "wouter";
-import { ArrowLeft, BarChart3, ShieldCheck, Star, TrendingUp, UserRound } from "lucide-react";
+import { ArrowLeft, BarChart3, CalendarDays, ClipboardList, Newspaper, ShieldCheck, TrendingUp } from "lucide-react";
 import { trpc } from "@/lib/trpc";
 
-type TankPlayer = { body?: Record<string, unknown> | Record<string, unknown>[] };
-type FlattenedStats = { row: Record<string, unknown>; stats: Record<string, unknown>; passing?: Record<string, unknown>; rushing?: Record<string, unknown>; receiving?: Record<string, unknown>; kicking?: Record<string, unknown>; defense?: Record<string, unknown> };
+type TankRecord = Record<string, unknown>;
+type TankPlayerInfo = { body?: TankRecord | TankRecord[] };
+type TankNewsItem = { title?: string; link?: string; image?: string; playerIDs?: string[] };
+type FlattenedStats = { row: TankRecord; stats: TankRecord; passing: TankRecord; rushing: TankRecord; receiving: TankRecord; kicking: TankRecord; defense: TankRecord };
+
 const positionColor: Record<string, string> = { QB: "bg-red-600", RB: "bg-emerald-700", WR: "bg-blue-700", TE: "bg-amber-700", K: "bg-violet-700", DST: "bg-slate-700" };
-function value(source: Record<string, unknown> | undefined, keys: string[]) { for (const key of keys) { const candidate = source?.[key]; if (candidate !== undefined && candidate !== null && candidate !== "") return String(candidate); } return "—"; }
-function asRecord(value: unknown): Record<string, unknown> { return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {}; }
-function flattenStats(payload: TankPlayer | null): FlattenedStats { const raw = Array.isArray(payload?.body) ? payload?.body[0] : payload?.body; const row = asRecord(raw); const stats = asRecord(row.stats); const source = Object.keys(stats).length ? stats : row; return { row, stats: source, passing: asRecord(source.Passing), rushing: asRecord(source.Rushing), receiving: asRecord(source.Receiving), kicking: asRecord(source.Kicking), defense: asRecord(source.Defense) }; }
+const NEWS_CACHE_KEY = "cvc_tank01_news_v1";
+const NEWS_TTL_MS = 15 * 60_000;
+const infoCache = new Map<string, TankRecord | null>();
+const scheduleCache = new Map<string, TankRecord[] | null>();
+
+function asRecord(value: unknown): TankRecord { return value && typeof value === "object" && !Array.isArray(value) ? value as TankRecord : {}; }
+function firstOf(source: TankRecord | undefined, keys: string[]): string | null { for (const key of keys) { const candidate = source?.[key]; if (candidate !== undefined && candidate !== null && candidate !== "") return String(candidate); } return null; }
+function flattenStats(row: TankRecord | null): FlattenedStats { const source = row ?? {}; const stats = asRecord(source.stats); const flat = Object.keys(stats).length ? stats : source; return { row: source, stats: flat, passing: asRecord(flat.Passing), rushing: asRecord(flat.Rushing), receiving: asRecord(flat.Receiving), kicking: asRecord(flat.Kicking), defense: asRecord(flat.Defense) }; }
+function looksLikeInjury(text: string) { return /injur|questionable|doubtful| ruled out|out for|ir |surgery|concussion|hamstring|ankle|knee|illness/i.test(text); }
+const normalizeTeam = (team: string | null | undefined) => ({ kan: "kc", tam: "tb", arz: "ari", jax: "jac", was: "wsh" }[(team ?? "").toLowerCase()] ?? (team ?? "").toLowerCase());
+
+/** Fetches Tank01's getNFLPlayerInfo for one player, cached by name for the session. Every
+ * field below beyond `espnHeadshot` (already used in Protections.tsx/CvcWrcOwnerLineup.tsx)
+ * is read defensively and simply omitted if Tank01 doesn't return it — this endpoint requires
+ * TANK01_RAPIDAPI_KEY, which is not configured in every environment. */
+function useTank01PlayerInfo(displayName: string | undefined) {
+  const [row, setRow] = useState<TankRecord | null>(null);
+  const [loading, setLoading] = useState(false);
+  useEffect(() => {
+    if (!displayName) return;
+    if (infoCache.has(displayName)) { setRow(infoCache.get(displayName) ?? null); return; }
+    let ignore = false;
+    setLoading(true);
+    fetch(`/api/tank01/getNFLPlayerInfo?playerName=${encodeURIComponent(displayName)}&getStats=true`)
+      .then(response => (response.ok ? response.json() : null) as Promise<TankPlayerInfo | null>)
+      .then(payload => { const next = Array.isArray(payload?.body) ? payload!.body[0] as TankRecord : (payload?.body as TankRecord | undefined) ?? null; infoCache.set(displayName, next); if (!ignore) setRow(next); })
+      .catch(() => { infoCache.set(displayName, null); if (!ignore) setRow(null); })
+      .finally(() => { if (!ignore) setLoading(false); });
+    return () => { ignore = true; };
+  }, [displayName]);
+  return { row, loading };
+}
+
+/** Reuses the same cached feed as CvcWrcPlayerNews.tsx, filtered client-side to one player's
+ * name — cheaper than a dedicated per-player fetch and consistent with the existing pattern. */
+function usePlayerNews(displayName: string | undefined) {
+  const [items, setItems] = useState<TankNewsItem[]>([]);
+  const [loading, setLoading] = useState(true);
+  useEffect(() => {
+    let ignore = false;
+    const load = async () => {
+      try {
+        const cached = sessionStorage.getItem(NEWS_CACHE_KEY);
+        if (cached) { const parsed = JSON.parse(cached) as { ts: number; data: TankNewsItem[] }; if (Date.now() - parsed.ts < NEWS_TTL_MS) { if (!ignore) { setItems(parsed.data); setLoading(false); } return; } }
+        const response = await fetch("/api/tank01/getNFLNews?recentNews=true");
+        if (!response.ok) throw new Error("unavailable");
+        const payload = await response.json() as { body?: TankNewsItem[] };
+        const fresh = Array.isArray(payload.body) ? payload.body.filter(item => item.title) : [];
+        sessionStorage.setItem(NEWS_CACHE_KEY, JSON.stringify({ ts: Date.now(), data: fresh }));
+        if (!ignore) setItems(fresh);
+      } catch { if (!ignore) setItems([]); } finally { if (!ignore) setLoading(false); }
+    };
+    void load();
+    return () => { ignore = true; };
+  }, []);
+  const mine = useMemo(() => displayName ? items.filter(item => item.title?.toLowerCase().includes(displayName.toLowerCase())) : [], [items, displayName]);
+  return { items: mine, loading };
+}
+
+/** getNFLTeamSchedule has no existing usage anywhere else in this codebase, so its response
+ * shape is unverified — parsed defensively against Tank01's documented field names and hidden
+ * entirely if nothing recognizable comes back, rather than risk showing wrong data. */
+function useTeamSchedule(team: string | null | undefined, enabled: boolean) {
+  const [games, setGames] = useState<TankRecord[] | null>(null);
+  const [loading, setLoading] = useState(false);
+  useEffect(() => {
+    if (!enabled || !team) return;
+    const abv = normalizeTeam(team).toUpperCase();
+    if (scheduleCache.has(abv)) { setGames(scheduleCache.get(abv) ?? null); return; }
+    let ignore = false;
+    setLoading(true);
+    fetch(`/api/tank01/getNFLTeamSchedule?teamAbv=${encodeURIComponent(abv)}`)
+      .then(response => (response.ok ? response.json() : null) as Promise<{ body?: TankRecord | TankRecord[] } | null>)
+      .then(payload => {
+        const raw = payload?.body;
+        const list = Array.isArray(raw) ? raw : raw && typeof raw === "object" ? Object.values(raw as Record<string, unknown>).filter((entry): entry is TankRecord => Boolean(entry) && typeof entry === "object") : [];
+        scheduleCache.set(abv, list.length ? list : null);
+        if (!ignore) setGames(list.length ? list : null);
+      })
+      .catch(() => { scheduleCache.set(abv, null); if (!ignore) setGames(null); })
+      .finally(() => { if (!ignore) setLoading(false); });
+    return () => { ignore = true; };
+  }, [team, enabled]);
+  return { games, loading };
+}
+
+function gameOpponent(game: TankRecord, team: string) {
+  const abv = normalizeTeam(team).toUpperCase();
+  const away = firstOf(game, ["away", "awayTeam", "away_team"]);
+  const home = firstOf(game, ["home", "homeTeam", "home_team"]);
+  if (!away || !home) return null;
+  return away.toUpperCase() === abv ? { opponent: home, atOrVs: "@" } : { opponent: away, atOrVs: "vs" };
+}
 
 export function CvcWrcPlayerProfile() {
-  const [, params] = useRoute("/player/:playerId"); const playerId = params?.playerId ?? "";
+  const [, params] = useRoute("/player/:playerId");
+  const playerId = params?.playerId ?? "";
   const valid = /^[0-9a-f]{8}-[0-9a-f-]{27}$/i.test(playerId);
   const detail = trpc.league.playerDetail.useQuery({ playerId: valid ? playerId : "00000000-0000-0000-0000-000000000000" }, { enabled: valid });
-  const [tank, setTank] = useState<TankPlayer | null>(null); const [loadingStats, setLoadingStats] = useState(false);
-  useEffect(() => { const name = detail.data?.display_name; if (!name) return; let ignore = false; setLoadingStats(true); fetch(`/api/tank01/getNFLPlayerInfo?playerName=${encodeURIComponent(name)}&getStats=true`).then(response => response.ok ? response.json() : null).then(data => { if (!ignore) setTank(data); }).catch(() => { if (!ignore) setTank(null); }).finally(() => { if (!ignore) setLoadingStats(false); }); return () => { ignore = true; }; }, [detail.data?.display_name]);
+  const [tab, setTab] = useState<"stats" | "schedule" | "gamelog">("stats");
+  const { row: tank, loading: loadingInfo } = useTank01PlayerInfo(detail.data?.display_name);
+  const { items: news, loading: loadingNews } = usePlayerNews(detail.data?.display_name);
+  const { games: schedule } = useTeamSchedule(detail.data?.nfl_team, valid);
+  const { games: gameLog, loading: loadingGameLog } = useTeamSchedule(detail.data?.nfl_team, tab === "gamelog"); // shares the schedule shape/cache; see note in Game Log tab below
   const metrics = useMemo(() => flattenStats(tank), [tank]);
-  if (!valid) return <section className="min-h-screen bg-[#06121b] p-8 text-white"><Link href="/players" className="inline-flex items-center gap-2 text-sm font-black uppercase text-cvc-accent"><ArrowLeft size={15}/> Player directory</Link><p className="mt-8 text-slate-300">Choose a CVC player from the directory.</p></section>;
-  if (detail.isLoading) return <section className="min-h-screen bg-[#06121b] p-8 text-white">Loading CVC player profile…</section>;
-  if (detail.error || !detail.data) return <section className="min-h-screen bg-[#06121b] p-8 text-white">This CVC player record was not found.</section>;
-  const player = detail.data; const pos = player.position ?? "NFL"; const initials = player.display_name.split(" ").map((part: string) => part[0]).join("").slice(0, 2); const positionStats = pos === "QB" ? [["PASS YDS", value(metrics.passing, ["passYds", "passingYards"])], ["PASS TD", value(metrics.passing, ["passTD", "passingTD"])], ["INT", value(metrics.passing, ["int", "interceptions"])]] : pos === "K" ? [["FGM", value(metrics.kicking, ["fgMade", "fieldGoalsMade"])], ["XPM", value(metrics.kicking, ["xpMade", "extraPointsMade"])], ["PTS", value(metrics.stats, ["fantasyPoints"])]] : pos === "DST" ? [["SACK", value(metrics.defense, ["sacks"])], ["INT", value(metrics.defense, ["defensiveInterceptions", "interceptions"])], ["TD", value(metrics.defense, ["defTD", "touchdowns"])]] : [["RUSH YDS", value(metrics.rushing, ["rushYds", "rushingYards"])], ["REC", value(metrics.receiving, ["receptions", "rec"])], ["REC YDS", value(metrics.receiving, ["recYds", "receivingYards"])], ["TD", value(metrics.receiving, ["recTD", "receivingTD"])]];
-  return <section className="min-h-screen bg-[#06121b] px-3 pb-14 pt-5 text-white sm:px-6"><div className="mx-auto max-w-5xl"><Link href="/players" className="inline-flex items-center gap-2 text-xs font-black uppercase tracking-[0.12em] text-cvc-accent"><ArrowLeft size={15}/> Back to players</Link><div className="mt-5 overflow-hidden rounded-3xl border border-white/10 bg-gradient-to-br from-[#102d1c] via-[#081a18] to-[#06121b]"><div className="p-6 sm:p-8"><div className="flex flex-wrap items-start justify-between gap-4"><div className="flex gap-4"><div className="grid h-20 w-20 place-items-center rounded-2xl border border-white/15 bg-black/25 text-2xl font-black">{initials}</div><div><div className="flex flex-wrap items-center gap-2"><h1 className="font-display text-4xl uppercase sm:text-5xl">{player.display_name}</h1><span className={`rounded px-2 py-1 text-xs font-black ${positionColor[pos] ?? "bg-slate-700"}`}>{pos}</span></div><p className="mt-2 text-sm text-slate-300">{player.nfl_team ?? "NFL team pending"} · CVC {detail.data.season.year}</p>{player.ownership ? <p className="mt-2 inline-flex items-center gap-2 rounded-full bg-white/10 px-3 py-1 text-xs font-bold text-cvc-accent"><ShieldCheck size={14}/>{player.ownership.franchiseName} · {player.ownership.ownerName ?? "CVC owner"}</p> : <p className="mt-2 inline-flex rounded-full bg-cvc-accent px-3 py-1 text-xs font-black text-cvc-deep">Free agent · Available for FAAB</p>}</div></div><Star className="text-cvc-accent"/></div><div className="mt-7 grid gap-3 sm:grid-cols-3"><div className="rounded-xl bg-black/25 p-4"><p className="text-[10px] font-black uppercase tracking-[0.15em] text-slate-400">CVC contract</p><p className="mt-2 font-display text-2xl">{player.contract ? `$${player.contract.salary}` : "FA"}</p></div><div className="rounded-xl bg-black/25 p-4"><p className="text-[10px] font-black uppercase tracking-[0.15em] text-slate-400">Term / marker</p><p className="mt-2 text-sm font-bold">{player.contract?.expires_year ?? "—"} · {player.contract?.source_marker ?? "Available"}</p></div><div className="rounded-xl bg-black/25 p-4"><p className="text-[10px] font-black uppercase tracking-[0.15em] text-slate-400">Tank01 feed</p><p className="mt-2 text-sm font-bold">{loadingStats ? "Refreshing…" : tank ? "Connected" : "Unavailable"}</p></div></div></div></div><div className="mt-6 grid gap-6 lg:grid-cols-[1.45fr_0.75fr]"><div className="overflow-hidden rounded-2xl border border-white/10 bg-white text-cvc-deep"><div className="flex items-center justify-between border-b-4 border-cvc-accent px-5 py-4"><div className="flex items-center gap-2"><BarChart3 size={17} className="text-cvc-accent"/><div><h2 className="font-black">Season Stats</h2><p className="text-xs text-slate-500">Tank01 totals · CVC scoring context</p></div></div><TrendingUp className="text-cvc-accent"/></div><div className="grid grid-cols-2 divide-x divide-y divide-slate-200 sm:grid-cols-4">{positionStats.map(([label, stat]) => <div key={label} className="p-4"><p className="text-[10px] font-black uppercase text-slate-500">{label}</p><p className="mt-1 text-xl font-black">{stat}</p></div>)}</div><div className="border-t border-slate-200 px-5 py-4 text-sm text-slate-600">Live current-week matchup and exact CVC fantasy points are shown in Live Scoring once Tank01 game data is active.</div></div><aside className="rounded-2xl border border-white/10 bg-white/5 p-5"><div className="flex items-center gap-2"><UserRound size={17} className="text-cvc-accent"/><h2 className="font-black uppercase tracking-[0.1em]">CVC Status</h2></div><dl className="mt-5 space-y-4 text-sm"><div><dt className="text-slate-400">Ownership</dt><dd className="mt-1 font-bold">{player.ownership ? player.ownership.franchiseName : "Free Agent"}</dd></div><div><dt className="text-slate-400">Roster slot</dt><dd className="mt-1 font-bold">{player.ownership?.assignedSlotCode ?? "Not assigned"}</dd></div><div><dt className="text-slate-400">Provider record</dt><dd className="mt-1 font-bold">{player.provider}</dd></div></dl></aside></div></div></section>;
+  const [headshotFailed, setHeadshotFailed] = useState(false);
+
+  if (!valid) return <div className="mx-auto max-w-3xl"><Link href="/free-agents" className="inline-flex items-center gap-2 text-xs font-black uppercase tracking-[0.12em] text-cvc-accent"><ArrowLeft size={15} /> Player pool</Link><p className="mt-8 text-sm text-cvc-muted">Choose a CVC player from the roster, free agent, or draft views.</p></div>;
+  if (detail.isLoading) return <div className="mx-auto max-w-3xl text-sm text-cvc-muted">Loading CVC player profile…</div>;
+  if (detail.error || !detail.data) return <div className="mx-auto max-w-3xl text-sm text-cvc-muted">This CVC player record was not found.</div>;
+
+  const player = detail.data;
+  const pos = player.position ?? "NFL";
+  const initials = player.display_name.split(" ").map((part: string) => part[0]).join("").slice(0, 2).toUpperCase();
+  const headshot = firstOf(tank ?? undefined, ["espnHeadshot"]);
+  const jerseyNum = firstOf(tank ?? undefined, ["jerseyNum"]);
+  const height = firstOf(tank ?? undefined, ["height"]);
+  const weight = firstOf(tank ?? undefined, ["weight"]);
+  const age = firstOf(tank ?? undefined, ["age"]);
+  const experience = firstOf(tank ?? undefined, ["exp", "yearsExp", "experience"]);
+  const injuryStatus = firstOf(tank ?? undefined, ["injury_designation", "injuryStatus", "gameStatus"]);
+  const statusLabel = injuryStatus || player.status || "Active";
+  const statusPillClass = looksLikeInjury(statusLabel) ? "cvc-pill questionable" : "cvc-pill";
+  const rankEcr = (player.metadata as { rank_ecr?: number } | null)?.rank_ecr;
+  const rankAdp = (player.metadata as { rank_adp?: number } | null)?.rank_adp;
+  const hasExpertConsensus = Boolean(rankEcr || rankAdp);
+  const upcoming = schedule?.map(game => ({ game, opponent: gameOpponent(game, player.nfl_team ?? "") })).find(entry => entry.opponent);
+
+  const positionStats = pos === "QB"
+    ? [["PASS YDS", firstOf(metrics.passing, ["passYds", "passingYards"]) ?? "—"], ["PASS TD", firstOf(metrics.passing, ["passTD", "passingTD"]) ?? "—"], ["INT", firstOf(metrics.passing, ["int", "interceptions"]) ?? "—"]]
+    : pos === "K"
+    ? [["FGM", firstOf(metrics.kicking, ["fgMade", "fieldGoalsMade"]) ?? "—"], ["XPM", firstOf(metrics.kicking, ["xpMade", "extraPointsMade"]) ?? "—"], ["PTS", firstOf(metrics.stats, ["fantasyPoints"]) ?? "—"]]
+    : pos === "DST"
+    ? [["SACK", firstOf(metrics.defense, ["sacks"]) ?? "—"], ["INT", firstOf(metrics.defense, ["defensiveInterceptions", "interceptions"]) ?? "—"], ["TD", firstOf(metrics.defense, ["defTD", "touchdowns"]) ?? "—"]]
+    : [["RUSH YDS", firstOf(metrics.rushing, ["rushYds", "rushingYards"]) ?? "—"], ["REC", firstOf(metrics.receiving, ["receptions", "rec"]) ?? "—"], ["REC YDS", firstOf(metrics.receiving, ["recYds", "receivingYards"]) ?? "—"], ["TD", firstOf(metrics.receiving, ["recTD", "receivingTD"]) ?? "—"]];
+  const hasStats = Object.keys(metrics.stats).length > 0;
+
+  return <div className="mx-auto max-w-5xl">
+    <Link href="/free-agents" className="inline-flex items-center gap-2 text-xs font-black uppercase tracking-[0.12em] text-cvc-accent hover:text-[var(--cvc-accent-soft)]"><ArrowLeft size={15} /> Back to players</Link>
+
+    <section className="cvc-card mt-5"><div className="cvc-card-stripe" /><div className="cvc-card-body sm:p-7"><div className="flex flex-wrap items-start gap-5">
+      <span className="grid h-24 w-24 shrink-0 place-items-center overflow-hidden rounded-2xl bg-cvc-deep text-2xl font-black text-white">{headshot && !headshotFailed ? <img src={headshot} alt="" className="h-full w-full object-cover object-top" onError={() => setHeadshotFailed(true)} /> : initials}</span>
+      <div className="min-w-0 flex-1">
+        <div className="flex flex-wrap items-center gap-2"><h1 className="font-display text-4xl uppercase leading-none tracking-[0.02em] text-cvc-deep sm:text-5xl">{player.display_name}</h1><span className={`rounded px-2 py-1 text-xs font-black text-white ${positionColor[pos] ?? "bg-slate-700"}`}>{pos}</span>{jerseyNum ? <span className="text-lg font-bold text-slate-400">#{jerseyNum}</span> : null}</div>
+        <p className="mt-2 text-sm text-slate-500">{player.nfl_team ?? "NFL team pending"}{height ? ` · ${height}` : ""}{weight ? ` · ${weight} lb` : ""}{age ? ` · Age ${age}` : ""}{experience ? ` · ${experience} yr exp` : ""}</p>
+        <div className="mt-3 flex flex-wrap items-center gap-2">
+          {player.ownership ? <span className="inline-flex items-center gap-1.5 rounded-full bg-cvc-tint px-3 py-1 text-xs font-bold text-[var(--cvc-primary)]"><ShieldCheck size={13} />{player.ownership.franchiseName}{player.ownership.ownerName ? ` · ${player.ownership.ownerName}` : ""}</span> : <span className="inline-flex rounded-full bg-[var(--cvc-accent)] px-3 py-1 text-xs font-black text-cvc-deep">Free agent</span>}
+          <span className={statusPillClass}>{statusLabel}</span>
+        </div>
+      </div>
+    </div></div></section>
+
+    {hasExpertConsensus ? <section className="cvc-card mt-5"><div className="cvc-card-title"><span>Expert Consensus</span><TrendingUp size={16} /></div><div className="cvc-card-body grid grid-cols-2 gap-4 sm:grid-cols-2">
+      {/* Only overall rank + ADP are captured by fantasyProsSync.normalizeFantasyProsPlayers today.
+          Position rank, tier, and weekly projections would need that sync extended to persist
+          FantasyPros' positional-rankings/projections endpoints before this panel could show them. */}
+      {rankEcr ? <div><p className="text-[10px] font-black uppercase tracking-[0.1em] text-slate-500">Overall rank</p><p className="mt-1 font-display text-3xl text-cvc-deep">#{rankEcr}</p></div> : null}
+      {rankAdp ? <div><p className="text-[10px] font-black uppercase tracking-[0.1em] text-slate-500">ADP</p><p className="mt-1 font-display text-3xl text-cvc-deep">{rankAdp}</p></div> : null}
+    </div></section> : null}
+
+    {upcoming ? <section className="cvc-card mt-5"><div className="cvc-card-title"><span>Upcoming Matchup</span><CalendarDays size={16} /></div><div className="cvc-card-body flex items-center justify-between"><p className="font-display text-2xl text-cvc-deep">{upcoming.opponent!.atOrVs} {upcoming.opponent!.opponent}</p><p className="text-sm text-slate-500">{firstOf(upcoming.game, ["gameWeek", "week"]) ? `Week ${firstOf(upcoming.game, ["gameWeek", "week"])}` : ""} {firstOf(upcoming.game, ["gameDate", "date"]) ?? ""}</p></div></section> : null}
+
+    {loadingNews || news.length ? <section className="cvc-card mt-5"><div className="cvc-card-title"><span>Player News</span><Newspaper size={16} /></div>{loadingNews ? <div className="cvc-card-body text-sm text-slate-500">Loading Tank01 news…</div> : <div>{news.map((item, index) => <article key={`${item.title}-${index}`} className="border-t border-slate-200 px-5 py-4 first:border-t-0"><div className="flex flex-wrap items-center gap-2">{looksLikeInjury(item.title ?? "") ? <span className="rounded bg-rose-100 px-2 py-1 text-[10px] font-black uppercase text-rose-800">Injury watch</span> : <span className="rounded bg-slate-100 px-2 py-1 text-[10px] font-black uppercase text-slate-600">Tank01</span>}</div><h3 className="mt-2 text-base font-black leading-snug text-cvc-deep">{item.title}</h3>{item.link ? <a href={item.link} target="_blank" rel="noreferrer" className="mt-2 inline-block text-xs font-black uppercase tracking-[0.08em] text-[var(--cvc-primary)] underline">Read source</a> : null}</article>)}</div>}</section> : null}
+
+    <section className="cvc-card mt-5">
+      <div className="flex items-center gap-1 border-b border-slate-200 bg-white px-3 pt-2">
+        {([["stats", "Season Stats", BarChart3], ["schedule", "Schedule", CalendarDays], ["gamelog", "Game Log", ClipboardList]] as const).map(([id, label, Icon]) => <button key={id} onClick={() => setTab(id)} className={`flex items-center gap-1.5 border-b-[3px] px-4 py-3 text-xs font-black uppercase tracking-[0.08em] ${tab === id ? "border-[var(--cvc-accent)] text-cvc-deep" : "border-transparent text-slate-400 hover:text-cvc-deep"}`}><Icon size={14} />{label}</button>)}
+      </div>
+      <div className="cvc-card-body">
+        {tab === "stats" ? (hasStats ? <div className="grid grid-cols-2 gap-px overflow-hidden rounded-lg bg-slate-200 sm:grid-cols-4">{positionStats.map(([label, value]) => <div key={label} className="bg-white p-4"><p className="text-[10px] font-black uppercase text-slate-500">{label}</p><p className="mt-1 text-xl font-black text-cvc-deep">{value}</p></div>)}</div> : <p className="text-sm text-slate-500">{loadingInfo ? "Loading Tank01 season stats…" : "Season stats are unavailable for this player right now."}</p>) : null}
+        {tab === "schedule" ? (schedule?.length ? <div className="overflow-x-auto"><table className="cvc-table"><thead><tr><th>Week</th><th>Opponent</th><th>Date</th></tr></thead><tbody>{schedule.map((game, index) => { const opponent = gameOpponent(game, player.nfl_team ?? ""); return opponent ? <tr key={index}><td>{firstOf(game, ["gameWeek", "week"]) ?? "—"}</td><td>{opponent.atOrVs} {opponent.opponent}</td><td>{firstOf(game, ["gameDate", "date"]) ?? "—"}</td></tr> : null; })}</tbody></table></div> : <p className="text-sm text-slate-500">Schedule data is unavailable for this player right now.</p>) : null}
+        {/* Game Log reuses the team-schedule fetch as a stand-in for a played-games list since
+            getNFLGamesForPlayer has no existing usage/parsing anywhere in this codebase — its real
+            response shape needs confirming against a live call before this tab shows box-score-level
+            detail (points, targets, etc.) rather than just the schedule. */}
+        {tab === "gamelog" ? (gameLog?.length ? <p className="text-sm text-slate-500">Game-by-game detail requires confirming getNFLGamesForPlayer's response shape against a live Tank01 call — showing schedule context only for now.</p> : <p className="text-sm text-slate-500">{loadingGameLog ? "Loading…" : "Game log is unavailable for this player right now."}</p>) : null}
+      </div>
+    </section>
+  </div>;
 }
