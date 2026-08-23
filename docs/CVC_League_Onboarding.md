@@ -81,6 +81,9 @@ The live-scoring and player-news views have a provider-neutral boundary. Before 
 
 ## Custom domain handoff: cvcfantasyfootball.com
 
-The CVC site is prepared to use `https://cvcfantasyfootball.com/` as its canonical public address. In the project management interface, open **Settings → Domains**, add `cvcfantasyfootball.com`, and follow the displayed DNS instructions at the domain registrar. Do not remove the Manus-provided project domain; it remains useful as a recovery and preview address.
+CVC is hosted on Vercel; DNS for `cvcfantasyfootball.com` is managed at Namecheap. To connect the domain:
 
-After DNS verification completes, visit both `cvcfantasyfootball.com` and `www.cvcfantasyfootball.com` (if you choose to configure the `www` host) and select one as the canonical redirect destination. Publishing remains a separate user-controlled action.
+1. In the Vercel project, open **Settings → Domains** and add both `cvcfantasyfootball.com` and `www.cvcfantasyfootball.com`. Choose the apex domain as canonical, with `www` redirecting to it.
+2. Vercel displays the exact DNS records required (typically an `A` record for `@` pointing at Vercel's anycast IP, and a `CNAME` for `www` pointing at `cname.vercel-dns.com` — use whatever the dashboard currently shows).
+3. Add those records in Namecheap's **Advanced DNS** panel for the domain, removing any conflicting existing `@`/`www` records.
+4. Wait for DNS propagation and Vercel's automatic SSL issuance, then confirm both `https://cvcfantasyfootball.com` and `https://www.cvcfantasyfootball.com` resolve to the live site.

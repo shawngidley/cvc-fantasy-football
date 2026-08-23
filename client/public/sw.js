@@ -3,11 +3,11 @@ const ASSETS = [
   "/",
   "/standings",
   "/manifest.webmanifest",
-  "/manus-storage/cvc-pwa-192-clean_c8e39f50.png",
-  "/manus-storage/cvc-pwa-512-clean_9ae190a5.png",
-  "/manus-storage/cvc-pwa-maskable-512-clean_6056ae8c.png",
-  "/manus-storage/cvc-apple-touch-icon-clean_8e601a69.png",
-  "/manus-storage/cvc-favicon-64-clean_5da454a9.png"
+  "/brand/pwa-192.png",
+  "/brand/pwa-512.png",
+  "/brand/pwa-maskable-512.png",
+  "/brand/apple-touch-icon.png",
+  "/brand/favicon-64.png"
 ];
 
 self.addEventListener("install", event => {

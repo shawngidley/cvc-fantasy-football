@@ -1,6 +1,5 @@
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
-import { ENV } from "../_core/env";
 import { protectedProcedure, publicProcedure, router } from "../_core/trpc";
 import { getFantasyProsDataAdapter, getNFLDataAdapter } from "../nflDataAdapter";
 import { fantasyProsCacheStatus } from "../fantasyProsCache";

@@ -46,8 +46,8 @@ button { cursor: pointer; }
 .bg-cvc-tint { background: var(--cvc-tint); }
 .text-cvc-deep\/65 { color: color-mix(in srgb, var(--cvc-deep) 65%, transparent); }
 
-.cvc-stadium-layer { position: fixed; inset: 0; z-index: 0; background: linear-gradient(180deg, rgba(4, 15, 23, .64), rgba(4, 15, 23, .90)), url('/manus-storage/cvc-stadium-night_70d3bfb5.png') center / cover no-repeat; }
-.cvc-stadium-layer::after { content: ""; position: absolute; inset: 0; opacity: .22; background: url('/manus-storage/cvc-turf-texture_2aa62bbc.png') center / cover no-repeat; mix-blend-mode: screen; }
+.cvc-stadium-layer { position: fixed; inset: 0; z-index: 0; background: linear-gradient(180deg, rgba(4, 15, 23, .64), rgba(4, 15, 23, .90)), url('/brand/stadium-night.png') center / cover no-repeat; }
+.cvc-stadium-layer::after { content: ""; position: absolute; inset: 0; opacity: .22; background: url('/brand/turf-texture.png') center / cover no-repeat; mix-blend-mode: screen; }
 .cvc-nav { position: sticky; top: 0; z-index: 40; border-bottom: 1px solid rgba(255,255,255,.10); background: rgba(7,19,28,.83); backdrop-filter: blur(18px); }
 .cvc-mark { display: inline-flex; align-items: center; justify-content: center; width: 39px; height: 39px; border: 1px solid rgba(230,164,59,.8); border-radius: 50%; color: var(--cvc-accent); font-family: "Barlow Condensed", sans-serif; font-size: 16px; font-weight: 800; letter-spacing: .04em; }
 .cvc-nav-link, .cvc-mobile-link { border-radius: 5px; color: rgba(255,255,255,.72); font-size: 10px; font-weight: 700; letter-spacing: .12em; padding: .5rem .55rem; text-decoration: none; text-transform: uppercase; transition: background .15s, color .15s; }
@@ -102,7 +102,7 @@ button { cursor: pointer; }
 .cvc-field input:focus, .cvc-field select:focus, .cvc-field textarea:focus { border-color: var(--cvc-accent); box-shadow: 0 0 0 3px rgba(230,164,59,.16); }
 .cvc-login-wrap { display: grid; min-height: 100vh; grid-template-columns: minmax(0, 1fr); background: #fff; }
 .cvc-login-panel { position: relative; z-index: 2; display: flex; flex-direction: column; justify-content: center; padding: 3.5rem 1.5rem; }
-.cvc-login-art { position: fixed; inset: 0; background: linear-gradient(135deg, rgba(6,17,27,.9), rgba(6,17,27,.45)), url('/manus-storage/cvc-stadium-crowd_e37212ae.png') center / cover; }
+.cvc-login-art { position: fixed; inset: 0; background: linear-gradient(135deg, rgba(6,17,27,.9), rgba(6,17,27,.45)), url('/brand/stadium-crowd.png') center / cover; }
 .cvc-login-panel { margin: 0 4vw; max-width: 590px; border-radius: 18px; background: rgba(255,255,255,.96); box-shadow: 0 30px 80px rgba(0,0,0,.25); }
 .cvc-login-copy { display: none; }
 @media (min-width: 960px) { .cvc-login-wrap { grid-template-columns: 1fr 1fr; } .cvc-login-panel { margin-left: auto; margin-right: 6vw; width: min(590px, 88%); } .cvc-login-copy { position: relative; z-index: 1; display: flex; flex-direction: column; justify-content: center; padding: 4rem; } .cvc-mark-large { width: 80px; height: 80px; font-size: 28px; } }
