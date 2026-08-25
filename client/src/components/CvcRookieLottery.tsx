@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { Radio, ShieldCheck, Sparkles, Timer, Trophy } from "lucide-react";
 import { trpc } from "@/lib/trpc";
@@ -28,6 +28,20 @@ export function CvcRookieLottery({ roundNumber = 2 }: { roundNumber?: number }) 
   }, []);
 
   const refresh = () => { void utils.league.rookieLottery.invalidate(); void utils.league.draftBoard.invalidate(); };
+
+  // The lottery can also complete purely from polling elapsed time (nobody clicking a
+  // button) -- the server-side write to draft_pick still happens in that case, but
+  // nothing had ever told the Draft Board table to refetch and show it, so the page
+  // could sit showing a stale, pre-lottery order until manually reloaded. Watches for
+  // the transition into COMPLETE and invalidates draftBoard exactly once when it
+  // happens, regardless of whether a mutation or plain polling caused it.
+  const previousStatusRef = useRef<string | undefined>(undefined);
+  useEffect(() => {
+    const status = lottery.data?.status;
+    if (status === "COMPLETE" && previousStatusRef.current !== "COMPLETE") void utils.league.draftBoard.invalidate();
+    previousStatusRef.current = status;
+  }, [lottery.data?.status, utils]);
+
   const start = trpc.league.startRookieLottery.useMutation({ onSuccess: refresh, onError: error => toast.error(error.message) });
   const pause = trpc.league.pauseRookieLottery.useMutation({ onSuccess: refresh, onError: error => toast.error(error.message) });
   const resume = trpc.league.resumeRookieLottery.useMutation({ onSuccess: refresh, onError: error => toast.error(error.message) });
