@@ -328,7 +328,17 @@ export const leagueRouter = router({
     const order = secureShuffle(franchiseIds);
     const commitment = lotteryCommitment(order);
     const now = new Date().toISOString();
-    const lottery = unwrap(await supabase.from("rookie_draft_lottery").insert({ draft_id: draft.id, round_number: roundNumber, status: "RUNNING", franchise_order: order, franchise_count: order.length, order_commitment: commitment, reveal_interval_seconds: LOTTERY_REVEAL_INTERVAL_SECONDS, revealed_count: 0, started_at: now, elapsed_ms_before_pause: 0, created_by_owner_id: commissioner.id, updated_at: now }).select("id").single());
+    // A partial unique index (draft_id, round_number) where status in (RUNNING,PAUSED)
+    // backs this up at the database level in case two start requests race past the
+    // check above at nearly the same instant (double-click, two tabs/devices) -- the
+    // losing insert fails with a unique violation (Postgres code 23505) rather than
+    // silently creating a second active lottery that would prevent completion.
+    const { data: inserted, error: insertError } = await supabase.from("rookie_draft_lottery").insert({ draft_id: draft.id, round_number: roundNumber, status: "RUNNING", franchise_order: order, franchise_count: order.length, order_commitment: commitment, reveal_interval_seconds: LOTTERY_REVEAL_INTERVAL_SECONDS, revealed_count: 0, started_at: now, elapsed_ms_before_pause: 0, created_by_owner_id: commissioner.id, updated_at: now }).select("id").single();
+    if (insertError) {
+      if (insertError.code === "23505") throw new TRPCError({ code: "CONFLICT", message: `A round ${roundNumber} lottery just started in another tab or by someone else. Refresh to see it.` });
+      throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: insertError.message });
+    }
+    const lottery = inserted;
     if (!lottery) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "The lottery could not be started." });
     await createAuditEvent(league.id, season.id, commissioner.id, "rookie_draft_lottery", lottery.id, "started", `Started the round ${roundNumber} rookie draft lottery (${order.length} franchises).`);
     return { lotteryId: lottery.id };
