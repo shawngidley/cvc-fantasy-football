@@ -19,6 +19,8 @@ function shortName(name: string | null | undefined) {
   return `${parts[0][0]}. ${parts.slice(1).join(" ")}`;
 }
 
+const KNOWN_SOURCE_MARKERS = new Set(["F", "T", "R", "W"]);
+
 function contractLabel(item: any) {
   const year = item.contract?.expires_year;
   if (!year) return "—";
@@ -27,8 +29,12 @@ function contractLabel(item: any) {
   // status rather than how they were originally acquired.
   const activeRightMarker = item.rights?.map((right: any) => rightMarker[right.right_type]).find(Boolean);
   if (activeRightMarker) return `${year}-${activeRightMarker}`;
+  // Otherwise fall back to the contract's own source marker — F (franchise), T
+  // (transition), R (rookie draft), or W (waiver) — not just F as before, which is
+  // why rookie-drafted players like Ashton Jeanty weren't showing "-R" here even
+  // though their contract row was tagged correctly.
   const marker = (item.contract?.source_marker ?? "").trim().toUpperCase();
-  return `${year}${marker.startsWith("F") ? "-F" : ""}`;
+  return `${year}${KNOWN_SOURCE_MARKERS.has(marker) ? `-${marker}` : ""}`;
 }
 
 function RosterCard({ franchise, mine }: { franchise: any; mine?: boolean }) {
