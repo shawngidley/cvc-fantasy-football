@@ -108,4 +108,38 @@ export const auctionRouter = router({
     unwrap(await supabase.from("transaction").insert({ season_id: season.id, franchise_id: nomination.high_franchise_id, actor_owner_id: actor.id, transaction_type: "commissioner_adjustment", status: "final", summary: `Auction award corrected: $${nomination.high_bid} restored`, details: { nominationId: nomination.id, playerId: nomination.player_id, reason: input.reason } }).select("id").single());
     return { success: true } as const;
   }),
+
+  // Records a full pick (player + winning franchise + salary) in one step, for auctions
+  // where nomination and bidding happen live in the room rather than in the app — e.g.
+  // the commissioner speaking the result aloud via the voice-pick recorder, which parses
+  // a spoken sentence into these three fields client-side and calls this after the
+  // commissioner confirms the parsed result. Functionally equivalent to nominate() +
+  // award() run back to back (same validation, same nomination/roster/contract/
+  // transaction records), just without requiring a prior "active nomination" in the app.
+  recordVoicePick: protectedProcedure.input(z.object({ playerId: z.string().uuid(), franchiseId: z.string().uuid(), amount: z.number().int().min(1) })).mutation(async ({ ctx: c, input }) => {
+    const actor = await commissioner(c.user.openId); const { season, draft } = await context();
+    const existing = unwrap(await supabase.from("auction_nomination").select("id").eq("draft_id", draft.id).eq("status", "active").maybeSingle());
+    if (existing) throw new TRPCError({ code: "CONFLICT", message: "Award or pass the active player first." });
+    const rostered = unwrap(await supabase.from("roster_assignment").select("id").eq("season_id", season.id).eq("player_id", input.playerId).is("released_at", null).limit(1));
+    if ((rostered ?? []).length) throw new TRPCError({ code: "BAD_REQUEST", message: "Rostered players are not auction eligible." });
+    const player = unwrap(await supabase.from("player").select("provider, position, metadata").eq("id", input.playerId).maybeSingle());
+    if (!player || player.provider === "placeholder") throw new TRPCError({ code: "BAD_REQUEST", message: "Only imported CVC player records are auction eligible." });
+    if (!isCvcAuctionPosition(player.position)) throw new TRPCError({ code: "BAD_REQUEST", message: "Only QB, RB, WR, TE, K, and D/ST players are eligible for the CVC auction." });
+    if (((player.metadata ?? {}) as { is_rookie?: boolean }).is_rookie) throw new TRPCError({ code: "BAD_REQUEST", message: "Rookies are not eligible for the regular CVC auction." });
+    const alreadyAwarded = unwrap(await supabase.from("auction_nomination").select("id").eq("draft_id", draft.id).eq("player_id", input.playerId).eq("status", "awarded").maybeSingle());
+    if (alreadyAwarded) throw new TRPCError({ code: "CONFLICT", message: "This player has already been awarded in the CVC auction." });
+    const state = unwrap(await supabase.from("auction_team_state").select("starting_budget, spent_budget, roster_count").eq("draft_id", draft.id).eq("franchise_id", input.franchiseId).maybeSingle());
+    if (!state) throw new TRPCError({ code: "NOT_FOUND", message: "This franchise has no CVC auction budget configured." });
+    const legalMax = calculateAuctionLegalMaxBid(state.starting_budget, state.spent_budget, state.roster_count);
+    if (state.roster_count >= 22) throw new TRPCError({ code: "BAD_REQUEST", message: "This franchise has reached 22 players." });
+    if (input.amount > legalMax) throw new TRPCError({ code: "BAD_REQUEST", message: `Maximum legal bid is $${legalMax}.` });
+    const nomination = unwrap(await supabase.from("auction_nomination").insert({ draft_id: draft.id, player_id: input.playerId, nominating_franchise_id: input.franchiseId, high_franchise_id: input.franchiseId, high_bid: input.amount, status: "awarded", awarded_at: new Date().toISOString() }).select("id").single());
+    if (!nomination) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "CVC voice pick could not be saved." });
+    unwrap(await supabase.from("auction_team_state").update({ spent_budget: state.spent_budget + input.amount, roster_count: state.roster_count + 1, updated_at: new Date().toISOString() }).eq("draft_id", draft.id).eq("franchise_id", input.franchiseId));
+    unwrap(await supabase.from("roster_assignment").insert({ season_id: season.id, franchise_id: input.franchiseId, player_id: input.playerId, roster_state: "active" }));
+    const contractYears = cvcFranchiseTerms(cvcContractTier(input.amount));
+    unwrap(await supabase.from("player_contract").upsert({ season_id: season.id, franchise_id: input.franchiseId, player_id: input.playerId, salary: input.amount, expires_year: season.year + contractYears - 1, source_marker: null, contract_status: "active" }, { onConflict: "season_id,franchise_id,player_id" }).select("id").single());
+    unwrap(await supabase.from("transaction").insert({ season_id: season.id, franchise_id: input.franchiseId, actor_owner_id: actor.id, transaction_type: "draft_pick", status: "final", summary: `Auction pick recorded by voice for $${input.amount}`, details: { nominationId: nomination.id, amount: input.amount, source: "voice_pick" } }));
+    return { success: true, legalMax };
+  }),
 });
