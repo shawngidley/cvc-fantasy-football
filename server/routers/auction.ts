@@ -37,6 +37,15 @@ async function liveTeamState(seasonId: string, draftId: string, franchiseId: str
   const roster_count = (unwrap(assignmentsResult) ?? []).length;
   return { starting_budget: state.starting_budget, spent_budget, roster_count };
 }
+// Rookies are only auction-eligible once the rookie draft has concluded — the rookie
+// draft runs first, and any rookie it doesn't select becomes fair game for the regular
+// auction afterward. A selected rookie is already rostered by that point anyway (see
+// recordDraftSelection), so this only ever matters for undrafted rookies.
+async function assertRookieAuctionEligible(seasonId: string, isRookie: boolean) {
+  if (!isRookie) return;
+  const rookieDraft = unwrap(await supabase.from("draft").select("status").eq("season_id", seasonId).eq("draft_type", "rookie").maybeSingle());
+  if (rookieDraft?.status !== "complete") throw new TRPCError({ code: "BAD_REQUEST", message: "Rookies are not eligible for the regular CVC auction until the rookie draft is complete." });
+}
 async function commissioner(openId: string) {
   const ownerId = openId.startsWith("cvc:") ? openId.slice(4) : null;
   const owner = unwrap(await supabase.from("owner").select("id, role").eq(ownerId ? "id" : "user_open_id", ownerId ?? openId).eq("is_active", true).maybeSingle());
@@ -73,18 +82,26 @@ export const auctionRouter = router({
     let playerQuery = supabase.from("player").select("id, display_name, position, nfl_team, status, metadata").neq("provider", "placeholder").in("position", input?.position ? [input.position] : CVC_AUCTION_POSITIONS).order("display_name").limit(limit + 220);
     if (input?.search) playerQuery = playerQuery.ilike("display_name", `%${input.search.replace(/[%_]/g, "")}%`);
     if (input?.position) playerQuery = playerQuery.eq("position", input.position);
-    const [playersResult, activeAssignmentsResult, awardedResult] = await Promise.all([
+    const [playersResult, activeAssignmentsResult, awardedResult, rookieDraftResult] = await Promise.all([
       playerQuery,
       supabase.from("roster_assignment").select("player_id").eq("season_id", season.id).is("released_at", null),
       supabase.from("auction_nomination").select("player_id").eq("draft_id", draft.id).eq("status", "awarded"),
+      supabase.from("draft").select("status").eq("season_id", season.id).eq("draft_type", "rookie").maybeSingle(),
     ]);
     const activePlayerIds = new Set((unwrap(activeAssignmentsResult) ?? []).map(assignment => assignment.player_id));
     const activeRosteredPlayers = activePlayerIds.size ? unwrap(await supabase.from("player").select("display_name").in("id", Array.from(activePlayerIds))) ?? [] : [];
     const activePlayerNames = new Set(activeRosteredPlayers.map(player => playerIdentity(player.display_name)));
     const awardedPlayerIds = new Set((unwrap(awardedResult) ?? []).map(award => award.player_id));
+    // The rookie draft runs first. Until it's marked complete, rookies are blocked from
+    // the regular auction entirely. Once complete, a rookie who WAS selected is already
+    // rostered (recordDraftSelection creates their roster_assignment), so the
+    // activePlayerIds check above already excludes them — only undrafted rookies remain
+    // unrostered and become auction-eligible here.
+    const rookieDraftComplete = unwrap(rookieDraftResult)?.status === "complete";
     const filtered = (unwrap(playersResult) ?? []).filter(player => {
       const metadata = (player.metadata ?? {}) as { is_rookie?: boolean };
-      return !activePlayerIds.has(player.id) && !activePlayerNames.has(playerIdentity(player.display_name)) && !awardedPlayerIds.has(player.id) && !metadata.is_rookie;
+      if (!rookieDraftComplete && metadata.is_rookie) return false;
+      return !activePlayerIds.has(player.id) && !activePlayerNames.has(playerIdentity(player.display_name)) && !awardedPlayerIds.has(player.id);
     });
     // Some player names have duplicate rows in the underlying table (separate provider
     // syncs). Since none of these were eligible-elimination candidates above (all are
@@ -117,7 +134,7 @@ export const auctionRouter = router({
     const player = unwrap(await supabase.from("player").select("provider, position, metadata").eq("id", input.playerId).maybeSingle());
     if (!player || player.provider === "placeholder") throw new TRPCError({ code: "BAD_REQUEST", message: "Only imported CVC player records are auction eligible." });
     if (!isCvcAuctionPosition(player.position)) throw new TRPCError({ code: "BAD_REQUEST", message: "Only QB, RB, WR, TE, K, and D/ST players are eligible for the CVC auction." });
-    if (((player.metadata ?? {}) as { is_rookie?: boolean }).is_rookie) throw new TRPCError({ code: "BAD_REQUEST", message: "Rookies are not eligible for the regular CVC auction." });
+    await assertRookieAuctionEligible(season.id, Boolean(((player.metadata ?? {}) as { is_rookie?: boolean }).is_rookie));
     return unwrap(await supabase.from("auction_nomination").insert({ draft_id: draft.id, player_id: input.playerId, nominating_franchise_id: nominatorState.franchise_id }).select().single());
   }),
   award: protectedProcedure.input(z.object({ franchiseId: z.string().uuid(), amount: z.number().int().min(1) })).mutation(async ({ ctx: c, input }) => {
@@ -168,7 +185,7 @@ export const auctionRouter = router({
     const player = unwrap(await supabase.from("player").select("provider, position, metadata").eq("id", input.playerId).maybeSingle());
     if (!player || player.provider === "placeholder") throw new TRPCError({ code: "BAD_REQUEST", message: "Only imported CVC player records are auction eligible." });
     if (!isCvcAuctionPosition(player.position)) throw new TRPCError({ code: "BAD_REQUEST", message: "Only QB, RB, WR, TE, K, and D/ST players are eligible for the CVC auction." });
-    if (((player.metadata ?? {}) as { is_rookie?: boolean }).is_rookie) throw new TRPCError({ code: "BAD_REQUEST", message: "Rookies are not eligible for the regular CVC auction." });
+    await assertRookieAuctionEligible(season.id, Boolean(((player.metadata ?? {}) as { is_rookie?: boolean }).is_rookie));
     const alreadyAwarded = unwrap(await supabase.from("auction_nomination").select("id").eq("draft_id", draft.id).eq("player_id", input.playerId).eq("status", "awarded").maybeSingle());
     if (alreadyAwarded) throw new TRPCError({ code: "CONFLICT", message: "This player has already been awarded in the CVC auction." });
     const state = await liveTeamState(season.id, draft.id, input.franchiseId);
@@ -181,7 +198,7 @@ export const auctionRouter = router({
     unwrap(await supabase.from("roster_assignment").insert({ season_id: season.id, franchise_id: input.franchiseId, player_id: input.playerId, roster_state: "active" }));
     const contractYears = cvcFranchiseTerms(cvcContractTier(input.amount));
     unwrap(await supabase.from("player_contract").upsert({ season_id: season.id, franchise_id: input.franchiseId, player_id: input.playerId, salary: input.amount, expires_year: season.year + contractYears - 1, source_marker: null, contract_status: "active" }, { onConflict: "season_id,franchise_id,player_id" }).select("id").single());
-    unwrap(await supabase.from("transaction").insert({ season_id: season.id, franchise_id: input.franchiseId, actor_owner_id: actor.id, transaction_type: "draft_pick", status: "final", summary: `Auction pick recorded by voice for $${input.amount}`, details: { nominationId: nomination.id, amount: input.amount, source: "voice_pick" } }));
+    unwrap(await supabase.from("transaction").insert({ season_id: season.id, franchise_id: input.franchiseId, actor_owner_id: actor.id, transaction_type: "draft_pick", status: "final", summary: `Auction pick recorded for $${input.amount}`, details: { nominationId: nomination.id, amount: input.amount, source: "commissioner_console" } }));
     return { success: true, legalMax };
   }),
 });
