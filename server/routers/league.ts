@@ -471,8 +471,9 @@ export const leagueRouter = router({
     await requireCommissioner({ openId: ctx.user.openId });
     if (!process.env.FANTASYPROS_API_KEY) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "FantasyPros is not configured for CVC." });
     const { season } = await getCurrentLeagueAndSeason();
-    const { idsByPosition, errors } = await getFantasyProsRookiePlayerIds(season.year);
-    return syncFantasyProsRookieFlags(idsByPosition, errors);
+    const { idsByPosition, errors, samplePlayers } = await getFantasyProsRookiePlayerIds(season.year);
+    const result = await syncFantasyProsRookieFlags(idsByPosition, errors);
+    return { ...result, samplePlayers };
   }),
 
   syncSeasonStats: protectedProcedure.input(z.object({ limit: z.number().int().min(1).max(100).optional() }).optional()).mutation(async ({ ctx, input }) => {

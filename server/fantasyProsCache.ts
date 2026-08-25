@@ -73,11 +73,12 @@ export async function getFantasyProsPlayerSnapshot(): Promise<FantasyProsSnapsho
 // matching nothing, the same failure mode that hid the original is_rookie/rookie bug.
 const ROOKIE_POSITIONS = ["QB", "RB", "WR", "TE", "K"] as const;
 
-export async function getFantasyProsRookiePlayerIds(season: number): Promise<{ idsByPosition: Record<string, string[]>; errors: Record<string, string> }> {
+export async function getFantasyProsRookiePlayerIds(season: number): Promise<{ idsByPosition: Record<string, string[]>; errors: Record<string, string>; samplePlayers: Record<string, unknown> }> {
   const apiKey = process.env.FANTASYPROS_API_KEY;
   if (!apiKey) throw new Error("FantasyPros is not configured for CVC.");
   const idsByPosition: Record<string, string[]> = {};
   const errors: Record<string, string> = {};
+  const samplePlayers: Record<string, unknown> = {};
   for (const position of ROOKIE_POSITIONS) {
     try {
       await waitForRequestWindow();
@@ -85,10 +86,14 @@ export async function getFantasyProsRookiePlayerIds(season: number): Promise<{ i
       if (!response.ok) { errors[position] = `Request failed with status ${response.status}`; continue; }
       const payload = await response.json() as { players?: { player_id?: number | string }[] };
       idsByPosition[position] = (payload.players ?? []).map(player => player.player_id).filter((id): id is number | string => id !== undefined).map(String);
+      // Diagnostic only: captures one raw player object per position so we can see
+      // whether the response carries a draft-year/experience field to scope this down
+      // to just the current draft class, rather than guessing at a field name.
+      if (payload.players?.length) samplePlayers[position] = payload.players[0];
     } catch (error) {
       errors[position] = error instanceof Error ? error.message : "Request failed";
     }
   }
-  return { idsByPosition, errors };
+  return { idsByPosition, errors, samplePlayers };
 }
 

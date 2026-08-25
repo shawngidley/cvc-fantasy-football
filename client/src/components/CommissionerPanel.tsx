@@ -122,7 +122,7 @@ function SeasonStatsSyncModule() {
     onError: error => toast.error(error.message),
   });
   const utils = trpc.useUtils();
-  const [rookieResult, setRookieResult] = useState<null | { countByPosition: Record<string, number>; matchedInDb: number; notYetSynced: number; flaggedNow: number; clearedStale: number; errors: Record<string, string> }>(null);
+  const [rookieResult, setRookieResult] = useState<null | { countByPosition: Record<string, number>; matchedInDb: number; notYetSynced: number; flaggedNow: number; clearedStale: number; errors: Record<string, string>; samplePlayers?: Record<string, unknown> }>(null);
   const syncPlayers = trpc.league.syncFantasyProsPlayers.useMutation({ onError: error => toast.error(error.message) });
   const syncRookies = trpc.league.syncFantasyProsRookies.useMutation({
     onSuccess: data => {
@@ -151,6 +151,7 @@ function SeasonStatsSyncModule() {
         <p className="mt-1"><b className="text-cvc-deep">Matched to a synced CVC player:</b> {rookieResult.matchedInDb} · <b className="text-cvc-deep">Not yet in CVC's player list:</b> {rookieResult.notYetSynced}</p>
         <p className="mt-1"><b className="text-cvc-deep">Newly flagged as rookie:</b> {rookieResult.flaggedNow} · <b className="text-cvc-deep">Stale flags cleared:</b> {rookieResult.clearedStale}</p>
         {Object.keys(rookieResult.errors).length ? <p className="mt-1 text-red-700"><b>Errors:</b> {Object.entries(rookieResult.errors).map(([pos, message]) => `${pos}: ${message}`).join("; ")}</p> : null}
+        {rookieResult.samplePlayers ? <details className="mt-2"><summary className="cursor-pointer text-cvc-deep">Raw sample player per position (for checking a draft-year field)</summary><pre className="mt-1 max-h-64 overflow-auto rounded bg-slate-50 p-2 text-[10px]">{JSON.stringify(rookieResult.samplePlayers, null, 2)}</pre></details> : null}
       </div> : null}
     </div>
   </div>;
