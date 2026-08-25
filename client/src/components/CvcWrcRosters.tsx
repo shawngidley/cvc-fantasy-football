@@ -8,10 +8,25 @@ import { TeamLogo } from "@/components/TeamLogo";
 
 const posTone: Record<string, string> = { QB: "bg-violet-100 text-violet-800", RB: "bg-emerald-100 text-emerald-800", WR: "bg-sky-100 text-sky-800", TE: "bg-amber-100 text-amber-800", K: "bg-fuchsia-100 text-fuchsia-800", DST: "bg-slate-200 text-slate-700" };
 const order: Record<string, number> = { QB: 0, RB: 1, WR: 2, TE: 3, K: 4, DST: 5 };
+const rightMarker: Record<string, string> = { franchise: "F", transition: "T", rookie_match: "R", waiver_match: "W", rookie_pick_match: "R" };
+
+// Compact "F. Lastname" format for the narrow roster-card grid, so a long name never
+// gets clipped mid-word by the column's truncation — e.g. "David Montgomery" -> "D. Montgomery".
+function shortName(name: string | null | undefined) {
+  if (!name) return "Player unavailable";
+  const parts = name.trim().split(/\s+/);
+  if (parts.length < 2) return name;
+  return `${parts[0][0]}. ${parts.slice(1).join(" ")}`;
+}
 
 function contractLabel(item: any) {
   const year = item.contract?.expires_year;
   if (!year) return "—";
+  // Any currently-active protection right (franchise/transition/rookie or waiver match)
+  // takes priority over the raw source marker, since it reflects the player's current
+  // status rather than how they were originally acquired.
+  const activeRightMarker = item.rights?.map((right: any) => rightMarker[right.right_type]).find(Boolean);
+  if (activeRightMarker) return `${year}-${activeRightMarker}`;
   const marker = (item.contract?.source_marker ?? "").trim().toUpperCase();
   return `${year}${marker.startsWith("F") ? "-F" : ""}`;
 }
@@ -24,7 +39,7 @@ function RosterCard({ franchise, mine }: { franchise: any; mine?: boolean }) {
     <div className="flex items-center gap-3 px-4 pb-3 pt-4"><TeamLogo name={franchise.name} abbreviation={franchise.abbreviation} logoUrl={franchise.logo_url} size="md" className="rounded-lg border-cvc-deep/20"/><div className="min-w-0 flex-1"><p className="truncate font-display text-xl uppercase tracking-[.04em] text-cvc-deep">{franchise.name}</p><p className="mt-0.5 text-xs text-slate-500">{franchise.owner} · {players.length} players</p></div>{mine ? <span className="rounded bg-cvc-accent px-2 py-1 text-[9px] font-bold uppercase tracking-[.09em] text-cvc-deep">My team</span> : null}<Link href={`/lineup/${franchise.id}`} className="rounded bg-cvc-deep px-2 py-1.5 text-[9px] font-bold uppercase tracking-[.08em] text-white hover:bg-cvc-accent hover:text-cvc-deep">View lineup</Link></div>
     <div className="border-t border-slate-200">
       <div className="grid grid-cols-[2.25rem_minmax(0,1fr)_2.25rem_3.75rem_4.5rem] gap-2 bg-slate-100 px-4 py-2 text-[9px] font-black uppercase tracking-[.08em] text-slate-500"><span>Pos</span><span>Player</span><span>NFL</span><span className="text-right">Salary</span><span className="text-right">Contract</span></div>
-      {roster.isLoading ? <p className="px-4 py-8 text-center text-sm text-slate-400">Loading roster…</p> : players.length ? players.map((item, index) => <div className={index % 2 ? "grid grid-cols-[2.25rem_minmax(0,1fr)_2.25rem_3.75rem_4.5rem] items-center gap-2 bg-slate-50 px-4 py-2" : "grid grid-cols-[2.25rem_minmax(0,1fr)_2.25rem_3.75rem_4.5rem] items-center gap-2 bg-white px-4 py-2"} key={item.id}><span className={`rounded px-1.5 py-0.5 text-center text-[10px] font-bold ${posTone[item.player?.position] ?? "bg-slate-100 text-slate-700"}`}>{item.player?.position ?? "—"}</span><Link href={`/player/${item.player_id}`} className="min-w-0 truncate text-sm font-semibold text-cvc-deep hover:text-cvc-accent">{item.player?.display_name ?? "Player unavailable"}</Link><span className="text-xs font-semibold text-slate-500">{item.player?.nfl_team ?? "FA"}</span><span className="text-right text-[10px] font-bold text-cvc-deep">{item.contract ? `$${Number(item.contract.salary).toFixed(0)}` : "—"}</span><span className="text-right text-[10px] font-bold uppercase text-slate-600">{contractLabel(item)}</span></div>) : <p className="px-4 py-8 text-center text-sm text-slate-400">No active roster assignments.</p>}
+      {roster.isLoading ? <p className="px-4 py-8 text-center text-sm text-slate-400">Loading roster…</p> : players.length ? players.map((item, index) => <div className={index % 2 ? "grid grid-cols-[2.25rem_minmax(0,1fr)_2.25rem_3.75rem_4.5rem] items-center gap-2 bg-slate-50 px-4 py-2" : "grid grid-cols-[2.25rem_minmax(0,1fr)_2.25rem_3.75rem_4.5rem] items-center gap-2 bg-white px-4 py-2"} key={item.id}><span className={`rounded px-1.5 py-0.5 text-center text-[10px] font-bold ${posTone[item.player?.position] ?? "bg-slate-100 text-slate-700"}`}>{item.player?.position ?? "—"}</span><Link href={`/player/${item.player_id}`} className="min-w-0 truncate text-sm font-semibold text-cvc-deep hover:text-cvc-accent">{shortName(item.player?.display_name)}</Link><span className="text-xs font-semibold text-slate-500">{item.player?.nfl_team ?? "FA"}</span><span className="text-right text-[10px] font-bold text-cvc-deep">{item.contract ? `$${Number(item.contract.salary).toFixed(0)}` : "—"}</span><span className="text-right text-[10px] font-bold uppercase text-slate-600">{contractLabel(item)}</span></div>) : <p className="px-4 py-8 text-center text-sm text-slate-400">No active roster assignments.</p>}
     </div>
   </section>;
 }
