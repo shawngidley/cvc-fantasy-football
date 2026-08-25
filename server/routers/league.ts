@@ -63,16 +63,22 @@ async function createAuditEvent(leagueId: string, seasonId: string, actorOwnerId
 // draft_pick rows: franchiseOrder[0] (revealed first, draft_position N) goes to the
 // LAST pick of the round; franchiseOrder[N-1] (revealed last, draft_position 1) goes
 // to the FIRST pick — matching reverseLotteryPositions' reveal-order mapping exactly.
-async function applyRookieLotteryResults(draftId: string, roundNumber: number, franchiseOrder: string[]) {
+// Runs the individual pick updates in parallel (not a sequential awaited loop) to
+// minimize the chance of a slow request timing out partway through, and marks
+// results_applied so a future request can detect and retry if it ever does fail
+// partway anyway — this used to be a single unretried attempt with no way to notice
+// or recover from a partial failure.
+async function applyRookieLotteryResults(lotteryId: string, draftId: string, roundNumber: number, franchiseOrder: string[]) {
   const picks = unwrap(await supabase.from("draft_pick").select("id, pick_number").eq("draft_id", draftId).eq("round_number", roundNumber).order("pick_number")) ?? [];
   const count = franchiseOrder.length;
-  for (let index = 0; index < count; index += 1) {
+  const updates = Array.from({ length: count }, (_, index) => {
     const draftPosition = count - index;
     const pick = picks[draftPosition - 1];
-    if (!pick) continue;
     const franchiseId = franchiseOrder[index];
-    unwrap(await supabase.from("draft_pick").update({ original_franchise_id: franchiseId, current_franchise_id: franchiseId, updated_at: new Date().toISOString() }).eq("id", pick.id).select("id").single());
-  }
+    return pick ? { pick, franchiseId } : null;
+  }).filter((item): item is { pick: { id: string; pick_number: number }; franchiseId: string } => item !== null);
+  await Promise.all(updates.map(({ pick, franchiseId }) => supabase.from("draft_pick").update({ original_franchise_id: franchiseId, current_franchise_id: franchiseId, updated_at: new Date().toISOString() }).eq("id", pick.id).select("id").single().then(unwrap)));
+  unwrap(await supabase.from("rookie_draft_lottery").update({ results_applied: true, updated_at: new Date().toISOString() }).eq("id", lotteryId).select("id").single());
 }
 
 /** Attaches cached Tank01 season-total stats (see tank01SeasonStatsSync.ts) to a page
@@ -267,7 +273,7 @@ export const leagueRouter = router({
     const { season } = await getCurrentLeagueAndSeason();
     const draft = unwrap(await supabase.from("draft").select("id").eq("season_id", season.id).eq("draft_type", "rookie").maybeSingle());
     if (!draft) return null;
-    const lottery = unwrap(await supabase.from("rookie_draft_lottery").select("id, status, franchise_count, order_commitment, reveal_interval_seconds, revealed_count, started_at, elapsed_ms_before_pause, paused_at, completed_at, aborted_at, abort_reason").eq("draft_id", draft.id).eq("round_number", roundNumber).order("created_at", { ascending: false }).limit(1).maybeSingle());
+    const lottery = unwrap(await supabase.from("rookie_draft_lottery").select("id, status, franchise_count, order_commitment, reveal_interval_seconds, revealed_count, started_at, elapsed_ms_before_pause, paused_at, completed_at, aborted_at, abort_reason, results_applied").eq("draft_id", draft.id).eq("round_number", roundNumber).order("created_at", { ascending: false }).limit(1).maybeSingle());
     if (!lottery) return null;
 
     let revealedCount = lottery.revealed_count;
@@ -286,14 +292,24 @@ export const leagueRouter = router({
         if (isComplete) {
           // Compare-and-swap on status='RUNNING' so only one concurrent poller (many
           // owners can be watching the reveal live) wins the RUNNING->COMPLETE
-          // transition and applies results to draft_pick exactly once.
-          const claimed = unwrap(await supabase.from("rookie_draft_lottery").update({ revealed_count: computed, status: "COMPLETE", completed_at: new Date().toISOString(), updated_at: new Date().toISOString() }).eq("id", lottery.id).eq("status", "RUNNING").select("id").maybeSingle());
-          if (claimed) await applyRookieLotteryResults(draft.id, roundNumber, full?.franchise_order ?? []);
+          // transition — but ALWAYS attempts applyRookieLotteryResults below via the
+          // results_applied self-heal check, whether or not this particular request
+          // won the swap, so a request that dies partway through the pick writes
+          // still gets retried by the next one instead of leaving it stuck forever.
+          unwrap(await supabase.from("rookie_draft_lottery").update({ revealed_count: computed, status: "COMPLETE", completed_at: new Date().toISOString(), updated_at: new Date().toISOString() }).eq("id", lottery.id).eq("status", "RUNNING").select("id").maybeSingle());
           status = "COMPLETE";
+          if (!lottery.results_applied) await applyRookieLotteryResults(lottery.id, draft.id, roundNumber, full?.franchise_order ?? []);
         } else {
           unwrap(await supabase.from("rookie_draft_lottery").update({ revealed_count: computed, updated_at: new Date().toISOString() }).eq("id", lottery.id).select("id").single());
         }
       }
+    } else if (lottery.status === "COMPLETE" && !lottery.results_applied) {
+      // Self-heals a lottery that reached COMPLETE in an earlier request but never
+      // successfully finished writing draft_pick (e.g. that request timed out
+      // partway through the pick updates) — every request that observes this now
+      // retries the write until results_applied is confirmed set.
+      const full = unwrap(await supabase.from("rookie_draft_lottery").select("franchise_order").eq("id", lottery.id).single());
+      await applyRookieLotteryResults(lottery.id, draft.id, roundNumber, full?.franchise_order ?? []);
     }
 
     const revealRows = unwrap(await supabase.from("rookie_draft_lottery_reveal").select("reveal_index, draft_position, revealed_at, franchise:franchise_id(name, logo_url)").eq("lottery_id", lottery.id).order("reveal_index")) ?? [];
