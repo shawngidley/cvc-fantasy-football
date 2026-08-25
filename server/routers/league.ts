@@ -315,7 +315,29 @@ export const leagueRouter = router({
     const activePlayerIds = new Set((unwrap(activeAssignmentsResult) ?? []).map(assignment => assignment.player_id));
     const rosteredPlayers = activePlayerIds.size ? unwrap(await supabase.from("player").select("display_name").in("id", Array.from(activePlayerIds))) ?? [] : [];
     const activePlayerNames = new Set(rosteredPlayers.map(player => player.display_name.trim().toLowerCase().replace(/\s+/g, " ")));
-    return players.filter(player => !activePlayerIds.has(player.id) && !activePlayerNames.has(player.display_name.trim().toLowerCase().replace(/\s+/g, " "))).slice(0, limit);
+    const freeAgentPool = players.filter(player => !activePlayerIds.has(player.id) && !activePlayerNames.has(player.display_name.trim().toLowerCase().replace(/\s+/g, " "))).slice(0, limit);
+
+    // Surface a "Cut by <franchise>" tag for players who held an active rookie-match or
+    // waiver-match right at the moment they were released — visual only, doesn't affect
+    // availability or auction matching-rights logic.
+    const freeAgentIds = freeAgentPool.map(player => player.id);
+    const cutTags = freeAgentIds.length
+      ? unwrap(await supabase.from("player_contract").select("player_id, last_cut_tag_type, updated_at, franchise:last_cut_by_franchise_id(name)").eq("season_id", season.id).eq("contract_status", "released").not("last_cut_by_franchise_id", "is", null).in("player_id", freeAgentIds)) ?? []
+      : [];
+    const latestCutTagByPlayerId = new Map<string, { franchiseName: string; tagType: string; updatedAt: string }>();
+    for (const row of cutTags as any[]) {
+      const existing = latestCutTagByPlayerId.get(row.player_id);
+      const franchiseField = row.franchise as { name: string } | { name: string }[] | null;
+      const name = Array.isArray(franchiseField) ? franchiseField[0]?.name : franchiseField?.name;
+      if (!name) continue;
+      if (!existing || new Date(row.updated_at) > new Date(existing.updatedAt)) {
+        latestCutTagByPlayerId.set(row.player_id, { franchiseName: name, tagType: row.last_cut_tag_type, updatedAt: row.updated_at });
+      }
+    }
+    return freeAgentPool.map(player => {
+      const tag = latestCutTagByPlayerId.get(player.id);
+      return tag ? { ...player, cutByFranchiseName: tag.franchiseName, cutTagType: tag.tagType } : player;
+    });
   }),
 
   playerDetail: publicProcedure.input(z.object({ playerId: z.string().uuid() })).query(async ({ input }) => {
@@ -592,9 +614,11 @@ export const leagueRouter = router({
       throw new TRPCError({ code: "BAD_REQUEST", message: "Only an active CVC contract can be released from Protections." });
     }
     const player = unwrap(await supabase.from("player").select("display_name").eq("id", input.playerId).maybeSingle());
+    const activeRights = unwrap(await supabase.from("player_right").select("right_type").eq("season_id", season.id).eq("franchise_id", franchise.id).eq("player_id", input.playerId).eq("status", "active")) ?? [];
+    const cutTagType = activeRights.find(right => right.right_type === "rookie_match" || right.right_type === "waiver_match")?.right_type as "rookie_match" | "waiver_match" | undefined;
 
     unwrap(await supabase.from("roster_assignment").update({ roster_state: "released", released_at: new Date().toISOString() }).eq("id", assignment.id).select("id").single());
-    unwrap(await supabase.from("player_contract").update({ contract_status: "released" }).eq("id", contract.id).select("id").single());
+    unwrap(await supabase.from("player_contract").update({ contract_status: "released", last_cut_by_franchise_id: cutTagType ? franchise.id : null, last_cut_tag_type: cutTagType ?? null }).eq("id", contract.id).select("id").single());
     unwrap(await supabase.from("player_right").update({ status: "revoked" }).eq("season_id", season.id).eq("franchise_id", franchise.id).eq("player_id", input.playerId).eq("status", "active").select("id"));
     unwrap(await supabase.from("transaction").insert({
       season_id: season.id,
@@ -757,7 +781,7 @@ export const leagueRouter = router({
     if (!assignment || !contract) throw new TRPCError({ code: "NOT_FOUND", message: "That CVC cut player is not available to restore." });
     const player = unwrap(await supabase.from("player").select("display_name").eq("id", input.playerId).maybeSingle());
     unwrap(await supabase.from("roster_assignment").update({ roster_state: "active", released_at: null, updated_at: new Date().toISOString() }).eq("id", assignment.id).select("id").single());
-    unwrap(await supabase.from("player_contract").update({ contract_status: Number(contract.expires_year) <= season.year ? "expiring" : "active" }).eq("id", contract.id).select("id").single());
+    unwrap(await supabase.from("player_contract").update({ contract_status: Number(contract.expires_year) <= season.year ? "expiring" : "active", last_cut_by_franchise_id: null, last_cut_tag_type: null }).eq("id", contract.id).select("id").single());
     unwrap(await supabase.from("transaction").insert({ season_id: season.id, franchise_id: franchise.id, actor_owner_id: actor.id, transaction_type: "add", status: "final", summary: `${franchise.name} restored ${player?.display_name ?? "a player"} from Protections.`, details: { player_id: input.playerId, action: "cut_restored" } }).select("id").single());
     await createAuditEvent(league.id, season.id, actor.id, "roster_assignment", assignment.id, "cut_restored", `${franchise.name} restored ${player?.display_name ?? "a player"} from Protections.`);
     return { restored: true };
@@ -853,7 +877,9 @@ export const leagueRouter = router({
     const playerName = unwrap(player)?.display_name ?? "a player";
     const now = new Date().toISOString();
     unwrap(await supabase.from("roster_assignment").update({ roster_state: "released", released_at: now }).eq("id", assignment.id).select("id").single());
-    unwrap(await supabase.from("player_contract").update({ contract_status: "released", pending_cut_flagged_at: null }).eq("id", contract.id).select("id").single());
+    // No cut-tag here: the guard above already rejects any player holding an active
+    // player_right (including rookie_match/waiver_match), so this path never applies.
+    unwrap(await supabase.from("player_contract").update({ contract_status: "released", pending_cut_flagged_at: null, last_cut_by_franchise_id: null, last_cut_tag_type: null }).eq("id", contract.id).select("id").single());
     unwrap(await supabase.from("transaction").insert({
       season_id: season.id,
       franchise_id: input.franchiseId,

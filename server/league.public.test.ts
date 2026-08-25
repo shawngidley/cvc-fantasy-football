@@ -77,4 +77,16 @@ describe("CVC public league procedures", () => {
     expect(players.length).toBeLessThanOrEqual(25);
     expect(players.every(player => player.display_name.toLowerCase().includes("a.j.") && player.position === "WR")).toBe(true);
   });
+
+  it("only tags free agents with a cutByFranchiseName when a cut-tag value is present", async () => {
+    const freeAgents = await appRouter.createCaller(createPublicContext()).league.freeAgents({ limit: 50 });
+
+    // Visual-only tag: absent for the ordinary case, and when present must be a
+    // non-empty franchise name paired with a rookie_match/waiver_match tag type.
+    for (const player of freeAgents as Array<{ cutByFranchiseName?: string; cutTagType?: string }>) {
+      if (player.cutByFranchiseName === undefined) continue;
+      expect(player.cutByFranchiseName.length).toBeGreaterThan(0);
+      expect(["rookie_match", "waiver_match"]).toContain(player.cutTagType);
+    }
+  });
 });
