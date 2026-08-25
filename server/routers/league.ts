@@ -795,12 +795,19 @@ export const leagueRouter = router({
     if ((unwrap(priorTransition) ?? []).length) throw new TRPCError({ code: "BAD_REQUEST", message: "This player has already used a transition designation and cannot be transitioned again." });
     if ((unwrap(priorFranchise) ?? []).length) throw new TRPCError({ code: "BAD_REQUEST", message: "A player who has been franchised may be re-franchised after expiry but may not be transitioned." });
     const currentSalary = Number(activeContract.salary); const priorSeasonSalary = cvcPriorSeasonSalary(currentSalary); const transitionTier = cvcContractTier(priorSeasonSalary, activeContract.source_marker); const salary = cvcTransitionSalary(priorSeasonSalary, transitionTier);
-    unwrap(await supabase.from("player_contract").update({ salary, expires_year: season.year, source_marker: "T", contract_status: "expiring" }).eq("id", activeContract.id).select("id").single());
-    const right = unwrap(await supabase.from("player_right").insert({ season_id: season.id, franchise_id: franchise.id, player_id: input.playerId, right_type: "transition", salary_basis: priorSeasonSalary, contract_years: 1, expires_year: season.year, metadata: { transition_exhausted: true, transition_tier: transitionTier, designated_season: season.year, prior_season_salary: priorSeasonSalary, tagged_salary: salary, future_franchise_allowed: transitionTier === "two_year", previous_salary: currentSalary, previous_expires_year: activeContract.expires_year, previous_source_marker: activeContract.source_marker, previous_contract_status: activeContract.contract_status } }).select("id").single());
+    // A transition tag extends the contract one year beyond the season it's applied in
+    // (e.g. applied during the 2026 season -> runs through 2027), the same way
+    // assignFranchiseTag computes expiresYear = season.year + years - 1 for its own
+    // term. Previously this was hardcoded to season.year itself, which incorrectly
+    // treated the tag as expiring immediately in the same season it was applied, and
+    // marked contract_status "expiring" even though the tag had just extended it.
+    const expiresYear = season.year + 1;
+    unwrap(await supabase.from("player_contract").update({ salary, expires_year: expiresYear, source_marker: "T", contract_status: "active" }).eq("id", activeContract.id).select("id").single());
+    const right = unwrap(await supabase.from("player_right").insert({ season_id: season.id, franchise_id: franchise.id, player_id: input.playerId, right_type: "transition", salary_basis: priorSeasonSalary, contract_years: 1, expires_year: expiresYear, metadata: { transition_exhausted: true, transition_tier: transitionTier, designated_season: season.year, prior_season_salary: priorSeasonSalary, tagged_salary: salary, future_franchise_allowed: transitionTier === "two_year", previous_salary: currentSalary, previous_expires_year: activeContract.expires_year, previous_source_marker: activeContract.source_marker, previous_contract_status: activeContract.contract_status } }).select("id").single());
     if (!right) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "CVC could not save the transition designation." });
     unwrap(await supabase.from("transaction").insert({ season_id: season.id, franchise_id: franchise.id, actor_owner_id: actor.id, transaction_type: "note", status: "final", summary: `${franchise.name} assigned a transition tag to ${playerRow?.display_name ?? "a player"}.`, details: { player_id: input.playerId, right_type: "transition", salary } }).select("id").single());
     await createAuditEvent(league.id, season.id, actor.id, "player_right", right.id, "transition_tag_assigned", `${franchise.name} assigned a one-year transition tag to ${playerRow?.display_name ?? "a player"}.`);
-    return { rightId: right.id, salary, expiresYear: season.year };
+    return { rightId: right.id, salary, expiresYear };
   }),
 
   assignRestrictedRight: protectedProcedure.input(z.object({
