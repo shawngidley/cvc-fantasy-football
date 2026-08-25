@@ -56,4 +56,13 @@ describe("CVC commissioner boundaries", () => {
       rightType: "rookie_match",
     })).rejects.toMatchObject({ code: "FORBIDDEN" });
   });
+
+  it("rejects a rookie draft selection from an account without commissioner access", async () => {
+    const caller = appRouter.createCaller(createAuthenticatedContext("not-a-cvc-commissioner"));
+    await expect(caller.league.recordDraftSelection({
+      draftPickId: "11111111-1111-4111-8111-111111111111",
+      playerId: "22222222-2222-4222-8222-222222222222",
+      salary: 1,
+    })).rejects.toMatchObject({ code: "FORBIDDEN" });
+  });
 });

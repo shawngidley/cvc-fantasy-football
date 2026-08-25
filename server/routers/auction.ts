@@ -2,6 +2,7 @@ import { TRPCError } from "@trpc/server";
 import { z } from "zod";
 import { supabase, unwrap } from "../supabase";
 import { protectedProcedure, publicProcedure, router } from "../_core/trpc";
+import { cvcContractTier, cvcFranchiseTerms } from "../../shared/cvcProtectionPolicy";
 
 export function calculateAuctionLegalMaxBid(startingBudget: number, spentBudget: number, rosterCount: number) {
   return startingBudget - spentBudget - Math.max(0, 14 - rosterCount);
@@ -12,7 +13,7 @@ export const CVC_AUCTION_POSITIONS = ["QB", "RB", "WR", "TE", "K", "DST", "D/ST"
 const isCvcAuctionPosition = (position: string | null | undefined) => CVC_AUCTION_POSITIONS.includes((position ?? "").toUpperCase() as typeof CVC_AUCTION_POSITIONS[number]);
 
 async function context() {
-  const season = unwrap(await supabase.from("season").select("id, league_id").order("year", { ascending: false }).limit(1).single());
+  const season = unwrap(await supabase.from("season").select("id, league_id, year").order("year", { ascending: false }).limit(1).single());
   if (!season) throw new TRPCError({ code: "NOT_FOUND", message: "CVC season was not found." });
   const draft = unwrap(await supabase.from("draft").select("id, status, label").eq("season_id", season.id).eq("draft_type", "auction").limit(1).maybeSingle());
   if (!draft) throw new TRPCError({ code: "NOT_FOUND", message: "CVC auction draft has not been configured." });
@@ -85,6 +86,11 @@ export const auctionRouter = router({
     unwrap(await supabase.from("auction_nomination").update({ high_franchise_id: input.franchiseId, high_bid: input.amount, status: "awarded", awarded_at: new Date().toISOString() }).eq("id", nomination.id));
     unwrap(await supabase.from("auction_team_state").update({ spent_budget: state.spent_budget + input.amount, roster_count: state.roster_count + 1, updated_at: new Date().toISOString() }).eq("draft_id", draft.id).eq("franchise_id", input.franchiseId));
     unwrap(await supabase.from("roster_assignment").insert({ season_id: season.id, franchise_id: input.franchiseId, player_id: nomination.player_id, roster_state: "active" }));
+    // Contract term follows CVC's standard salary rule: $10+ salary earns a 3-year
+    // contract, $9-or-less earns 2 years (shared/cvcProtectionPolicy.cvcContractTier —
+    // the same rule already used for franchise-tag terms elsewhere in the app).
+    const contractYears = cvcFranchiseTerms(cvcContractTier(input.amount));
+    unwrap(await supabase.from("player_contract").upsert({ season_id: season.id, franchise_id: input.franchiseId, player_id: nomination.player_id, salary: input.amount, expires_year: season.year + contractYears - 1, source_marker: null, contract_status: "active" }, { onConflict: "season_id,franchise_id,player_id" }).select("id").single());
     unwrap(await supabase.from("transaction").insert({ season_id: season.id, franchise_id: input.franchiseId, actor_owner_id: actor.id, transaction_type: "draft_pick", status: "final", summary: `Auction award for $${input.amount}`, details: { nominationId: nomination.id, amount: input.amount } }));
     return { success: true, legalMax };
   }),
@@ -96,6 +102,7 @@ export const auctionRouter = router({
     const roster = unwrap(await supabase.from("roster_assignment").select("id").eq("season_id", season.id).eq("franchise_id", nomination.high_franchise_id).eq("player_id", nomination.player_id).is("released_at", null).order("acquired_at", { ascending: false }).limit(1).maybeSingle());
     if (!state || !roster) throw new TRPCError({ code: "CONFLICT", message: "The award cannot be corrected because its active roster or budget record is unavailable." });
     unwrap(await supabase.from("roster_assignment").update({ roster_state: "released", released_at: new Date().toISOString() }).eq("id", roster.id).select("id").single());
+    unwrap(await supabase.from("player_contract").update({ contract_status: "released" }).eq("season_id", season.id).eq("franchise_id", nomination.high_franchise_id).eq("player_id", nomination.player_id).select("id"));
     unwrap(await supabase.from("auction_team_state").update({ spent_budget: Math.max(0, state.spent_budget - nomination.high_bid), roster_count: Math.max(0, state.roster_count - 1), updated_at: new Date().toISOString() }).eq("draft_id", draft.id).eq("franchise_id", nomination.high_franchise_id).select("id").single());
     unwrap(await supabase.from("auction_nomination").update({ status: "corrected", correction_reason: input.reason, updated_at: new Date().toISOString() }).eq("id", nomination.id).select("id").single());
     unwrap(await supabase.from("transaction").insert({ season_id: season.id, franchise_id: nomination.high_franchise_id, actor_owner_id: actor.id, transaction_type: "commissioner_adjustment", status: "final", summary: `Auction award corrected: $${nomination.high_bid} restored`, details: { nominationId: nomination.id, playerId: nomination.player_id, reason: input.reason } }).select("id").single());

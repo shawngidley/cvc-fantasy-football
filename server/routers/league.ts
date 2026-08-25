@@ -232,7 +232,7 @@ export const leagueRouter = router({
     if (!pick) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "CVC draft pick could not be saved." }); await createAuditEvent(league.id, season.id, commissioner.id, "draft_pick", pick.id, "saved", `Saved CVC pick ${pick.pick_number} for ${franchise.name}.`); return pick;
   }),
 
-  recordDraftSelection: protectedProcedure.input(z.object({ draftPickId: z.string().uuid(), playerId: z.string().uuid(), note: z.string().max(500).optional() })).mutation(async ({ ctx, input }) => {
+  recordDraftSelection: protectedProcedure.input(z.object({ draftPickId: z.string().uuid(), playerId: z.string().uuid(), salary: z.number().int().min(0).max(115), note: z.string().max(500).optional() })).mutation(async ({ ctx, input }) => {
     const commissioner = await requireCommissioner({ openId: ctx.user.openId }); const { league, season } = await getCurrentLeagueAndSeason();
     const pick = unwrap(await supabase.from("draft_pick").select("id, draft_id, current_franchise_id, pick_number, pick_status, draft:draft_id(season_id, draft_type)").eq("id", input.draftPickId).maybeSingle());
     if (!pick || pick.draft?.[0]?.season_id !== season.id || pick.pick_status !== "open") throw new TRPCError({ code: "BAD_REQUEST", message: "This CVC draft pick is not available for selection." });
@@ -242,7 +242,12 @@ export const leagueRouter = router({
     const active = unwrap(await supabase.from("roster_assignment").select("id").eq("season_id", season.id).eq("player_id", player.id).is("released_at", null).limit(1).maybeSingle()); if (active) throw new TRPCError({ code: "BAD_REQUEST", message: "This rookie is already on a CVC roster." });
     unwrap(await supabase.from("draft_pick").update({ player_id: player.id, pick_status: "selected", selected_at: new Date().toISOString(), notes: input.note ?? null }).eq("id", pick.id).select("id").single());
     unwrap(await supabase.from("roster_assignment").insert({ season_id: season.id, franchise_id: pick.current_franchise_id, player_id: player.id, roster_state: "active" }).select("id").single());
-    unwrap(await supabase.from("transaction").insert({ season_id: season.id, franchise_id: pick.current_franchise_id, actor_owner_id: commissioner.id, transaction_type: "draft_pick", status: "final", summary: `CVC rookie draft pick ${pick.pick_number}: ${player.display_name}`, details: { draft_pick_id: pick.id, player_id: player.id } }).select("id").single());
+    // Every rookie-draft selection gets a fixed 3-year contract regardless of salary
+    // (unlike auction picks, where term length depends on salary) and is tagged with
+    // the "R" source marker so it's identifiable as a rookie-draft-originated contract
+    // elsewhere in the app (e.g. the Rosters page contract/right marker).
+    unwrap(await supabase.from("player_contract").upsert({ season_id: season.id, franchise_id: pick.current_franchise_id, player_id: player.id, salary: input.salary, expires_year: season.year + 3 - 1, source_marker: "R", contract_status: "active" }, { onConflict: "season_id,franchise_id,player_id" }).select("id").single());
+    unwrap(await supabase.from("transaction").insert({ season_id: season.id, franchise_id: pick.current_franchise_id, actor_owner_id: commissioner.id, transaction_type: "draft_pick", status: "final", summary: `CVC rookie draft pick ${pick.pick_number}: ${player.display_name}`, details: { draft_pick_id: pick.id, player_id: player.id, salary: input.salary } }).select("id").single());
     await createAuditEvent(league.id, season.id, commissioner.id, "draft_pick", pick.id, "selected", `Recorded CVC rookie draft selection ${player.display_name}.`); return { selected: true };
   }),
 
