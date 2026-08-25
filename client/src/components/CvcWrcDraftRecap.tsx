@@ -1,11 +1,114 @@
-import { Award, CheckCircle2, Trophy } from "lucide-react";
+import { Award, CheckCircle2, Mic, Trophy } from "lucide-react";
 import { toast } from "sonner";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { trpc } from "@/lib/trpc";
 import { useCvcOwnerAuth } from "@/hooks/useCvcOwnerAuth";
 import { DraftSubNav } from "@/components/DraftSubNav";
+import { bestMatch, parseSalaryFromTranscript, useSpeechRecognition } from "@/lib/voicePickUtils";
 
-function RecordRookiePick({ openPicks }: { openPicks: { id: string; round_number: number; pick_number: number; currentFranchise: string; originalFranchise: string }[] }) {
+type OpenPick = { id: string; round_number: number; pick_number: number; currentFranchise: string; originalFranchise: string };
+
+function RookieVoicePickRecorder({ openPicks }: { openPicks: OpenPick[] }) {
+  const utils = trpc.useUtils();
+  const overview = trpc.league.overview.useQuery();
+  const rookies = trpc.league.eligibleRookies.useQuery({ limit: 150 });
+  const [listening, setListening] = useState(false);
+  const [transcript, setTranscript] = useState("");
+  const [parsedPlayerId, setParsedPlayerId] = useState("");
+  const [parsedFranchiseId, setParsedFranchiseId] = useState("");
+  const [parsedAmount, setParsedAmount] = useState("");
+  // The pick itself isn't spoken — rookie-draft picks are recorded in order, so the
+  // next lowest-numbered open pick is assumed and shown for the commissioner to
+  // confirm or override, the same way the player/franchise/salary guesses are shown
+  // before anything is actually recorded.
+  const [draftPickId, setDraftPickId] = useState("");
+
+  const recognition = useMemo(() => useSpeechRecognition(), []);
+
+  const record = trpc.league.recordDraftSelection.useMutation({
+    onSuccess: async () => {
+      toast.success("Rookie draft pick recorded.");
+      setTranscript(""); setParsedPlayerId(""); setParsedFranchiseId(""); setParsedAmount(""); setDraftPickId("");
+      await Promise.all([utils.league.draftBoard.invalidate(), utils.league.freeAgents.invalidate(), utils.league.eligibleRookies.invalidate(), utils.auction.eligiblePlayers.invalidate()]);
+    },
+    onError: error => toast.error(error.message),
+  });
+
+  const nextOpenPick = [...openPicks].sort((a, b) => a.pick_number - b.pick_number)[0];
+
+  const parse = (text: string) => {
+    const amount = parseSalaryFromTranscript(text);
+    const playerMatch = bestMatch(text, rookies.data ?? [], (p: any) => p.display_name);
+    const franchiseMatch = bestMatch(text, overview.data?.franchises ?? [], (f: any) => f.name ?? "");
+    setParsedAmount(amount ? String(amount) : "");
+    setParsedPlayerId(playerMatch ? playerMatch.item.id : "");
+    setParsedFranchiseId(franchiseMatch ? franchiseMatch.item.id : "");
+    setDraftPickId(nextOpenPick?.id ?? "");
+  };
+
+  const startListening = () => {
+    if (!recognition) return;
+    recognition.onresult = (event: any) => { const text = event.results[0][0].transcript; setTranscript(text); parse(text); };
+    recognition.onend = () => setListening(false);
+    recognition.onerror = () => setListening(false);
+    setListening(true);
+    recognition.start();
+  };
+  const stopListening = () => { recognition?.stop(); setListening(false); };
+  const clear = () => { setTranscript(""); setParsedPlayerId(""); setParsedFranchiseId(""); setParsedAmount(""); setDraftPickId(""); };
+
+  const selectedPlayer = rookies.data?.find((p: any) => p.id === parsedPlayerId);
+  const selectedTeam = overview.data?.franchises.find((f: any) => f.id === parsedFranchiseId);
+  const selectedPick = openPicks.find(pick => pick.id === draftPickId);
+
+  if (!recognition) return null;
+
+  return <section className="mt-5 overflow-hidden rounded-xl border border-white/10 bg-white text-cvc-deep shadow-[0_8px_24px_rgba(0,0,0,0.16)]">
+    <div className="h-1 bg-[#e2b23d]"/>
+    <header className="flex items-center justify-between bg-[#123040] px-5 py-3 font-display text-xl uppercase tracking-[0.08em] text-white"><span>Voice pick recorder</span><span className="text-[10px] font-bold uppercase tracking-[.13em] text-[#e2b23d]">Beta</span></header>
+    <div className="p-5">
+      <p className="mb-4 text-xs text-slate-500">For picks called live in the room. Say the rookie, winning franchise, and salary — e.g. "Jeremiyah Love, Miller Time, sixteen dollars." The next open pick is assumed; review everything before confirming, since nothing is recorded until you do.</p>
+      <div className="flex flex-wrap items-center gap-3">
+        <button type="button" onClick={listening ? stopListening : startListening} className={listening ? "inline-flex items-center gap-2 rounded-lg bg-red-600 px-4 py-2.5 text-xs font-black uppercase tracking-[0.1em] text-white hover:bg-red-700" : "inline-flex items-center gap-2 rounded-lg bg-[#e2b23d] px-4 py-2.5 text-xs font-black uppercase tracking-[0.1em] text-cvc-deep"}><Mic size={14} /> {listening ? "Listening… tap to stop" : "Tap to speak a pick"}</button>
+        {transcript ? <p className="text-sm italic text-slate-600">Heard: "{transcript}"</p> : null}
+      </div>
+      {transcript ? <div className="mt-4 grid gap-4 lg:grid-cols-4">
+        <div>
+          <p className="text-[10px] font-bold uppercase tracking-[.13em] text-slate-500">Pick</p>
+          <select value={draftPickId} onChange={event => setDraftPickId(event.target.value)} className="mt-2 w-full rounded-md border border-slate-200 bg-white px-3 py-2 text-sm">
+            <option value="">Choose pick</option>
+            {openPicks.map(pick => <option key={pick.id} value={pick.id}>R{pick.round_number}.{String(pick.pick_number).padStart(2, "0")} — {pick.currentFranchise}{pick.originalFranchise !== pick.currentFranchise ? ` (${pick.originalFranchise})` : ""}</option>)}
+          </select>
+        </div>
+        <div>
+          <p className="text-[10px] font-bold uppercase tracking-[.13em] text-slate-500">Rookie player</p>
+          <select value={parsedPlayerId} onChange={event => setParsedPlayerId(event.target.value)} className="mt-2 w-full rounded-md border border-slate-200 bg-white px-3 py-2 text-sm">
+            <option value="">Not matched — choose manually</option>
+            {rookies.data?.map((p: any) => <option key={p.id} value={p.id}>{p.display_name}</option>)}
+          </select>
+        </div>
+        <div>
+          <p className="text-[10px] font-bold uppercase tracking-[.13em] text-slate-500">Winning franchise</p>
+          <select value={parsedFranchiseId} onChange={event => setParsedFranchiseId(event.target.value)} className="mt-2 w-full rounded-md border border-slate-200 bg-white px-3 py-2 text-sm">
+            <option value="">Not matched — choose manually</option>
+            {overview.data?.franchises.map((f: any) => <option key={f.id} value={f.id}>{f.name}</option>)}
+          </select>
+        </div>
+        <div>
+          <p className="text-[10px] font-bold uppercase tracking-[.13em] text-slate-500">Salary</p>
+          <input value={parsedAmount} onChange={event => setParsedAmount(event.target.value.replace(/\D/g, ""))} className="mt-2 w-full rounded-md border border-slate-200 px-3 py-2 text-sm" inputMode="numeric" />
+        </div>
+      </div> : null}
+      {transcript ? <div className="mt-4 flex flex-wrap items-center gap-3">
+        <button type="button" disabled={!draftPickId || !parsedPlayerId || !parsedFranchiseId || !parsedAmount || record.isPending} onClick={() => record.mutate({ draftPickId, playerId: parsedPlayerId, winningFranchiseId: parsedFranchiseId, salary: Number(parsedAmount) })} className="rounded-lg bg-cvc-deep px-4 py-2.5 text-xs font-black uppercase tracking-[0.1em] text-white disabled:cursor-not-allowed disabled:opacity-50">{record.isPending ? "Recording…" : `Confirm: ${selectedPlayer?.display_name ?? "?"} to ${selectedTeam?.name ?? "?"} for $${parsedAmount || "?"} (${selectedPick ? `R${selectedPick.round_number}.${String(selectedPick.pick_number).padStart(2, "0")}` : "?"})`}</button>
+        <button type="button" onClick={clear} className="text-xs font-bold uppercase tracking-[.06em] text-slate-500">Clear</button>
+      </div> : null}
+      {record.error ? <p className="mt-2 text-sm text-red-700">{record.error.message}</p> : null}
+    </div>
+  </section>;
+}
+
+function RecordRookiePick({ openPicks }: { openPicks: OpenPick[] }) {
   const utils = trpc.useUtils();
   const overview = trpc.league.overview.useQuery();
   const [draftPickId, setDraftPickId] = useState("");
@@ -75,7 +178,7 @@ export function CvcWrcDraftRecap() {
   });
   const picks = (board.data?.picks ?? []).filter(pick => pick.currentFranchise !== "Unknown" && !/placeholder|lottery/i.test(pick.notes ?? ""));
   if (board.isLoading) return <><DraftSubNav current="rookie" /><section className="mx-auto max-w-5xl pb-10"><div className="rounded-xl border border-white/10 bg-white/5 p-7 text-center text-sm text-white/70">Loading CVC Draft Recap…</div></section></>;
-  return <><DraftSubNav current="rookie" /><section className="mx-auto max-w-5xl pb-10"><header className="px-1 pt-2"><p className="text-xs font-black uppercase tracking-[0.16em] text-[#e2b23d]">CVC draft center</p><h1 className="mt-2 font-display text-5xl uppercase text-white">Rookie Draft</h1><p className="mt-2 text-sm text-white/70">CVC rookie-draft selections and pick ownership, published as entries are recorded.</p></header>{isCommissioner && board.data ? <div className={isComplete ? "mt-5 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-emerald-400/40 bg-emerald-400/10 px-5 py-4" : "mt-5 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-[#e2b23d]/40 bg-[#e2b23d]/10 px-5 py-4"}><div className="flex items-center gap-3">{isComplete ? <CheckCircle2 size={20} className="text-emerald-400" /> : <Award size={20} className="text-[#e2b23d]" />}<div><p className={isComplete ? "font-display text-lg uppercase text-emerald-300" : "font-display text-lg uppercase text-[#e2b23d]"}>{isComplete ? "Rookie draft complete" : "Rookie draft in progress"}</p><p className="text-xs text-white/60">{isComplete ? "Undrafted rookies are auction-eligible." : "Undrafted rookies stay blocked from the regular auction until this is marked complete."}</p></div></div>{!isComplete ? <button type="button" disabled={markComplete.isPending} onClick={() => { if (window.confirm("Mark the rookie draft complete? Undrafted rookies immediately become eligible for the regular CVC auction.")) markComplete.mutate({ label: board.data.label, draftType: "rookie", status: "complete", lotteryEnabled: board.data.lottery_enabled, pickTimerSeconds: board.data.pick_timer_seconds }); }} className="rounded-lg bg-[#e2b23d] px-4 py-2 text-xs font-black uppercase tracking-[0.1em] text-cvc-deep disabled:opacity-50">{markComplete.isPending ? "Saving…" : "Mark rookie draft complete"}</button> : null}</div> : null}{isCommissioner ? <RecordRookiePick openPicks={picks.filter(pick => pick.pick_status === "open")} /> : null}{!picks.length ? <EmptyRecap/> : <><section className="mt-6 overflow-hidden rounded-xl border border-white/10 bg-white text-cvc-deep shadow-[0_8px_24px_rgba(0,0,0,0.16)]"><div className="h-1 bg-[#e2b23d]"/><header className="bg-[#123040] px-5 py-3 font-display text-xl uppercase tracking-[0.08em] text-white">CVC Draft Board</header><div className="overflow-x-auto"><table className="min-w-[820px] w-full text-left text-sm"><thead className="border-b border-slate-200 bg-slate-50 text-xs font-black uppercase tracking-[0.08em] text-slate-500"><tr><th className="px-5 py-3">Pick</th><th className="px-5 py-3">Franchise</th><th className="px-5 py-3">Winning franchise</th><th className="px-5 py-3">Player</th><th className="px-5 py-3">NFL</th><th className="px-5 py-3 text-right">Salary</th></tr></thead><tbody>{picks.map(pick => <tr className="border-b border-slate-100 last:border-0" key={pick.id}><td className="px-5 py-4"><span className="rounded bg-[#edf5e7] px-2 py-1 font-display text-sm text-cvc-deep">R{pick.round_number}.{String(pick.pick_number).padStart(2, "0")}</span></td><td className="px-5 py-4 font-semibold">{pick.currentFranchise}{pick.originalFranchise !== "Unknown" && pick.originalFranchise !== pick.currentFranchise ? <span className="ml-1.5 font-normal text-slate-400">({pick.originalFranchise})</span> : null}</td><td className="px-5 py-4">{pick.winningFranchise ? <span className="font-semibold text-emerald-700">{pick.winningFranchise}</span> : <span className="text-slate-400">Awaiting selection</span>}</td><td className="px-5 py-4 font-semibold">{pick.playerName ?? <span className="font-normal text-slate-400">—</span>}</td><td className="px-5 py-4 text-slate-500">{pick.playerNflTeam ?? "—"}</td><td className="px-5 py-4 text-right text-slate-500">{pick.salary !== null ? `$${pick.salary}` : "—"}</td></tr>)}</tbody></table></div></section><p className="mt-4 text-center text-xs text-white/50">Player-by-player recap details will appear only after CVC rookie selections are officially recorded.</p></>}</section></>;
+  return <><DraftSubNav current="rookie" /><section className="mx-auto max-w-5xl pb-10"><header className="px-1 pt-2"><p className="text-xs font-black uppercase tracking-[0.16em] text-[#e2b23d]">CVC draft center</p><h1 className="mt-2 font-display text-5xl uppercase text-white">Rookie Draft</h1><p className="mt-2 text-sm text-white/70">CVC rookie-draft selections and pick ownership, published as entries are recorded.</p></header>{isCommissioner && board.data ? <div className={isComplete ? "mt-5 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-emerald-400/40 bg-emerald-400/10 px-5 py-4" : "mt-5 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-[#e2b23d]/40 bg-[#e2b23d]/10 px-5 py-4"}><div className="flex items-center gap-3">{isComplete ? <CheckCircle2 size={20} className="text-emerald-400" /> : <Award size={20} className="text-[#e2b23d]" />}<div><p className={isComplete ? "font-display text-lg uppercase text-emerald-300" : "font-display text-lg uppercase text-[#e2b23d]"}>{isComplete ? "Rookie draft complete" : "Rookie draft in progress"}</p><p className="text-xs text-white/60">{isComplete ? "Undrafted rookies are auction-eligible." : "Undrafted rookies stay blocked from the regular auction until this is marked complete."}</p></div></div>{!isComplete ? <button type="button" disabled={markComplete.isPending} onClick={() => { if (window.confirm("Mark the rookie draft complete? Undrafted rookies immediately become eligible for the regular CVC auction.")) markComplete.mutate({ label: board.data.label, draftType: "rookie", status: "complete", lotteryEnabled: board.data.lottery_enabled, pickTimerSeconds: board.data.pick_timer_seconds }); }} className="rounded-lg bg-[#e2b23d] px-4 py-2 text-xs font-black uppercase tracking-[0.1em] text-cvc-deep disabled:opacity-50">{markComplete.isPending ? "Saving…" : "Mark rookie draft complete"}</button> : null}</div> : null}{isCommissioner ? <RookieVoicePickRecorder openPicks={picks.filter(pick => pick.pick_status === "open")} /> : null}{isCommissioner ? <RecordRookiePick openPicks={picks.filter(pick => pick.pick_status === "open")} /> : null}{!picks.length ? <EmptyRecap/> : <><section className="mt-6 overflow-hidden rounded-xl border border-white/10 bg-white text-cvc-deep shadow-[0_8px_24px_rgba(0,0,0,0.16)]"><div className="h-1 bg-[#e2b23d]"/><header className="bg-[#123040] px-5 py-3 font-display text-xl uppercase tracking-[0.08em] text-white">CVC Draft Board</header><div className="overflow-x-auto"><table className="min-w-[820px] w-full text-left text-sm"><thead className="border-b border-slate-200 bg-slate-50 text-xs font-black uppercase tracking-[0.08em] text-slate-500"><tr><th className="px-5 py-3">Pick</th><th className="px-5 py-3">Franchise</th><th className="px-5 py-3">Winning franchise</th><th className="px-5 py-3">Player</th><th className="px-5 py-3">NFL</th><th className="px-5 py-3 text-right">Salary</th></tr></thead><tbody>{picks.map(pick => <tr className="border-b border-slate-100 last:border-0" key={pick.id}><td className="px-5 py-4"><span className="rounded bg-[#edf5e7] px-2 py-1 font-display text-sm text-cvc-deep">R{pick.round_number}.{String(pick.pick_number).padStart(2, "0")}</span></td><td className="px-5 py-4 font-semibold">{pick.currentFranchise}{pick.originalFranchise !== "Unknown" && pick.originalFranchise !== pick.currentFranchise ? <span className="ml-1.5 font-normal text-slate-400">({pick.originalFranchise})</span> : null}</td><td className="px-5 py-4">{pick.winningFranchise ? <span className="font-semibold text-emerald-700">{pick.winningFranchise}</span> : <span className="text-slate-400">Awaiting selection</span>}</td><td className="px-5 py-4 font-semibold">{pick.playerName ?? <span className="font-normal text-slate-400">—</span>}</td><td className="px-5 py-4 text-slate-500">{pick.playerNflTeam ?? "—"}</td><td className="px-5 py-4 text-right text-slate-500">{pick.salary !== null ? `$${pick.salary}` : "—"}</td></tr>)}</tbody></table></div></section><p className="mt-4 text-center text-xs text-white/50">Player-by-player recap details will appear only after CVC rookie selections are officially recorded.</p></>}</section></>;
 }
 
 function EmptyRecap() { return <section className="mt-6 overflow-hidden rounded-xl border border-white/10 bg-white text-center text-cvc-deep shadow-[0_8px_24px_rgba(0,0,0,0.16)]"><div className="h-1 bg-[#e2b23d]"/><div className="px-7 py-12"><Trophy className="mx-auto text-[#dcae37]" size={48}/><h2 className="mt-4 font-display text-3xl uppercase">Draft Recap Not Yet Available</h2><p className="mx-auto mt-3 max-w-md text-sm leading-6 text-slate-500">CVC rookie-draft picks have not been configured or recorded. This recap will remain empty until commissioner-approved selections exist.</p></div></section>; }

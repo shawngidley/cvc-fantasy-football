@@ -3,6 +3,7 @@ import { LeagueLayout } from "@/components/LeagueLayout";
 import { DraftSubNav } from "@/components/DraftSubNav";
 import { trpc } from "@/lib/trpc";
 import { useCvcOwnerAuth } from "@/hooks/useCvcOwnerAuth";
+import { bestMatch, parseSalaryFromTranscript, useSpeechRecognition } from "@/lib/voicePickUtils";
 import { Gavel, Mic, PauseCircle, Search, ShieldCheck, Trophy, Users } from "lucide-react";
 import { useMemo, useState } from "react";
 import { Link } from "wouter";
@@ -16,37 +17,6 @@ const money = (value: number) => `$${value}`;
 // visible text). Normalizes either shape to a single object.
 const firstOf = (value: any) => Array.isArray(value) ? value[0] : value;
 
-// Lightweight fuzzy match (no dependency added): exact/substring match scores highest,
-// otherwise scores by the fraction of query tokens that appear in the candidate. Good
-// enough for matching a spoken player or franchise name against a short known list —
-// not meant for large free-text search.
-function scoreMatch(query: string, candidate: string): number {
-  const normalize = (value: string) => value.toLowerCase().replace(/[^a-z0-9\s]/g, "").trim();
-  const q = normalize(query); const c = normalize(candidate);
-  if (!q || !c) return 0;
-  if (c === q) return 100;
-  if (c.includes(q) || q.includes(c)) return 80;
-  const qTokens = q.split(/\s+/); const cTokens = c.split(/\s+/);
-  const overlap = qTokens.filter(token => cTokens.some(candidateToken => candidateToken === token || candidateToken.startsWith(token) || token.startsWith(candidateToken))).length;
-  return (overlap / Math.max(qTokens.length, cTokens.length)) * 60;
-}
-
-function bestMatch(query, items, getLabel) {
-  let best = null;
-  for (const item of items) {
-    const score = scoreMatch(query, getLabel(item));
-    if (!best || score > best.score) best = { item, score };
-  }
-  return best && best.score > 30 ? best : null;
-}
-
-// Chrome's speech recognition already converts spoken numbers to digits in most cases
-// ("sixteen dollars" -> "16 dollars"), so a plain digit regex covers the common case.
-function parseSalaryFromTranscript(transcript: string): number | null {
-  const match = transcript.match(/\$?\s*(\d+)\s*(dollars?)?/i);
-  return match ? Number(match[1]) : null;
-}
-
 function VoicePickRecorder({ teams }: { teams: any[] }) {
   const utils = trpc.useUtils();
   const eligible = trpc.auction.eligiblePlayers.useQuery({ limit: 150 });
@@ -56,16 +26,7 @@ function VoicePickRecorder({ teams }: { teams: any[] }) {
   const [parsedFranchiseId, setParsedFranchiseId] = useState("");
   const [parsedAmount, setParsedAmount] = useState("");
 
-  const recognition = useMemo(() => {
-    if (typeof window === "undefined") return null;
-    const SpeechRecognitionCtor = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-    if (!SpeechRecognitionCtor) return null;
-    const instance = new SpeechRecognitionCtor();
-    instance.lang = "en-US";
-    instance.interimResults = false;
-    instance.maxAlternatives = 1;
-    return instance;
-  }, []);
+  const recognition = useMemo(() => useSpeechRecognition(), []);
 
   const record = trpc.auction.recordPick.useMutation({
     onSuccess: async () => {
