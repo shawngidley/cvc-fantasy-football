@@ -787,8 +787,13 @@ export const leagueRouter = router({
     const waiverEligibilitySource = wasWaiverAcquired ? "recorded_transaction" : input.waiverEligibilityOverride ? "commissioner_review" : null;
     const right = unwrap(await supabase.from("player_right").insert({ season_id: season.id, franchise_id: franchise.id, player_id: input.playerId, right_type: input.rightType, salary_basis: Number(activeContract.salary), expires_year: activeContract.expires_year ?? season.year, metadata: { original_franchise_id: franchise.id, designated_season: season.year, source_marker: activeContract.source_marker, waiver_eligibility_source: waiverEligibilitySource } }).select("id").single());
     if (!right) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "CVC could not save the restricted right." });
+    // A restricted right makes the player a restricted-rights free agent, not a rostered
+    // player: release them to the auction/free-agent pool, tagged with the rights-holding
+    // franchise (reusing the same cut-tag columns/UI as a manual cut with an active right).
+    unwrap(await supabase.from("roster_assignment").update({ roster_state: "released", released_at: new Date().toISOString() }).eq("id", activeAssignment.id).select("id").single());
+    unwrap(await supabase.from("player_contract").update({ contract_status: "released", last_cut_by_franchise_id: franchise.id, last_cut_tag_type: input.rightType }).eq("id", activeContract.id).select("id").single());
     unwrap(await supabase.from("transaction").insert({ season_id: season.id, franchise_id: franchise.id, actor_owner_id: actor.id, transaction_type: "note", status: "final", summary: `${franchise.name} designated ${playerRow?.display_name ?? "a player"} for ${input.rightType === "rookie_match" ? "rookie" : "waiver"} matching rights.`, details: { player_id: input.playerId, right_type: input.rightType } }).select("id").single());
-    await createAuditEvent(league.id, season.id, actor.id, "player_right", right.id, "restricted_right_assigned", `${franchise.name} assigned ${input.rightType} to ${playerRow?.display_name ?? "a player"}.`);
+    await createAuditEvent(league.id, season.id, actor.id, "player_right", right.id, "restricted_right_assigned", `${franchise.name} assigned ${input.rightType} to ${playerRow?.display_name ?? "a player"} and released them to the CVC restricted-rights free-agent pool.`);
     return { rightId: right.id, rightType: input.rightType };
   }),
 

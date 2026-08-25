@@ -47,4 +47,13 @@ describe("CVC commissioner boundaries", () => {
       requestPlayerIds: ["33333333-3333-4333-8333-333333333333"],
     })).rejects.toMatchObject({ code: "FORBIDDEN" });
   });
+
+  it("rejects a restricted-rights designation from an account without a CVC owner record", async () => {
+    const caller = appRouter.createCaller(createAuthenticatedContext("not-a-cvc-owner"));
+    await expect(caller.league.assignRestrictedRight({
+      franchiseId: "11111111-1111-4111-8111-111111111111",
+      playerId: "22222222-2222-4222-8222-222222222222",
+      rightType: "rookie_match",
+    })).rejects.toMatchObject({ code: "FORBIDDEN" });
+  });
 });
