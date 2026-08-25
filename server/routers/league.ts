@@ -213,13 +213,36 @@ export const leagueRouter = router({
     const { data: draft, error: draftError } = await supabase.from("draft").select("id, label, draft_type, status, pick_timer_seconds, keeper_enabled, lottery_enabled, settings").eq("season_id", season.id).eq("draft_type", "rookie").maybeSingle();
     if (draftError || !draft) throw new TRPCError({ code: "NOT_FOUND", message: "CVC draft configuration was not found." });
     const [picksResult, franchisesResult] = await Promise.all([
-      supabase.from("draft_pick").select("id, round_number, pick_number, original_franchise_id, current_franchise_id, pick_status, is_protected, notes").eq("draft_id", draft.id).order("pick_number").limit(500),
+      supabase.from("draft_pick").select("id, round_number, pick_number, original_franchise_id, current_franchise_id, player_id, pick_status, is_protected, notes").eq("draft_id", draft.id).order("pick_number").limit(500),
       supabase.from("franchise").select("id, name, abbreviation, logo_url").eq("is_active", true).limit(100),
     ]);
     const picks = unwrap(picksResult) ?? [];
     const franchises = unwrap(franchisesResult) ?? [];
     const franchiseById = new Map(franchises.map(franchise => [franchise.id, franchise]));
-    return { ...draft, picks: picks.map(pick => ({ ...pick, originalFranchise: franchiseById.get(pick.original_franchise_id)?.name ?? "Unknown", currentFranchise: franchiseById.get(pick.current_franchise_id)?.name ?? "Unknown" })) };
+    // A pick's franchise (original/current) tracks who HELD the pick, which can differ
+    // from who actually WON the player (the pick holder nominates live in the room but
+    // can lose the match to a higher bidder — see recordDraftSelection). The winning
+    // franchise and salary only exist on player_contract, not on draft_pick itself.
+    const selectedPlayerIds = picks.map(pick => pick.player_id).filter((id): id is string => Boolean(id));
+    const [playersResult, contractsResult] = selectedPlayerIds.length ? await Promise.all([
+      supabase.from("player").select("id, display_name, position, nfl_team").in("id", selectedPlayerIds),
+      supabase.from("player_contract").select("player_id, franchise_id, salary").eq("season_id", season.id).eq("contract_status", "active").in("player_id", selectedPlayerIds),
+    ]) : [{ data: [], error: null }, { data: [], error: null }];
+    const playerById = new Map((unwrap(playersResult) ?? []).map(player => [player.id, player]));
+    const contractByPlayerId = new Map((unwrap(contractsResult) ?? []).map(contract => [contract.player_id, contract]));
+    return { ...draft, picks: picks.map(pick => {
+      const player = pick.player_id ? playerById.get(pick.player_id) : null;
+      const contract = pick.player_id ? contractByPlayerId.get(pick.player_id) : null;
+      return {
+        ...pick,
+        originalFranchise: franchiseById.get(pick.original_franchise_id)?.name ?? "Unknown",
+        currentFranchise: franchiseById.get(pick.current_franchise_id)?.name ?? "Unknown",
+        playerName: player?.display_name ?? null,
+        playerNflTeam: player?.nfl_team ?? null,
+        winningFranchise: contract ? franchiseById.get(contract.franchise_id)?.name ?? "Unknown" : null,
+        salary: contract ? Number(contract.salary) : null,
+      };
+    }) };
   }),
 
   saveDraft: protectedProcedure.input(z.object({ label: z.string().min(2).max(100), draftType: z.enum(["snake", "linear", "auction", "rookie", "supplemental"]), status: z.enum(["setup", "lottery", "live", "paused", "complete"]), pickTimerSeconds: z.number().int().min(0).max(7200).nullable().optional(), lotteryEnabled: z.boolean(), startsAt: z.string().datetime().nullable().optional() })).mutation(async ({ ctx, input }) => {
