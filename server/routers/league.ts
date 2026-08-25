@@ -313,26 +313,50 @@ export const leagueRouter = router({
     const limit = input?.limit ?? 75;
     const eligiblePositions = ["QB", "RB", "WR", "TE", "K", "DST"];
     if (input?.position && !eligiblePositions.includes(input.position.toUpperCase())) throw new TRPCError({ code: "BAD_REQUEST", message: "CVC Free Agents are limited to QB, RB, WR, TE, K, and D/ST." });
+    const activeAssignmentsResult = await supabase.from("roster_assignment").select("player_id").eq("season_id", season.id).is("released_at", null);
+    const activePlayerIds = new Set((unwrap(activeAssignmentsResult) ?? []).map(assignment => assignment.player_id));
+
+    if (input?.matchingRightsOnly) {
+      // Dedicated path: start from tagged contracts directly rather than the general
+      // (alphabetically-truncated) player pool below, so every tagged free agent is
+      // findable regardless of where their name falls alphabetically.
+      let tagQuery = supabase.from("player_contract").select("player_id, last_cut_tag_type, updated_at, franchise:last_cut_by_franchise_id(name), player:player_id(id, provider, display_name, position, nfl_team, status, metadata)").eq("season_id", season.id).eq("contract_status", "released").not("last_cut_by_franchise_id", "is", null).order("updated_at", { ascending: false }).limit(300);
+      const tagRows = unwrap(await tagQuery) ?? [];
+      const rosteredPlayers = activePlayerIds.size ? unwrap(await supabase.from("player").select("display_name").in("id", Array.from(activePlayerIds))) ?? [] : [];
+      const activePlayerNames = new Set(rosteredPlayers.map(player => player.display_name.trim().toLowerCase().replace(/\s+/g, " ")));
+      const seen = new Set<string>();
+      const tagged: any[] = [];
+      for (const row of tagRows as any[]) {
+        const player = Array.isArray(row.player) ? row.player[0] : row.player;
+        if (!player || seen.has(player.id)) continue;
+        if (player.provider === "placeholder" || !eligiblePositions.includes(player.position)) continue;
+        if (activePlayerIds.has(player.id) || activePlayerNames.has(player.display_name.trim().toLowerCase().replace(/\s+/g, " "))) continue;
+        if (input?.position && player.position !== input.position.toUpperCase()) continue;
+        if (input?.search && !player.display_name.toLowerCase().includes(input.search.toLowerCase())) continue;
+        const franchiseField = row.franchise as { name: string } | { name: string }[] | null;
+        const franchiseName = Array.isArray(franchiseField) ? franchiseField[0]?.name : franchiseField?.name;
+        if (!franchiseName) continue;
+        seen.add(player.id);
+        tagged.push({ ...player, cutByFranchiseName: franchiseName, cutTagType: row.last_cut_tag_type });
+      }
+      tagged.sort((a, b) => a.display_name.localeCompare(b.display_name));
+      return tagged.slice(0, limit);
+    }
+
     let playerQuery = supabase.from("player").select("id, provider, display_name, position, nfl_team, status, metadata").neq("provider", "placeholder").in("position", eligiblePositions).order("display_name").limit(limit + 220);
     if (input?.search) playerQuery = playerQuery.ilike("display_name", `%${input.search.replace(/[%_]/g, "")}%`);
     if (input?.position) playerQuery = playerQuery.eq("position", input.position.toUpperCase());
-    const [playersResult, activeAssignmentsResult] = await Promise.all([
-      playerQuery,
-      supabase.from("roster_assignment").select("player_id").eq("season_id", season.id).is("released_at", null),
-    ]);
-    const players = unwrap(playersResult) ?? [];
-    const activePlayerIds = new Set((unwrap(activeAssignmentsResult) ?? []).map(assignment => assignment.player_id));
+    const players = unwrap(await playerQuery) ?? [];
     const rosteredPlayers = activePlayerIds.size ? unwrap(await supabase.from("player").select("display_name").in("id", Array.from(activePlayerIds))) ?? [] : [];
     const activePlayerNames = new Set(rosteredPlayers.map(player => player.display_name.trim().toLowerCase().replace(/\s+/g, " ")));
-    const freeAgentPoolAll = players.filter(player => !activePlayerIds.has(player.id) && !activePlayerNames.has(player.display_name.trim().toLowerCase().replace(/\s+/g, " ")));
+    const freeAgentPool = players.filter(player => !activePlayerIds.has(player.id) && !activePlayerNames.has(player.display_name.trim().toLowerCase().replace(/\s+/g, " "))).slice(0, limit);
 
-    // Surface a "Cut by <franchise>" tag for players who held an active rookie-match or
-    // waiver-match right at the moment they were released — visual only, doesn't affect
-    // availability or auction matching-rights logic. Looked up against the FULL matched
-    // pool (before slicing to limit) so the matchingRightsOnly filter below is accurate.
-    const freeAgentIdsAll = freeAgentPoolAll.map(player => player.id);
-    const cutTags = freeAgentIdsAll.length
-      ? unwrap(await supabase.from("player_contract").select("player_id, last_cut_tag_type, updated_at, franchise:last_cut_by_franchise_id(name)").eq("season_id", season.id).eq("contract_status", "released").not("last_cut_by_franchise_id", "is", null).in("player_id", freeAgentIdsAll)) ?? []
+    // Surface a "Matching rights: <franchise>" tag for players who held an active
+    // rookie-match or waiver-match right at the moment they were released — visual
+    // only, doesn't affect availability or auction matching-rights logic.
+    const freeAgentIds = freeAgentPool.map(player => player.id);
+    const cutTags = freeAgentIds.length
+      ? unwrap(await supabase.from("player_contract").select("player_id, last_cut_tag_type, updated_at, franchise:last_cut_by_franchise_id(name)").eq("season_id", season.id).eq("contract_status", "released").not("last_cut_by_franchise_id", "is", null).in("player_id", freeAgentIds)) ?? []
       : [];
     const latestCutTagByPlayerId = new Map<string, { franchiseName: string; tagType: string; updatedAt: string }>();
     for (const row of cutTags as any[]) {
@@ -344,8 +368,7 @@ export const leagueRouter = router({
         latestCutTagByPlayerId.set(row.player_id, { franchiseName: name, tagType: row.last_cut_tag_type, updatedAt: row.updated_at });
       }
     }
-    const scopedPool = input?.matchingRightsOnly ? freeAgentPoolAll.filter(player => latestCutTagByPlayerId.has(player.id)) : freeAgentPoolAll;
-    return scopedPool.slice(0, limit).map(player => {
+    return freeAgentPool.map(player => {
       const tag = latestCutTagByPlayerId.get(player.id);
       return tag ? { ...player, cutByFranchiseName: tag.franchiseName, cutTagType: tag.tagType } : player;
     });
