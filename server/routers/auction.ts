@@ -49,10 +49,22 @@ export const auctionRouter = router({
     const activeRosteredPlayers = activePlayerIds.size ? unwrap(await supabase.from("player").select("display_name").in("id", Array.from(activePlayerIds))) ?? [] : [];
     const activePlayerNames = new Set(activeRosteredPlayers.map(player => playerIdentity(player.display_name)));
     const awardedPlayerIds = new Set((unwrap(awardedResult) ?? []).map(award => award.player_id));
-    return (unwrap(playersResult) ?? []).filter(player => {
+    const filtered = (unwrap(playersResult) ?? []).filter(player => {
       const metadata = (player.metadata ?? {}) as { is_rookie?: boolean };
       return !activePlayerIds.has(player.id) && !activePlayerNames.has(playerIdentity(player.display_name)) && !awardedPlayerIds.has(player.id) && !metadata.is_rookie;
-    }).slice(0, limit);
+    });
+    // Some player names have duplicate rows in the underlying table (separate provider
+    // syncs). Since none of these were eligible-elimination candidates above (all are
+    // unrostered), a duplicate name would otherwise appear twice in this list — dedupe
+    // to one row per name, keeping the first (display_name-sorted) occurrence.
+    const seenNames = new Set<string>();
+    const deduped = filtered.filter(player => {
+      const key = playerIdentity(player.display_name);
+      if (seenNames.has(key)) return false;
+      seenNames.add(key);
+      return true;
+    });
+    return deduped.slice(0, limit);
   }),
   setBudget: protectedProcedure.input(z.object({ franchiseId: z.string().uuid(), startingBudget: z.number().int().min(0).max(115) })).mutation(async ({ ctx: c, input }) => {
     await commissioner(c.user.openId); const { draft } = await context();
