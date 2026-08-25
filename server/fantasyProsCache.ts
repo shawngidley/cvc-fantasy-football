@@ -60,3 +60,35 @@ export async function getFantasyProsPlayerSnapshot(): Promise<FantasyProsSnapsho
     throw error;
   }
 }
+
+// FantasyPros' /players endpoint carries no rookie flag at all (confirmed against a live
+// sample response) -- rookie status has to come from cross-referencing their separate
+// "Rookies" consensus-rankings type instead. Their site groups rookie rankings by
+// position (no combined "ALL" rookie list), so this fetches all five rookie-relevant
+// positions and returns the union of player_ids that appear in any of them. The exact
+// `type=ROOKIE` value is our best-informed guess (matches FantasyPros' own "Rookie
+// Rankings" product naming and their known type values like ROS/DRAFT/DYNASTY) rather
+// than a value confirmed against a live response -- syncFantasyProsRookieFlags surfaces
+// a per-position count so a wrong guess is immediately visible instead of silently
+// matching nothing, the same failure mode that hid the original is_rookie/rookie bug.
+const ROOKIE_POSITIONS = ["QB", "RB", "WR", "TE", "K"] as const;
+
+export async function getFantasyProsRookiePlayerIds(season: number): Promise<{ idsByPosition: Record<string, string[]>; errors: Record<string, string> }> {
+  const apiKey = process.env.FANTASYPROS_API_KEY;
+  if (!apiKey) throw new Error("FantasyPros is not configured for CVC.");
+  const idsByPosition: Record<string, string[]> = {};
+  const errors: Record<string, string> = {};
+  for (const position of ROOKIE_POSITIONS) {
+    try {
+      await waitForRequestWindow();
+      const response = await fetch(`https://api.fantasypros.com/public/v2/json/nfl/${season}/consensus-rankings?type=ROOKIE&position=${position}`, { headers: { "x-api-key": apiKey }, signal: AbortSignal.timeout(15_000) });
+      if (!response.ok) { errors[position] = `Request failed with status ${response.status}`; continue; }
+      const payload = await response.json() as { players?: { player_id?: number | string }[] };
+      idsByPosition[position] = (payload.players ?? []).map(player => player.player_id).filter((id): id is number | string => id !== undefined).map(String);
+    } catch (error) {
+      errors[position] = error instanceof Error ? error.message : "Request failed";
+    }
+  }
+  return { idsByPosition, errors };
+}
+

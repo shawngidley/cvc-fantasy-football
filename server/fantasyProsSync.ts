@@ -66,3 +66,27 @@ export async function syncFantasyProsSnapshot(snapshot: FantasyProsSnapshot): Pr
   }
   return { source: snapshot.source, fetchedAt: snapshot.fetchedAt, totalReceived: normalized.length, inserted: inserts.length, enriched: enrichments.length, skipped };
 }
+
+export type FantasyProsRookieSyncSummary = { countByPosition: Record<string, number>; matchedInDb: number; notYetSynced: number; flaggedNow: number; clearedStale: number; errors: Record<string, string> };
+
+/** Applies FantasyPros' rookie-rankings result (see getFantasyProsRookiePlayerIds) to
+ * player.metadata.is_rookie. Matches by fantasypros_id already stored from the regular
+ * player sync -- run syncFantasyProsSnapshot first if players haven't been synced yet,
+ * or a rookie with no CVC player record yet simply won't have anything to match against
+ * (counted as notYetSynced below, not silently dropped). */
+export async function syncFantasyProsRookieFlags(idsByPosition: Record<string, string[]>, errors: Record<string, string>): Promise<FantasyProsRookieSyncSummary> {
+  const rookieExternalIds = new Set(Object.values(idsByPosition).flat());
+  const countByPosition = Object.fromEntries(Object.entries(idsByPosition).map(([position, ids]) => [position, ids.length]));
+  const existing = unwrap(await supabase.from("player").select("id, external_id, metadata").eq("provider", "fantasypros")) as { id: string; external_id: string | null; metadata: Record<string, unknown> | null }[];
+  const existingExternalIds = new Set(existing.filter(player => player.external_id).map(player => player.external_id as string));
+  const matchedInDb = Array.from(rookieExternalIds).filter(id => existingExternalIds.has(id)).length;
+  let flaggedNow = 0; let clearedStale = 0;
+  for (const player of existing) {
+    const isRookieNow = Boolean(player.external_id && rookieExternalIds.has(player.external_id));
+    const wasRookie = Boolean((player.metadata as { is_rookie?: boolean } | null)?.is_rookie);
+    if (isRookieNow === wasRookie) continue;
+    unwrap(await supabase.from("player").update({ metadata: { ...(player.metadata ?? {}), is_rookie: isRookieNow }, updated_at: new Date().toISOString() }).eq("id", player.id).select("id").single());
+    if (isRookieNow) flaggedNow += 1; else clearedStale += 1;
+  }
+  return { countByPosition, matchedInDb, notYetSynced: rookieExternalIds.size - matchedInDb, flaggedNow, clearedStale, errors };
+}

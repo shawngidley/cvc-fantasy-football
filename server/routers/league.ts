@@ -2,8 +2,8 @@ import { TRPCError } from "@trpc/server";
 import { z } from "zod";
 import { protectedProcedure, publicProcedure, router } from "../_core/trpc";
 import { getFantasyProsDataAdapter, getNFLDataAdapter } from "../nflDataAdapter";
-import { fantasyProsCacheStatus } from "../fantasyProsCache";
-import { syncFantasyProsSnapshot } from "../fantasyProsSync";
+import { fantasyProsCacheStatus, getFantasyProsRookiePlayerIds } from "../fantasyProsCache";
+import { syncFantasyProsSnapshot, syncFantasyProsRookieFlags } from "../fantasyProsSync";
 import { syncTank01SeasonStats } from "../tank01SeasonStatsSync";
 import { activeLiveLineup } from "../liveScoringLineup";
 import { supabase, unwrap } from "../supabase";
@@ -465,6 +465,14 @@ export const leagueRouter = router({
     const adapter = getFantasyProsDataAdapter();
     if (!adapter) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "FantasyPros is not configured for CVC." });
     return syncFantasyProsSnapshot(await adapter.listPlayerSnapshot());
+  }),
+
+  syncFantasyProsRookies: protectedProcedure.mutation(async ({ ctx }) => {
+    await requireCommissioner({ openId: ctx.user.openId });
+    if (!process.env.FANTASYPROS_API_KEY) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "FantasyPros is not configured for CVC." });
+    const { season } = await getCurrentLeagueAndSeason();
+    const { idsByPosition, errors } = await getFantasyProsRookiePlayerIds(season.year);
+    return syncFantasyProsRookieFlags(idsByPosition, errors);
   }),
 
   syncSeasonStats: protectedProcedure.input(z.object({ limit: z.number().int().min(1).max(100).optional() }).optional()).mutation(async ({ ctx, input }) => {

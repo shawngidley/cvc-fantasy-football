@@ -121,11 +121,37 @@ function SeasonStatsSyncModule() {
     },
     onError: error => toast.error(error.message),
   });
+  const utils = trpc.useUtils();
+  const [rookieResult, setRookieResult] = useState<null | { countByPosition: Record<string, number>; matchedInDb: number; notYetSynced: number; flaggedNow: number; clearedStale: number; errors: Record<string, string> }>(null);
+  const syncPlayers = trpc.league.syncFantasyProsPlayers.useMutation({ onError: error => toast.error(error.message) });
+  const syncRookies = trpc.league.syncFantasyProsRookies.useMutation({
+    onSuccess: data => {
+      setRookieResult(data);
+      void utils.league.eligibleRookies.invalidate();
+      const errorNote = Object.keys(data.errors).length ? ` (errors for: ${Object.keys(data.errors).join(", ")})` : "";
+      if (data.flaggedNow === 0 && data.matchedInDb === 0) toast.error(`No rookies matched — the FantasyPros ranking type guess may be wrong${errorNote}. See the breakdown below.`);
+      else toast.success(`Flagged ${data.flaggedNow} new rookies, cleared ${data.clearedStale} stale flags.${errorNote}`);
+    },
+    onError: error => toast.error(error.message),
+  });
+  const runFantasyProsSync = async () => { await syncPlayers.mutateAsync(); await syncRookies.mutateAsync(); };
+  const rookieSyncing = syncPlayers.isPending || syncRookies.isPending;
   return <div className="grid gap-4">
     <div className="rounded-lg border border-dashed border-cvc-deep/20 bg-cvc-tint p-4">
       <p className="text-sm font-semibold text-cvc-deep">Season stats sync</p>
       <p className="mt-1 text-xs leading-5 text-slate-500">Pulls season-total stats from Tank01 for every rostered and free-agent CVC player (QB/RB/WR/TE/K/DST), caches them for display on Free Agents, and updates each player's current NFL team on their CVC record (skipped for D/ST, since that record is the team itself). Each click processes up to 40 players who haven't been synced in the last 12 hours — click repeatedly until "All players are up to date" if the pool is large.</p>
       <button type="button" className="cvc-button-compact mt-3" disabled={sync.isPending} onClick={() => sync.mutate({})}><Save size={14} /> {sync.isPending ? "Syncing…" : "Sync next batch"}</button>
+    </div>
+    <div className="rounded-lg border border-dashed border-cvc-deep/20 bg-cvc-tint p-4">
+      <p className="text-sm font-semibold text-cvc-deep">FantasyPros players &amp; rookie tags</p>
+      <p className="mt-1 text-xs leading-5 text-slate-500">Syncs the FantasyPros player list, then flags CVC players who appear on FantasyPros' rookie rankings (QB/RB/WR/TE/K) as rookies — this is what makes them searchable on the Rookie Draft page. The rookie-ranking endpoint isn't confirmed against a live response, so check the breakdown below after running this; if every count is 0, the ranking type guess needs adjusting.</p>
+      <button type="button" className="cvc-button-compact mt-3" disabled={rookieSyncing} onClick={runFantasyProsSync}><Save size={14} /> {rookieSyncing ? "Syncing…" : "Sync FantasyPros players & rookies"}</button>
+      {rookieResult ? <div className="mt-3 rounded-md border border-slate-200 bg-white p-3 text-xs text-slate-600">
+        <p><b className="text-cvc-deep">Rookies found on FantasyPros by position:</b> {Object.entries(rookieResult.countByPosition).map(([pos, count]) => `${pos}: ${count}`).join(", ") || "none"}</p>
+        <p className="mt-1"><b className="text-cvc-deep">Matched to a synced CVC player:</b> {rookieResult.matchedInDb} · <b className="text-cvc-deep">Not yet in CVC's player list:</b> {rookieResult.notYetSynced}</p>
+        <p className="mt-1"><b className="text-cvc-deep">Newly flagged as rookie:</b> {rookieResult.flaggedNow} · <b className="text-cvc-deep">Stale flags cleared:</b> {rookieResult.clearedStale}</p>
+        {Object.keys(rookieResult.errors).length ? <p className="mt-1 text-red-700"><b>Errors:</b> {Object.entries(rookieResult.errors).map(([pos, message]) => `${pos}: ${message}`).join("; ")}</p> : null}
+      </div> : null}
     </div>
   </div>;
 }
