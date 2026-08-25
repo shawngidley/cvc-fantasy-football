@@ -89,4 +89,10 @@ describe("CVC public league procedures", () => {
       expect(["rookie_match", "waiver_match"]).toContain(player.cutTagType);
     }
   });
+
+  it("scopes the free-agent pool to only cut-tagged players when matchingRightsOnly is set", async () => {
+    const filtered = await appRouter.createCaller(createPublicContext()).league.freeAgents({ limit: 50, matchingRightsOnly: true });
+
+    expect(filtered.every((player: { cutByFranchiseName?: string }) => Boolean(player.cutByFranchiseName))).toBe(true);
+  });
 });
