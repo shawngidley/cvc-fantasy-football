@@ -138,7 +138,7 @@ export const auctionRouter = router({
     unwrap(await supabase.from("transaction").insert({ season_id: season.id, franchise_id: input.franchiseId, actor_owner_id: actor.id, transaction_type: "draft_pick", status: "final", summary: `Auction award for $${input.amount}`, details: { nominationId: nomination.id, amount: input.amount } }));
     return { success: true, legalMax };
   }),
-  correctAward: protectedProcedure.input(z.object({ nominationId: z.string().uuid(), reason: z.string().trim().min(3).max(280) })).mutation(async ({ ctx: c, input }) => {
+  correctAward: protectedProcedure.input(z.object({ nominationId: z.string().uuid(), reason: z.string().trim().max(280).optional() })).mutation(async ({ ctx: c, input }) => {
     const actor = await commissioner(c.user.openId); const { season, draft } = await context();
     const nomination = unwrap(await supabase.from("auction_nomination").select("id, player_id, high_franchise_id, high_bid, status").eq("id", input.nominationId).eq("draft_id", draft.id).maybeSingle());
     if (!nomination || nomination.status !== "awarded" || !nomination.high_franchise_id || !nomination.high_bid) throw new TRPCError({ code: "BAD_REQUEST", message: "Only a completed CVC auction award can be corrected." });
@@ -147,7 +147,7 @@ export const auctionRouter = router({
     if (!budgetRow || !roster) throw new TRPCError({ code: "CONFLICT", message: "The award cannot be corrected because its active roster or budget record is unavailable." });
     unwrap(await supabase.from("roster_assignment").update({ roster_state: "released", released_at: new Date().toISOString() }).eq("id", roster.id).select("id").single());
     unwrap(await supabase.from("player_contract").update({ contract_status: "released" }).eq("season_id", season.id).eq("franchise_id", nomination.high_franchise_id).eq("player_id", nomination.player_id).select("id"));
-    unwrap(await supabase.from("auction_nomination").update({ status: "corrected", correction_reason: input.reason, updated_at: new Date().toISOString() }).eq("id", nomination.id).select("id").single());
+    unwrap(await supabase.from("auction_nomination").update({ status: "corrected", correction_reason: input.reason ?? "Commissioner correction", updated_at: new Date().toISOString() }).eq("id", nomination.id).select("id").single());
     unwrap(await supabase.from("transaction").insert({ season_id: season.id, franchise_id: nomination.high_franchise_id, actor_owner_id: actor.id, transaction_type: "commissioner_adjustment", status: "final", summary: `Auction award corrected: $${nomination.high_bid} restored`, details: { nominationId: nomination.id, playerId: nomination.player_id, reason: input.reason } }).select("id").single());
     return { success: true } as const;
   }),
