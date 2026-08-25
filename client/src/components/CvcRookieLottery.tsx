@@ -37,7 +37,9 @@ export function CvcRookieLottery({ roundNumber = 2 }: { roundNumber?: number }) 
   const latest = data?.reveals[data.reveals.length - 1];
   const nextPosition = data ? data.franchiseCount - data.revealedCount : null;
   const revealProgress = data ? `${data.revealedCount} / ${data.franchiseCount} revealed` : "";
-  const completedRows = useMemo(() => data?.reveals ?? [], [data?.reveals]);
+  // Explicit sort by draft_position descending (pick 10 down to pick 1), rather than
+  // relying on the reveals already arriving in that order from the server.
+  const completedRows = useMemo(() => [...(data?.reveals ?? [])].sort((a, b) => b.draftPosition - a.draftPosition), [data?.reveals]);
 
   if (lottery.isLoading) return null;
 
