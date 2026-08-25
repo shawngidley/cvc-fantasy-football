@@ -237,23 +237,53 @@ export const leagueRouter = router({
     if (!pick) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "CVC draft pick could not be saved." }); await createAuditEvent(league.id, season.id, commissioner.id, "draft_pick", pick.id, "saved", `Saved CVC pick ${pick.pick_number} for ${franchise.name}.`); return pick;
   }),
 
-  recordDraftSelection: protectedProcedure.input(z.object({ draftPickId: z.string().uuid(), playerId: z.string().uuid(), salary: z.number().int().min(0).max(115), note: z.string().max(500).optional() })).mutation(async ({ ctx, input }) => {
+  eligibleRookies: publicProcedure.input(z.object({ search: z.string().trim().max(64).optional(), position: z.string().trim().max(12).optional(), limit: z.number().int().min(1).max(150).optional() }).optional()).query(async ({ input }) => {
+    const { season } = await getCurrentLeagueAndSeason();
+    const limit = input?.limit ?? 20;
+    const rookiePositions = ["QB", "RB", "WR", "TE", "K"];
+    if (input?.position && !rookiePositions.includes(input.position.toUpperCase())) return [];
+    let playerQuery = supabase.from("player").select("id, display_name, position, nfl_team, metadata").neq("provider", "placeholder").in("position", input?.position ? [input.position.toUpperCase()] : rookiePositions).order("display_name").limit(limit + 300);
+    if (input?.search) playerQuery = playerQuery.ilike("display_name", `%${input.search.replace(/[%_]/g, "")}%`);
+    const [playersResult, activeAssignmentsResult, selectedPicksResult] = await Promise.all([
+      playerQuery,
+      supabase.from("roster_assignment").select("player_id").eq("season_id", season.id).is("released_at", null),
+      supabase.from("draft_pick").select("player_id, draft:draft_id(season_id)").not("player_id", "is", null),
+    ]);
+    const activePlayerIds = new Set((unwrap(activeAssignmentsResult) ?? []).map(assignment => assignment.player_id));
+    const selectedPlayerIds = new Set((unwrap(selectedPicksResult) ?? []).filter((row: any) => row.draft?.[0]?.season_id === season.id).map((row: any) => row.player_id));
+    return (unwrap(playersResult) ?? []).filter(player => {
+      const metadata = (player.metadata ?? {}) as { is_rookie?: boolean };
+      return metadata.is_rookie && !activePlayerIds.has(player.id) && !selectedPlayerIds.has(player.id);
+    }).slice(0, limit);
+  }),
+
+  // Records the outcome of an in-person rookie-draft selection: the pick-holding
+  // franchise nominates a rookie live in the room and gets last right to match the
+  // highest bid; if they pass, the highest bidder wins the player instead. So the
+  // WINNING franchise (who the roster/contract go to) is independently selectable here
+  // and can differ from the pick's owning franchise — the pick itself always records
+  // which franchise originally held/nominated it (draft_pick.current_franchise_id,
+  // already shown as "(Original franchise)" on the Rookie Draft board when it differs
+  // from a traded pick's current owner — unrelated to who wins the player).
+  recordDraftSelection: protectedProcedure.input(z.object({ draftPickId: z.string().uuid(), playerId: z.string().uuid(), winningFranchiseId: z.string().uuid(), salary: z.number().int().min(0).max(115), note: z.string().max(500).optional() })).mutation(async ({ ctx, input }) => {
     const commissioner = await requireCommissioner({ openId: ctx.user.openId }); const { league, season } = await getCurrentLeagueAndSeason();
-    const pick = unwrap(await supabase.from("draft_pick").select("id, draft_id, current_franchise_id, pick_number, pick_status, draft:draft_id(season_id, draft_type)").eq("id", input.draftPickId).maybeSingle());
+    const pick = unwrap(await supabase.from("draft_pick").select("id, draft_id, current_franchise_id, round_number, pick_number, pick_status, draft:draft_id(season_id, draft_type)").eq("id", input.draftPickId).maybeSingle());
     if (!pick || pick.draft?.[0]?.season_id !== season.id || pick.pick_status !== "open") throw new TRPCError({ code: "BAD_REQUEST", message: "This CVC draft pick is not available for selection." });
     if (!['rookie', 'supplemental'].includes(pick.draft?.[0]?.draft_type ?? '')) throw new TRPCError({ code: "BAD_REQUEST", message: "CVC player selection is reserved for rookie or supplemental drafts." });
+    const winningFranchise = unwrap(await supabase.from("franchise").select("id, name").eq("id", input.winningFranchiseId).eq("league_id", league.id).eq("is_active", true).maybeSingle());
+    if (!winningFranchise) throw new TRPCError({ code: "NOT_FOUND", message: "The winning CVC franchise was not found." });
     const player = unwrap(await supabase.from("player").select("id, display_name, metadata").eq("id", input.playerId).maybeSingle()); if (!player) throw new TRPCError({ code: "NOT_FOUND", message: "CVC player was not found." });
-    if (!(player.metadata as Record<string, unknown> | null)?.rookie) throw new TRPCError({ code: "BAD_REQUEST", message: "Only players marked as rookies are eligible for the CVC rookie draft." });
+    if (!(player.metadata as { is_rookie?: boolean } | null)?.is_rookie) throw new TRPCError({ code: "BAD_REQUEST", message: "Only players marked as rookies are eligible for the CVC rookie draft." });
     const active = unwrap(await supabase.from("roster_assignment").select("id").eq("season_id", season.id).eq("player_id", player.id).is("released_at", null).limit(1).maybeSingle()); if (active) throw new TRPCError({ code: "BAD_REQUEST", message: "This rookie is already on a CVC roster." });
     unwrap(await supabase.from("draft_pick").update({ player_id: player.id, pick_status: "selected", selected_at: new Date().toISOString(), notes: input.note ?? null }).eq("id", pick.id).select("id").single());
-    unwrap(await supabase.from("roster_assignment").insert({ season_id: season.id, franchise_id: pick.current_franchise_id, player_id: player.id, roster_state: "active" }).select("id").single());
+    unwrap(await supabase.from("roster_assignment").insert({ season_id: season.id, franchise_id: input.winningFranchiseId, player_id: player.id, roster_state: "active" }).select("id").single());
     // Every rookie-draft selection gets a fixed 3-year contract regardless of salary
     // (unlike auction picks, where term length depends on salary) and is tagged with
     // the "R" source marker so it's identifiable as a rookie-draft-originated contract
     // elsewhere in the app (e.g. the Rosters page contract/right marker).
-    unwrap(await supabase.from("player_contract").upsert({ season_id: season.id, franchise_id: pick.current_franchise_id, player_id: player.id, salary: input.salary, expires_year: season.year + 3 - 1, source_marker: "R", contract_status: "active" }, { onConflict: "season_id,franchise_id,player_id" }).select("id").single());
-    unwrap(await supabase.from("transaction").insert({ season_id: season.id, franchise_id: pick.current_franchise_id, actor_owner_id: commissioner.id, transaction_type: "draft_pick", status: "final", summary: `CVC rookie draft pick ${pick.pick_number}: ${player.display_name}`, details: { draft_pick_id: pick.id, player_id: player.id, salary: input.salary } }).select("id").single());
-    await createAuditEvent(league.id, season.id, commissioner.id, "draft_pick", pick.id, "selected", `Recorded CVC rookie draft selection ${player.display_name}.`); return { selected: true };
+    unwrap(await supabase.from("player_contract").upsert({ season_id: season.id, franchise_id: input.winningFranchiseId, player_id: player.id, salary: input.salary, expires_year: season.year + 3 - 1, source_marker: "R", contract_status: "active" }, { onConflict: "season_id,franchise_id,player_id" }).select("id").single());
+    unwrap(await supabase.from("transaction").insert({ season_id: season.id, franchise_id: input.winningFranchiseId, actor_owner_id: commissioner.id, transaction_type: "draft_pick", status: "final", summary: `CVC rookie draft R${pick.round_number}.${String(pick.pick_number).padStart(2, "0")}: ${player.display_name} to ${winningFranchise.name} for $${input.salary}`, details: { draft_pick_id: pick.id, player_id: player.id, salary: input.salary, pick_holder_franchise_id: pick.current_franchise_id } }).select("id").single());
+    await createAuditEvent(league.id, season.id, commissioner.id, "draft_pick", pick.id, "selected", `Recorded CVC rookie draft selection ${player.display_name} to ${winningFranchise.name}.`); return { selected: true };
   }),
 
   franchiseRoster: publicProcedure.input(z.object({ franchiseId: z.string().uuid() })).query(async ({ input }) => {

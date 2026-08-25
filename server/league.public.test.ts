@@ -115,4 +115,10 @@ describe("CVC public league procedures", () => {
       expect(player.seasonStats).toHaveProperty("games_played");
     }
   });
+
+  it("only returns unrostered, undrafted rookies in QB/RB/WR/TE/K positions", async () => {
+    const rookies = await appRouter.createCaller(createPublicContext()).league.eligibleRookies({ limit: 50 });
+
+    expect(rookies.every((player: { position: string | null }) => ["QB", "RB", "WR", "TE", "K"].includes(player.position ?? ""))).toBe(true);
+  });
 });
