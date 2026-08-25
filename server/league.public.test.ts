@@ -95,4 +95,13 @@ describe("CVC public league procedures", () => {
 
     expect(filtered.every((player: { cutByFranchiseName?: string }) => Boolean(player.cutByFranchiseName))).toBe(true);
   });
+
+  it("returns only open draft picks currently owned by the requested franchise", async () => {
+    const caller = appRouter.createCaller(createPublicContext());
+    const overview = await caller.league.overview();
+    const picks = await caller.league.franchisePicks({ franchiseId: overview.franchises[0].id });
+
+    expect(Array.isArray(picks)).toBe(true);
+    expect(picks.every((pick: { roundNumber: number; pickNumber: number }) => pick.roundNumber > 0 && pick.pickNumber > 0)).toBe(true);
+  });
 });

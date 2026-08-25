@@ -38,4 +38,13 @@ describe("CVC commissioner boundaries", () => {
     const caller = appRouter.createCaller(createAuthenticatedContext("not-a-cvc-commissioner"));
     await expect(caller.league.saveRosterSlot({ code: "BAD", label: "Invalid", positions: ["QB"], slotGroup: "starter", minimum: 3, maximum: 1 })).rejects.toMatchObject({ code: "BAD_REQUEST" });
   });
+
+  it("rejects a trade proposal from an account without an active CVC franchise", async () => {
+    const caller = appRouter.createCaller(createAuthenticatedContext("not-a-cvc-owner"));
+    await expect(caller.league.proposeTrade({
+      recipientFranchiseId: "11111111-1111-4111-8111-111111111111",
+      offerPlayerIds: ["22222222-2222-4222-8222-222222222222"],
+      requestPlayerIds: ["33333333-3333-4333-8333-333333333333"],
+    })).rejects.toMatchObject({ code: "FORBIDDEN" });
+  });
 });

@@ -290,6 +290,15 @@ export const leagueRouter = router({
     };
   }),
 
+  franchisePicks: publicProcedure.input(z.object({ franchiseId: z.string().uuid() })).query(async ({ input }) => {
+    const picks = unwrap(await supabase.from("draft_pick").select("id, round_number, pick_number, pick_status, draft:draft_id(draft_type, season:season_id(year))").eq("current_franchise_id", input.franchiseId).eq("pick_status", "open").order("round_number").order("pick_number").limit(100)) ?? [];
+    return picks.map((pick: any) => {
+      const draft = Array.isArray(pick.draft) ? pick.draft[0] : pick.draft;
+      const season = draft ? (Array.isArray(draft.season) ? draft.season[0] : draft.season) : null;
+      return { id: pick.id, roundNumber: pick.round_number, pickNumber: pick.pick_number, draftType: draft?.draft_type ?? "rookie", year: season?.year ?? null };
+    });
+  }),
+
   playerDirectory: publicProcedure.input(z.object({ search: z.string().trim().max(64).optional(), position: z.string().trim().max(12).optional(), limit: z.number().int().min(1).max(150).optional() }).optional()).query(async ({ input }) => {
     const limit = input?.limit ?? 75;
     let query = supabase.from("player").select("id, display_name, position, nfl_team, status, metadata").order("display_name").limit(limit);
@@ -461,12 +470,24 @@ export const leagueRouter = router({
     const { season } = await getCurrentLeagueAndSeason();
     const franchise = unwrap(await supabase.from("franchise").select("id").eq("current_owner_id", owner.id).eq("is_active", true).limit(1).maybeSingle());
     if (!franchise && !["commissioner", "administrator"].includes(owner.role)) return [];
-    let query = supabase.from("trade_offer").select("id, status, note, proposed_at, responded_at, reviewed_at, proposer:proposer_franchise_id(id, name), recipient:recipient_franchise_id(id, name), assets:trade_asset(id, from_franchise_id, player:player_id(id, display_name, position, nfl_team))").eq("season_id", season.id).order("proposed_at", { ascending: false }).limit(100);
+    let query = supabase.from("trade_offer").select("id, status, note, proposed_at, responded_at, reviewed_at, proposer:proposer_franchise_id(id, name), recipient:recipient_franchise_id(id, name), assets:trade_asset(id, from_franchise_id, player:player_id(id, display_name, position, nfl_team), pick:draft_pick_id(id, round_number, pick_number, draft:draft_id(draft_type, season:season_id(year))))").eq("season_id", season.id).order("proposed_at", { ascending: false }).limit(100);
     if (franchise) query = query.or(`proposer_franchise_id.eq.${franchise.id},recipient_franchise_id.eq.${franchise.id}`);
     return unwrap(await query) ?? [];
   }),
 
-  proposeTrade: protectedProcedure.input(z.object({ recipientFranchiseId: z.string().uuid(), offerPlayerIds: z.array(z.string().uuid()).min(1).max(22), requestPlayerIds: z.array(z.string().uuid()).min(1).max(22), note: z.string().trim().max(500).optional() }).refine(value => new Set([...value.offerPlayerIds, ...value.requestPlayerIds]).size === value.offerPlayerIds.length + value.requestPlayerIds.length, { message: "A player may appear only once in a CVC trade proposal." })).mutation(async ({ ctx, input }) => {
+  proposeTrade: protectedProcedure.input(z.object({
+    recipientFranchiseId: z.string().uuid(),
+    offerPlayerIds: z.array(z.string().uuid()).max(22).default([]),
+    requestPlayerIds: z.array(z.string().uuid()).max(22).default([]),
+    offerPickIds: z.array(z.string().uuid()).max(10).default([]),
+    requestPickIds: z.array(z.string().uuid()).max(10).default([]),
+    note: z.string().trim().max(500).optional(),
+  })
+    .refine(value => value.offerPlayerIds.length + value.offerPickIds.length > 0, { message: "Include at least one player or pick in what you're offering." })
+    .refine(value => value.requestPlayerIds.length + value.requestPickIds.length > 0, { message: "Include at least one player or pick in what you're requesting." })
+    .refine(value => new Set([...value.offerPlayerIds, ...value.requestPlayerIds]).size === value.offerPlayerIds.length + value.requestPlayerIds.length, { message: "A player may appear only once in a CVC trade proposal." })
+    .refine(value => new Set([...value.offerPickIds, ...value.requestPickIds]).size === value.offerPickIds.length + value.requestPickIds.length, { message: "A draft pick may appear only once in a CVC trade proposal." }))
+    .mutation(async ({ ctx, input }) => {
     const owner = await getOwnerAccess({ openId: ctx.user.openId });
     if (!owner) throw new TRPCError({ code: "FORBIDDEN", message: "A CVC owner session is required to propose a trade." });
     const { league, season } = await getCurrentLeagueAndSeason();
@@ -476,14 +497,22 @@ export const leagueRouter = router({
     const recipient = unwrap(await supabase.from("franchise").select("id, name").eq("id", input.recipientFranchiseId).eq("is_active", true).maybeSingle());
     if (!recipient) throw new TRPCError({ code: "NOT_FOUND", message: "The recipient CVC franchise was not found." });
     const playerIds = [...input.offerPlayerIds, ...input.requestPlayerIds];
-    const assignments = unwrap(await supabase.from("roster_assignment").select("player_id, franchise_id").eq("season_id", season.id).in("player_id", playerIds).is("released_at", null)) ?? [];
+    const assignments = playerIds.length ? unwrap(await supabase.from("roster_assignment").select("player_id, franchise_id").eq("season_id", season.id).in("player_id", playerIds).is("released_at", null)) ?? [] : [];
     const ownerByPlayer = new Map(assignments.map(assignment => [assignment.player_id, assignment.franchise_id]));
     if (input.offerPlayerIds.some(playerId => ownerByPlayer.get(playerId) !== proposer.id) || input.requestPlayerIds.some(playerId => ownerByPlayer.get(playerId) !== recipient.id)) throw new TRPCError({ code: "BAD_REQUEST", message: "Every CVC trade player must be on the franchise offering that player." });
+    const pickIds = [...input.offerPickIds, ...input.requestPickIds];
+    const pickRows = pickIds.length ? unwrap(await supabase.from("draft_pick").select("id, current_franchise_id, pick_status").in("id", pickIds)) ?? [] : [];
+    const pickById = new Map(pickRows.map(pick => [pick.id, pick]));
+    if (pickIds.some(pickId => !pickById.has(pickId))) throw new TRPCError({ code: "NOT_FOUND", message: "One or more CVC draft picks were not found." });
+    if (pickIds.some(pickId => pickById.get(pickId)!.pick_status !== "open")) throw new TRPCError({ code: "BAD_REQUEST", message: "Only an open, unselected CVC draft pick may be traded." });
+    if (input.offerPickIds.some(pickId => pickById.get(pickId)!.current_franchise_id !== proposer.id) || input.requestPickIds.some(pickId => pickById.get(pickId)!.current_franchise_id !== recipient.id)) throw new TRPCError({ code: "BAD_REQUEST", message: "Every CVC trade pick must currently be owned by the franchise offering that pick." });
     const trade = unwrap(await supabase.from("trade_offer").insert({ season_id: season.id, proposer_franchise_id: proposer.id, recipient_franchise_id: recipient.id, note: input.note ?? null }).select("id").single());
     if (!trade) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "CVC trade proposal could not be saved." });
     const assets = [
       ...input.offerPlayerIds.map(player_id => ({ trade_offer_id: trade.id, from_franchise_id: proposer.id, player_id })),
       ...input.requestPlayerIds.map(player_id => ({ trade_offer_id: trade.id, from_franchise_id: recipient.id, player_id })),
+      ...input.offerPickIds.map(draft_pick_id => ({ trade_offer_id: trade.id, from_franchise_id: proposer.id, draft_pick_id })),
+      ...input.requestPickIds.map(draft_pick_id => ({ trade_offer_id: trade.id, from_franchise_id: recipient.id, draft_pick_id })),
     ];
     unwrap(await supabase.from("trade_asset").insert(assets).select("id"));
     await createAuditEvent(league.id, season.id, owner.id, "trade_offer", trade.id, "proposed", `${proposer.name} proposed a trade to ${recipient.name}.`);
@@ -507,20 +536,33 @@ export const leagueRouter = router({
   executeTrade: protectedProcedure.input(z.object({ tradeId: z.string().uuid() })).mutation(async ({ ctx, input }) => {
     const commissioner = await requireCommissioner({ openId: ctx.user.openId });
     const { league, season } = await getCurrentLeagueAndSeason();
-    const trade = unwrap(await supabase.from("trade_offer").select("id, proposer_franchise_id, recipient_franchise_id, status, proposer:proposer_franchise_id(name), recipient:recipient_franchise_id(name), assets:trade_asset(id, from_franchise_id, player_id)").eq("id", input.tradeId).eq("season_id", season.id).maybeSingle());
+    const trade = unwrap(await supabase.from("trade_offer").select("id, proposer_franchise_id, recipient_franchise_id, status, proposer:proposer_franchise_id(name), recipient:recipient_franchise_id(name), assets:trade_asset(id, from_franchise_id, player_id, draft_pick_id)").eq("id", input.tradeId).eq("season_id", season.id).maybeSingle());
     if (!trade || trade.status !== "accepted") throw new TRPCError({ code: "BAD_REQUEST", message: "Only an accepted CVC trade may be executed." });
     const assets = trade.assets ?? [];
-    const assignments = unwrap(await supabase.from("roster_assignment").select("id, player_id, franchise_id").eq("season_id", season.id).in("player_id", assets.map((asset: any) => asset.player_id)).is("released_at", null)) ?? [];
-    const assignmentByPlayer = new Map(assignments.map(assignment => [assignment.player_id, assignment]));
-    if (assets.some((asset: any) => assignmentByPlayer.get(asset.player_id)?.franchise_id !== asset.from_franchise_id)) throw new TRPCError({ code: "CONFLICT", message: "A CVC trade asset is no longer on its offering franchise roster." });
-    await Promise.all(assets.map(async (asset: any) => {
-      const destination = asset.from_franchise_id === trade.proposer_franchise_id ? trade.recipient_franchise_id : trade.proposer_franchise_id;
-      await Promise.all([
-        supabase.from("roster_assignment").update({ franchise_id: destination, roster_state: "active", updated_at: new Date().toISOString() }).eq("id", assignmentByPlayer.get(asset.player_id)!.id).select("id"),
-        supabase.from("player_contract").update({ franchise_id: destination }).eq("season_id", season.id).eq("franchise_id", asset.from_franchise_id).eq("player_id", asset.player_id).select("id"),
-        supabase.from("player_right").update({ status: "expired" }).eq("season_id", season.id).eq("franchise_id", asset.from_franchise_id).eq("player_id", asset.player_id).in("right_type", ["franchise", "transition"]).eq("status", "active").select("id"),
-      ]);
-    }));
+    const playerAssets = assets.filter((asset: any) => asset.player_id);
+    const pickAssets = assets.filter((asset: any) => asset.draft_pick_id);
+    const [assignments, picks] = await Promise.all([
+      playerAssets.length ? supabase.from("roster_assignment").select("id, player_id, franchise_id").eq("season_id", season.id).in("player_id", playerAssets.map((asset: any) => asset.player_id)).is("released_at", null) : Promise.resolve({ data: [] }),
+      pickAssets.length ? supabase.from("draft_pick").select("id, current_franchise_id, pick_status").in("id", pickAssets.map((asset: any) => asset.draft_pick_id)) : Promise.resolve({ data: [] }),
+    ]);
+    const assignmentByPlayer = new Map((assignments.data ?? []).map((assignment: any) => [assignment.player_id, assignment]));
+    const pickById = new Map((picks.data ?? []).map((pick: any) => [pick.id, pick]));
+    if (playerAssets.some((asset: any) => assignmentByPlayer.get(asset.player_id)?.franchise_id !== asset.from_franchise_id)) throw new TRPCError({ code: "CONFLICT", message: "A CVC trade player is no longer on its offering franchise roster." });
+    if (pickAssets.some((asset: any) => pickById.get(asset.draft_pick_id)?.current_franchise_id !== asset.from_franchise_id || pickById.get(asset.draft_pick_id)?.pick_status !== "open")) throw new TRPCError({ code: "CONFLICT", message: "A CVC trade draft pick is no longer owned by its offering franchise, or has already been selected." });
+    await Promise.all([
+      ...playerAssets.map(async (asset: any) => {
+        const destination = asset.from_franchise_id === trade.proposer_franchise_id ? trade.recipient_franchise_id : trade.proposer_franchise_id;
+        await Promise.all([
+          supabase.from("roster_assignment").update({ franchise_id: destination, roster_state: "active", updated_at: new Date().toISOString() }).eq("id", assignmentByPlayer.get(asset.player_id)!.id).select("id"),
+          supabase.from("player_contract").update({ franchise_id: destination }).eq("season_id", season.id).eq("franchise_id", asset.from_franchise_id).eq("player_id", asset.player_id).select("id"),
+          supabase.from("player_right").update({ status: "expired" }).eq("season_id", season.id).eq("franchise_id", asset.from_franchise_id).eq("player_id", asset.player_id).in("right_type", ["franchise", "transition"]).eq("status", "active").select("id"),
+        ]);
+      }),
+      ...pickAssets.map(async (asset: any) => {
+        const destination = asset.from_franchise_id === trade.proposer_franchise_id ? trade.recipient_franchise_id : trade.proposer_franchise_id;
+        await supabase.from("draft_pick").update({ current_franchise_id: destination }).eq("id", asset.draft_pick_id).select("id");
+      }),
+    ]);
     unwrap(await supabase.from("trade_offer").update({ status: "processed", reviewed_at: new Date().toISOString(), reviewed_by_owner_id: commissioner.id }).eq("id", trade.id).select("id").single());
     unwrap(await supabase.from("transaction").insert({ season_id: season.id, franchise_id: trade.proposer_franchise_id, actor_owner_id: commissioner.id, transaction_type: "trade", status: "final", summary: `${trade.proposer?.[0]?.name ?? "CVC franchise"} completed a trade with ${trade.recipient?.[0]?.name ?? "CVC franchise"}.`, details: { trade_offer_id: trade.id, asset_count: assets.length } }).select("id").single());
     await createAuditEvent(league.id, season.id, commissioner.id, "trade_offer", trade.id, "processed", "Commissioner executed an accepted CVC trade.");
