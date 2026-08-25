@@ -104,4 +104,15 @@ describe("CVC public league procedures", () => {
     expect(Array.isArray(picks)).toBe(true);
     expect(picks.every((pick: { roundNumber: number; pickNumber: number }) => pick.roundNumber > 0 && pick.pickNumber > 0)).toBe(true);
   });
+
+  it("attaches cached season stats to free agents only when a synced row exists", async () => {
+    const players = await appRouter.createCaller(createPublicContext()).league.freeAgents({ limit: 50 });
+
+    for (const player of players as Array<{ seasonStats?: { games_played: number | null; fantasy_points: number | null } }>) {
+      if (player.seasonStats === undefined) continue;
+      expect(typeof player.seasonStats).toBe("object");
+      expect(player.seasonStats).toHaveProperty("fantasy_points");
+      expect(player.seasonStats).toHaveProperty("games_played");
+    }
+  });
 });

@@ -102,6 +102,14 @@ export class Tank01NFLDataAdapter implements NFLDataAdapter {
     if (payload.error) throw new Error(`Tank01 getNFLBoxScore returned ${payload.error}`);
     return payload.body ?? {};
   }
+
+  async getPlayerInfo(playerName: string) {
+    const response = await fetch(`https://${this.host}/getNFLPlayerInfo?playerName=${encodeURIComponent(playerName)}&getStats=true`, { headers: this.headers() });
+    if (!response.ok) throw new Error(`Tank01 getNFLPlayerInfo failed with status ${response.status}`);
+    const payload = await response.json() as { body?: Record<string, unknown> | Record<string, unknown>[]; error?: string };
+    if (payload.error) throw new Error(`Tank01 getNFLPlayerInfo returned ${payload.error}`);
+    return Array.isArray(payload.body) ? payload.body[0] ?? null : payload.body ?? null;
+  }
 }
 
 export class FantasyProsNFLDataAdapter implements NFLDataAdapter {

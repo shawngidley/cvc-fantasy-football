@@ -4,6 +4,7 @@ import { protectedProcedure, publicProcedure, router } from "../_core/trpc";
 import { getFantasyProsDataAdapter, getNFLDataAdapter } from "../nflDataAdapter";
 import { fantasyProsCacheStatus } from "../fantasyProsCache";
 import { syncFantasyProsSnapshot } from "../fantasyProsSync";
+import { syncTank01SeasonStats } from "../tank01SeasonStatsSync";
 import { activeLiveLineup } from "../liveScoringLineup";
 import { supabase, unwrap } from "../supabase";
 import { cvcContractTier, cvcFranchiseTerms, cvcPriorSeasonSalary, cvcTransitionSalary, isCvcHighSalaryTransition, isCvcProtectionYear } from "../../shared/cvcProtectionPolicy";
@@ -55,6 +56,19 @@ async function getCurrentLeagueAndSeason() {
 
 async function createAuditEvent(leagueId: string, seasonId: string, actorOwnerId: string, entityType: string, entityId: string | null, action: string, summary: string) {
   unwrap(await supabase.from("audit_event").insert({ league_id: leagueId, season_id: seasonId, actor_owner_id: actorOwnerId, entity_type: entityType, entity_id: entityId, action, summary }).select("id").single());
+}
+
+/** Attaches cached Tank01 season-total stats (see tank01SeasonStatsSync.ts) to a page
+ * of player rows for display — a cheap join against the cache table, never a live
+ * per-row Tank01 call. Players with no cached row yet (not synced) are left as-is. */
+async function attachSeasonStats<T extends { id: string }>(players: T[], seasonId: string): Promise<(T & { seasonStats?: Record<string, number | null> })[]> {
+  if (!players.length) return players;
+  const rows = unwrap(await supabase.from("player_season_stat").select("player_id, games_played, pass_yds, pass_td, pass_int, rush_att, rush_yds, rush_td, targets, receptions, rec_yds, rec_td, fg_made, xp_made, sacks, def_int, def_td, fantasy_points, fantasy_points_per_game").eq("season_id", seasonId).in("player_id", players.map(player => player.id))) ?? [];
+  const byPlayerId = new Map(rows.map(row => [row.player_id, row]));
+  return players.map(player => {
+    const stats = byPlayerId.get(player.id);
+    return stats ? { ...player, seasonStats: stats } : player;
+  });
 }
 
 export const leagueRouter = router({
@@ -340,7 +354,8 @@ export const leagueRouter = router({
         tagged.push({ ...player, cutByFranchiseName: franchiseName, cutTagType: row.last_cut_tag_type });
       }
       tagged.sort((a, b) => a.display_name.localeCompare(b.display_name));
-      return tagged.slice(0, limit);
+      const page = tagged.slice(0, limit);
+      return attachSeasonStats(page, season.id);
     }
 
     let playerQuery = supabase.from("player").select("id, provider, display_name, position, nfl_team, status, metadata").neq("provider", "placeholder").in("position", eligiblePositions).order("display_name").limit(limit + 220);
@@ -368,11 +383,13 @@ export const leagueRouter = router({
         latestCutTagByPlayerId.set(row.player_id, { franchiseName: name, tagType: row.last_cut_tag_type, updatedAt: row.updated_at });
       }
     }
-    return freeAgentPool.map(player => {
+    const tagged = freeAgentPool.map(player => {
       const tag = latestCutTagByPlayerId.get(player.id);
       return tag ? { ...player, cutByFranchiseName: tag.franchiseName, cutTagType: tag.tagType } : player;
     });
+    return attachSeasonStats(tagged, season.id);
   }),
+
 
   playerDetail: publicProcedure.input(z.object({ playerId: z.string().uuid() })).query(async ({ input }) => {
     const player = unwrap(await supabase.from("player").select("id, provider, external_id, display_name, position, nfl_team, status, metadata, created_at, updated_at").eq("id", input.playerId).maybeSingle());
@@ -408,6 +425,12 @@ export const leagueRouter = router({
     const adapter = getFantasyProsDataAdapter();
     if (!adapter) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "FantasyPros is not configured for CVC." });
     return syncFantasyProsSnapshot(await adapter.listPlayerSnapshot());
+  }),
+
+  syncSeasonStats: protectedProcedure.input(z.object({ limit: z.number().int().min(1).max(100).optional() }).optional()).mutation(async ({ ctx, input }) => {
+    await requireCommissioner({ openId: ctx.user.openId });
+    const { season } = await getCurrentLeagueAndSeason();
+    return syncTank01SeasonStats(season.id, input?.limit ?? 40);
   }),
 
   waiverStatus: publicProcedure.query(async () => {
