@@ -5,7 +5,7 @@ import { supabase, unwrap } from "./supabase";
 const ELIGIBLE_POSITIONS = ["QB", "RB", "WR", "TE", "K", "DST"];
 const CONCURRENCY = 5;
 
-type CvcPlayer = { id: string; display_name: string; position: string | null };
+type CvcPlayer = { id: string; display_name: string; position: string | null; nfl_team: string | null };
 
 export type SeasonStatsSyncSummary = {
   status: "skipped" | "completed";
@@ -14,6 +14,7 @@ export type SeasonStatsSyncSummary = {
   updated: number;
   notFound: number;
   remaining: number;
+  teamsUpdated: number;
 };
 
 const numeric = (value: unknown): number | null => {
@@ -24,6 +25,17 @@ const numeric = (value: unknown): number | null => {
 
 function asRecord(value: unknown): Record<string, string | number | undefined> {
   return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, string | number | undefined> : {};
+}
+
+// Tank01 field name for the team abbreviation isn't confirmed against a live response in
+// this codebase, so check several plausible keys defensively (matching the cautious style
+// already used for other unverified Tank01 fields, e.g. useTeamSchedule's comment in
+// CvcWrcPlayerProfile.tsx) and simply leave nfl_team unchanged if none are present.
+export function extractCurrentTeam(row: Record<string, unknown>): string | null {
+  const raw = row.team ?? row.teamAbv ?? row.currentTeam ?? row.team_abv ?? row.nflTeam;
+  if (raw === undefined || raw === null) return null;
+  const value = String(raw).trim().toUpperCase();
+  return value && value !== "FA" ? value : null;
 }
 
 /** Tank01's getNFLPlayerInfo?getStats=true nests season-total categories under `stats`
@@ -67,11 +79,11 @@ function extractSeasonStats(row: Record<string, unknown>, position: string, rule
  * (see `remaining` in the summary) until the whole pool is covered. */
 export async function syncTank01SeasonStats(seasonId: string, limit = 40): Promise<SeasonStatsSyncSummary> {
   const adapter = getNFLDataAdapter();
-  if (!(adapter instanceof Tank01NFLDataAdapter)) return { status: "skipped", reason: "Tank01 is not configured.", attempted: 0, updated: 0, notFound: 0, remaining: 0 };
+  if (!(adapter instanceof Tank01NFLDataAdapter)) return { status: "skipped", reason: "Tank01 is not configured.", attempted: 0, updated: 0, notFound: 0, remaining: 0, teamsUpdated: 0 };
 
   const rules = unwrap(await supabase.from("scoring_rule").select("stat_key, value, applies_to_positions").eq("season_id", seasonId)) ?? [];
-  const players = unwrap(await supabase.from("player").select("id, display_name, position").neq("provider", "placeholder").in("position", ELIGIBLE_POSITIONS).order("display_name")) as CvcPlayer[] ?? [];
-  if (!players.length) return { status: "completed", attempted: 0, updated: 0, notFound: 0, remaining: 0 };
+  const players = unwrap(await supabase.from("player").select("id, display_name, position, nfl_team").neq("provider", "placeholder").in("position", ELIGIBLE_POSITIONS).order("display_name")) as CvcPlayer[] ?? [];
+  if (!players.length) return { status: "completed", attempted: 0, updated: 0, notFound: 0, remaining: 0, teamsUpdated: 0 };
 
   const staleCutoff = new Date(Date.now() - 12 * 60 * 60 * 1000).toISOString();
   const existing = unwrap(await supabase.from("player_season_stat").select("player_id, synced_at").eq("season_id", seasonId)) ?? [];
@@ -81,6 +93,7 @@ export async function syncTank01SeasonStats(seasonId: string, limit = 40): Promi
 
   let updated = 0;
   let notFound = 0;
+  let teamsUpdated = 0;
   for (let i = 0; i < batch.length; i += CONCURRENCY) {
     const chunk = batch.slice(i, i + CONCURRENCY);
     await Promise.all(chunk.map(async player => {
@@ -89,9 +102,20 @@ export async function syncTank01SeasonStats(seasonId: string, limit = 40): Promi
         if (!row) { notFound += 1; return; }
         const stats = extractSeasonStats(row as Record<string, unknown>, player.position ?? "", rules);
         unwrap(await supabase.from("player_season_stat").upsert({ season_id: seasonId, player_id: player.id, ...stats, provider: "Tank01", synced_at: new Date().toISOString() }, { onConflict: "season_id,player_id" }).select("id").single());
+        // Keeps the Rosters/Lineup/Free Agents pages current after real-world trades or
+        // signings, using the same Tank01 call already made above for stats — no extra
+        // API cost. Skipped for DST rows: their "player" record IS the team itself
+        // (e.g. "Los Angeles Rams"), so there's no separate current-team concept to sync.
+        if (player.position !== "DST") {
+          const currentTeam = extractCurrentTeam(row as Record<string, unknown>);
+          if (currentTeam && currentTeam !== (player.nfl_team ?? "").toUpperCase()) {
+            unwrap(await supabase.from("player").update({ nfl_team: currentTeam }).eq("id", player.id).select("id").single());
+            teamsUpdated += 1;
+          }
+        }
         updated += 1;
       } catch { notFound += 1; }
     }));
   }
-  return { status: "completed", attempted: batch.length, updated, notFound, remaining: Math.max(0, pending.length - batch.length) };
+  return { status: "completed", attempted: batch.length, updated, notFound, remaining: Math.max(0, pending.length - batch.length), teamsUpdated };
 }

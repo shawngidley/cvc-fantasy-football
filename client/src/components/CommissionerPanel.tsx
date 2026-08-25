@@ -61,7 +61,7 @@ export function CommissionerPanel() {
   const saveRule = trpc.league.saveRuleDocument.useMutation({ onSuccess: () => { toast.success("Rule document saved."); setRule({ title: "", slug: "", version: "1.0", content: "" }); } });
   const saveFinance = trpc.league.saveFinancialEntry.useMutation({ onSuccess: () => { toast.success("Financial entry saved."); setFinance({ type: "dues", amount: "", status: "open", memo: "" }); } });
   const overview = trpc.league.overview.useQuery();
-  const description = useMemo(() => ({ teams: "Create CVC franchises, abbreviations, divisions, and identity records.", owners: "Register league members and grant owner, commissioner, or administrator access.", scoring: "Build CVC scoring one stat rule at a time; no calculation is hard-coded.", roster: "Define positions, eligibility, starters, bench, reserve, and taxi capacity.", schedule: "Create each league week, then add home/away matchups with CVC franchise selections.", rules: "Publish versioned commissioner-managed rules content without shipping code.", finance: "Record dues, payouts, credits, and other commissioner-controlled league entries.", protections: "At the protection deadline, flag every rostered player leaguewide whose contract expires this season and has no protection decision on file. Flagged players stay rostered until you process or exempt them below.", stats: "Cache season-total stats from Tank01 for display on Free Agents, since that list can't call Tank01 live per row." })[active], [active]);
+  const description = useMemo(() => ({ teams: "Create CVC franchises, abbreviations, divisions, and identity records.", owners: "Register league members and grant owner, commissioner, or administrator access.", scoring: "Build CVC scoring one stat rule at a time; no calculation is hard-coded.", roster: "Define positions, eligibility, starters, bench, reserve, and taxi capacity.", schedule: "Create each league week, then add home/away matchups with CVC franchise selections.", rules: "Publish versioned commissioner-managed rules content without shipping code.", finance: "Record dues, payouts, credits, and other commissioner-controlled league entries.", protections: "At the protection deadline, flag every rostered player leaguewide whose contract expires this season and has no protection decision on file. Flagged players stay rostered until you process or exempt them below.", stats: "Cache season-total stats from Tank01 for display on Free Agents, and keep each player's current NFL team up to date after real-world trades or signings." })[active], [active]);
   const onSubmit = (event: FormEvent) => {
     event.preventDefault();
     if (active === "teams") saveTeam.mutate({ name: team.name, abbreviation: team.abbreviation, divisionName: team.divisionName || undefined });
@@ -116,14 +116,14 @@ function SeasonStatsSyncModule() {
   const sync = trpc.league.syncSeasonStats.useMutation({
     onSuccess: data => {
       if (data.status === "skipped") { toast.error(data.reason ?? "Season stats sync is unavailable."); return; }
-      toast.success(`Synced ${data.updated} of ${data.attempted} players${data.notFound ? ` (${data.notFound} not found on Tank01)` : ""}.${data.remaining ? ` ${data.remaining} still pending — click again to continue.` : " All players are up to date."}`);
+      toast.success(`Synced ${data.updated} of ${data.attempted} players${data.notFound ? ` (${data.notFound} not found on Tank01)` : ""}${data.teamsUpdated ? ` — ${data.teamsUpdated} moved to a new NFL team` : ""}.${data.remaining ? ` ${data.remaining} still pending — click again to continue.` : " All players are up to date."}`);
     },
     onError: error => toast.error(error.message),
   });
   return <div className="grid gap-4">
     <div className="rounded-lg border border-dashed border-cvc-deep/20 bg-cvc-tint p-4">
       <p className="text-sm font-semibold text-cvc-deep">Season stats sync</p>
-      <p className="mt-1 text-xs leading-5 text-slate-500">Pulls season-total stats from Tank01 for every rostered and free-agent CVC player (QB/RB/WR/TE/K/DST) and caches them for display on Free Agents. Each click processes up to 40 players who haven't been synced in the last 12 hours — click repeatedly until "All players are up to date" if the pool is large.</p>
+      <p className="mt-1 text-xs leading-5 text-slate-500">Pulls season-total stats from Tank01 for every rostered and free-agent CVC player (QB/RB/WR/TE/K/DST), caches them for display on Free Agents, and updates each player's current NFL team on their CVC record (skipped for D/ST, since that record is the team itself). Each click processes up to 40 players who haven't been synced in the last 12 hours — click repeatedly until "All players are up to date" if the pool is large.</p>
       <button type="button" className="cvc-button-compact mt-3" disabled={sync.isPending} onClick={() => sync.mutate({})}><Save size={14} /> {sync.isPending ? "Syncing…" : "Sync next batch"}</button>
     </div>
   </div>;
