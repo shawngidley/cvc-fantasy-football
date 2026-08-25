@@ -171,8 +171,13 @@ export const leagueRouter = router({
   activity: publicProcedure.query(async () => {
     const { data: season, error: seasonError } = await supabase.from("season").select("id").order("year", { ascending: false }).limit(1).single();
     if (seasonError || !season) throw new TRPCError({ code: "NOT_FOUND", message: "CVC season configuration was not found." });
+    // Only trade/add/drop/waiver rows are ever eligible for the public board (see filter
+    // below), so restrict the raw fetch to those types before limiting — otherwise a
+    // burst of same-day admin activity (protection notes, commissioner adjustments,
+    // draft picks, etc.) can fill the row-limit window and push a genuinely recent
+    // trade or pickup/drop out of view even though it still qualifies for display.
     const [txResult, draftsResult] = await Promise.all([
-      supabase.from("transaction").select("id, transaction_type, status, summary, occurred_at, details, franchise_id, franchise:franchise_id(name, is_active)").eq("season_id", season.id).order("occurred_at", { ascending: false }).limit(50),
+      supabase.from("transaction").select("id, transaction_type, status, summary, occurred_at, details, franchise_id, franchise:franchise_id(name, is_active)").eq("season_id", season.id).in("transaction_type", ["trade", "add", "drop", "waiver"]).order("occurred_at", { ascending: false }).limit(200),
       supabase.from("draft").select("status").eq("season_id", season.id),
     ]);
     const { data, error } = txResult;
@@ -191,7 +196,7 @@ export const leagueRouter = router({
       if (item.transaction_type === "trade") return true;
       if (!pickupOrDropTypes.includes(item.transaction_type)) return false;
       return draftsConcluded;
-    }).map((item: any) => {
+    }).slice(0, 50).map((item: any) => {
       const franchise = Array.isArray(item.franchise) ? item.franchise[0] : item.franchise;
       return { ...item, franchise_name: franchise?.name ?? null };
     });
