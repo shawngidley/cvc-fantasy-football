@@ -68,7 +68,7 @@ describe("CVC commissioner boundaries", () => {
 
   it("rejects a voice-recorded auction pick from an account without commissioner access", async () => {
     const caller = appRouter.createCaller(createAuthenticatedContext("not-a-cvc-commissioner"));
-    await expect(caller.auction.recordVoicePick({
+    await expect(caller.auction.recordPick({
       playerId: "11111111-1111-4111-8111-111111111111",
       franchiseId: "22222222-2222-4222-8222-222222222222",
       amount: 1,

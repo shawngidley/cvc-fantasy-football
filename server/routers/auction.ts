@@ -109,14 +109,14 @@ export const auctionRouter = router({
     return { success: true } as const;
   }),
 
-  // Records a full pick (player + winning franchise + salary) in one step, for auctions
-  // where nomination and bidding happen live in the room rather than in the app — e.g.
-  // the commissioner speaking the result aloud via the voice-pick recorder, which parses
-  // a spoken sentence into these three fields client-side and calls this after the
-  // commissioner confirms the parsed result. Functionally equivalent to nominate() +
-  // award() run back to back (same validation, same nomination/roster/contract/
-  // transaction records), just without requiring a prior "active nomination" in the app.
-  recordVoicePick: protectedProcedure.input(z.object({ playerId: z.string().uuid(), franchiseId: z.string().uuid(), amount: z.number().int().min(1) })).mutation(async ({ ctx: c, input }) => {
+  // Records a full pick (player + winning franchise + salary) in one step. Nomination
+  // and bidding happen live in the room, not in the app, so this is the sole way a
+  // commissioner-console pick gets recorded — both the manual "Record a pick" form and
+  // the voice-pick recorder call this after the commissioner reviews/confirms the
+  // player, franchise, and amount. Functionally equivalent to nominate() + award() run
+  // back to back (same validation, same nomination/roster/contract/transaction
+  // records), just without requiring a prior "active nomination" in the app.
+  recordPick: protectedProcedure.input(z.object({ playerId: z.string().uuid(), franchiseId: z.string().uuid(), amount: z.number().int().min(1) })).mutation(async ({ ctx: c, input }) => {
     const actor = await commissioner(c.user.openId); const { season, draft } = await context();
     const existing = unwrap(await supabase.from("auction_nomination").select("id").eq("draft_id", draft.id).eq("status", "active").maybeSingle());
     if (existing) throw new TRPCError({ code: "CONFLICT", message: "Award or pass the active player first." });
