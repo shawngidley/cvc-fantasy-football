@@ -77,12 +77,19 @@ export type FantasyProsRookieSyncSummary = { countByPosition: Record<string, num
 export async function syncFantasyProsRookieFlags(idsByPosition: Record<string, string[]>, errors: Record<string, string>): Promise<FantasyProsRookieSyncSummary> {
   const rookieExternalIds = new Set(Object.values(idsByPosition).flat());
   const countByPosition = Object.fromEntries(Object.entries(idsByPosition).map(([position, ids]) => [position, ids.length]));
-  const existing = unwrap(await supabase.from("player").select("id, external_id, metadata").eq("provider", "fantasypros")) as { id: string; external_id: string | null; metadata: Record<string, unknown> | null }[];
-  const existingExternalIds = new Set(existing.filter(player => player.external_id).map(player => player.external_id as string));
-  const matchedInDb = Array.from(rookieExternalIds).filter(id => existingExternalIds.has(id)).length;
+  // Match on metadata.fantasypros_id, not the external_id/provider columns: those are
+  // only set for players FRESHLY INSERTED by this sync. A player who already existed
+  // (e.g. from the original CSV import) and got matched by name+team instead only ever
+  // has metadata enriched with fantasypros_id -- their provider/external_id columns
+  // stay whatever they originally were. Filtering by provider='fantasypros' missed
+  // exactly that majority case (confirmed: only 50 of 744 matched on the first run).
+  const existing = unwrap(await supabase.from("player").select("id, metadata").limit(5000)) as { id: string; metadata: Record<string, unknown> | null }[];
+  const existingByFantasyProsId = new Map(existing.filter(player => player.metadata?.fantasypros_id).map(player => [String(player.metadata!.fantasypros_id), player]));
+  const matchedInDb = Array.from(rookieExternalIds).filter(id => existingByFantasyProsId.has(id)).length;
   let flaggedNow = 0; let clearedStale = 0;
   for (const player of existing) {
-    const isRookieNow = Boolean(player.external_id && rookieExternalIds.has(player.external_id));
+    const fantasyProsId = player.metadata?.fantasypros_id ? String(player.metadata.fantasypros_id) : null;
+    const isRookieNow = Boolean(fantasyProsId && rookieExternalIds.has(fantasyProsId));
     const wasRookie = Boolean((player.metadata as { is_rookie?: boolean } | null)?.is_rookie);
     if (isRookieNow === wasRookie) continue;
     unwrap(await supabase.from("player").update({ metadata: { ...(player.metadata ?? {}), is_rookie: isRookieNow }, updated_at: new Date().toISOString() }).eq("id", player.id).select("id").single());
