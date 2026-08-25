@@ -5,6 +5,7 @@ import { getFantasyProsDataAdapter, getNFLDataAdapter } from "../nflDataAdapter"
 import { fantasyProsCacheStatus, getFantasyProsRookiePlayerIds } from "../fantasyProsCache";
 import { syncFantasyProsSnapshot, syncFantasyProsRookieFlags } from "../fantasyProsSync";
 import { syncTank01SeasonStats } from "../tank01SeasonStatsSync";
+import { LOTTERY_REVEAL_INTERVAL_SECONDS, lotteryCommitment, revealedLotteryCount, reverseLotteryPositions, secureShuffle } from "../rookieDraftLottery";
 import { activeLiveLineup } from "../liveScoringLineup";
 import { supabase, unwrap } from "../supabase";
 import { cvcContractTier, cvcFranchiseTerms, cvcPriorSeasonSalary, cvcTransitionSalary, isCvcHighSalaryTransition, isCvcProtectionYear } from "../../shared/cvcProtectionPolicy";
@@ -56,6 +57,22 @@ async function getCurrentLeagueAndSeason() {
 
 async function createAuditEvent(leagueId: string, seasonId: string, actorOwnerId: string, entityType: string, entityId: string | null, action: string, summary: string) {
   unwrap(await supabase.from("audit_event").insert({ league_id: leagueId, season_id: seasonId, actor_owner_id: actorOwnerId, entity_type: entityType, entity_id: entityId, action, summary }).select("id").single());
+}
+
+// Applies a completed lottery's drawn franchise order onto the round's actual
+// draft_pick rows: franchiseOrder[0] (revealed first, draft_position N) goes to the
+// LAST pick of the round; franchiseOrder[N-1] (revealed last, draft_position 1) goes
+// to the FIRST pick — matching reverseLotteryPositions' reveal-order mapping exactly.
+async function applyRookieLotteryResults(draftId: string, roundNumber: number, franchiseOrder: string[]) {
+  const picks = unwrap(await supabase.from("draft_pick").select("id, pick_number").eq("draft_id", draftId).eq("round_number", roundNumber).order("pick_number")) ?? [];
+  const count = franchiseOrder.length;
+  for (let index = 0; index < count; index += 1) {
+    const draftPosition = count - index;
+    const pick = picks[draftPosition - 1];
+    if (!pick) continue;
+    const franchiseId = franchiseOrder[index];
+    unwrap(await supabase.from("draft_pick").update({ original_franchise_id: franchiseId, current_franchise_id: franchiseId, updated_at: new Date().toISOString() }).eq("id", pick.id).select("id").single());
+  }
 }
 
 /** Attaches cached Tank01 season-total stats (see tank01SeasonStatsSync.ts) to a page
@@ -243,6 +260,124 @@ export const leagueRouter = router({
         salary: contract ? Number(contract.salary) : null,
       };
     }) };
+  }),
+
+  rookieLottery: publicProcedure.input(z.object({ roundNumber: z.number().int().min(1).max(20).optional() }).optional()).query(async ({ input }) => {
+    const roundNumber = input?.roundNumber ?? 2;
+    const { season } = await getCurrentLeagueAndSeason();
+    const draft = unwrap(await supabase.from("draft").select("id").eq("season_id", season.id).eq("draft_type", "rookie").maybeSingle());
+    if (!draft) return null;
+    const lottery = unwrap(await supabase.from("rookie_draft_lottery").select("id, status, franchise_count, order_commitment, reveal_interval_seconds, revealed_count, started_at, elapsed_ms_before_pause, paused_at, completed_at, aborted_at, abort_reason").eq("draft_id", draft.id).eq("round_number", roundNumber).order("created_at", { ascending: false }).limit(1).maybeSingle());
+    if (!lottery) return null;
+
+    let revealedCount = lottery.revealed_count;
+    let status = lottery.status;
+    if (lottery.status === "RUNNING") {
+      const computed = revealedLotteryCount({ franchiseCount: lottery.franchise_count, revealIntervalSeconds: lottery.reveal_interval_seconds, revealedCount: lottery.revealed_count, elapsedMsBeforePause: Number(lottery.elapsed_ms_before_pause), startedAt: lottery.started_at, status: lottery.status });
+      if (computed > lottery.revealed_count) {
+        // franchise_order is only ever fetched inside this handler, never returned to
+        // the client — the public payload below carries just the commitment hash and
+        // whatever's already been individually revealed.
+        const full = unwrap(await supabase.from("rookie_draft_lottery").select("franchise_order").eq("id", lottery.id).single());
+        const positions = reverseLotteryPositions(full?.franchise_order ?? [], computed).slice(lottery.revealed_count);
+        if (positions.length) unwrap(await supabase.from("rookie_draft_lottery_reveal").upsert(positions.map(p => ({ lottery_id: lottery.id, reveal_index: p.revealIndex, draft_position: p.draftPosition, franchise_id: p.franchiseId })), { onConflict: "lottery_id,reveal_index", ignoreDuplicates: true }).select("id"));
+        revealedCount = computed;
+        const isComplete = computed >= lottery.franchise_count;
+        if (isComplete) {
+          // Compare-and-swap on status='RUNNING' so only one concurrent poller (many
+          // owners can be watching the reveal live) wins the RUNNING->COMPLETE
+          // transition and applies results to draft_pick exactly once.
+          const claimed = unwrap(await supabase.from("rookie_draft_lottery").update({ revealed_count: computed, status: "COMPLETE", completed_at: new Date().toISOString(), updated_at: new Date().toISOString() }).eq("id", lottery.id).eq("status", "RUNNING").select("id").maybeSingle());
+          if (claimed) await applyRookieLotteryResults(draft.id, roundNumber, full?.franchise_order ?? []);
+          status = "COMPLETE";
+        } else {
+          unwrap(await supabase.from("rookie_draft_lottery").update({ revealed_count: computed, updated_at: new Date().toISOString() }).eq("id", lottery.id).select("id").single());
+        }
+      }
+    }
+
+    const revealRows = unwrap(await supabase.from("rookie_draft_lottery_reveal").select("reveal_index, draft_position, revealed_at, franchise:franchise_id(name, logo_url)").eq("lottery_id", lottery.id).order("reveal_index")) ?? [];
+    return {
+      id: lottery.id,
+      status,
+      franchiseCount: lottery.franchise_count,
+      orderCommitment: lottery.order_commitment,
+      revealIntervalSeconds: lottery.reveal_interval_seconds,
+      revealedCount,
+      startedAt: lottery.started_at,
+      elapsedMsBeforePause: Number(lottery.elapsed_ms_before_pause),
+      pausedAt: lottery.paused_at,
+      completedAt: lottery.completed_at,
+      abortReason: lottery.abort_reason,
+      reveals: revealRows.map((row: any) => { const franchise = Array.isArray(row.franchise) ? row.franchise[0] : row.franchise; return { revealIndex: row.reveal_index, draftPosition: row.draft_position, revealedAt: row.revealed_at, franchiseName: franchise?.name ?? "Unknown", franchiseLogoUrl: franchise?.logo_url ?? null }; }),
+    };
+  }),
+
+  startRookieLottery: protectedProcedure.input(z.object({ roundNumber: z.number().int().min(1).max(20).optional() }).optional()).mutation(async ({ ctx, input }) => {
+    const commissioner = await requireCommissioner({ openId: ctx.user.openId });
+    const roundNumber = input?.roundNumber ?? 2;
+    const { league, season } = await getCurrentLeagueAndSeason();
+    const draft = unwrap(await supabase.from("draft").select("id").eq("season_id", season.id).eq("draft_type", "rookie").maybeSingle());
+    if (!draft) throw new TRPCError({ code: "NOT_FOUND", message: "CVC rookie draft has not been configured." });
+    const existing = unwrap(await supabase.from("rookie_draft_lottery").select("id, status").eq("draft_id", draft.id).eq("round_number", roundNumber).order("created_at", { ascending: false }).limit(1).maybeSingle());
+    if (existing && ["RUNNING", "PAUSED", "COMPLETE"].includes(existing.status)) throw new TRPCError({ code: "CONFLICT", message: `A round ${roundNumber} lottery has already been started or completed. Abort it before running a new draw.` });
+    const picks = unwrap(await supabase.from("draft_pick").select("id, current_franchise_id").eq("draft_id", draft.id).eq("round_number", roundNumber).order("pick_number")) ?? [];
+    if (picks.length < 2) throw new TRPCError({ code: "BAD_REQUEST", message: `Round ${roundNumber} needs at least two configured picks before the lottery can run.` });
+    const franchiseIds = picks.map(pick => pick.current_franchise_id).filter((id): id is string => Boolean(id));
+    if (franchiseIds.length !== picks.length) throw new TRPCError({ code: "BAD_REQUEST", message: `Every round ${roundNumber} pick needs a franchise assigned before the lottery can shuffle them.` });
+    const order = secureShuffle(franchiseIds);
+    const commitment = lotteryCommitment(order);
+    const now = new Date().toISOString();
+    const lottery = unwrap(await supabase.from("rookie_draft_lottery").insert({ draft_id: draft.id, round_number: roundNumber, status: "RUNNING", franchise_order: order, franchise_count: order.length, order_commitment: commitment, reveal_interval_seconds: LOTTERY_REVEAL_INTERVAL_SECONDS, revealed_count: 0, started_at: now, elapsed_ms_before_pause: 0, created_by_owner_id: commissioner.id, updated_at: now }).select("id").single());
+    if (!lottery) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "The lottery could not be started." });
+    await createAuditEvent(league.id, season.id, commissioner.id, "rookie_draft_lottery", lottery.id, "started", `Started the round ${roundNumber} rookie draft lottery (${order.length} franchises).`);
+    return { lotteryId: lottery.id };
+  }),
+
+  pauseRookieLottery: protectedProcedure.input(z.object({ roundNumber: z.number().int().min(1).max(20).optional() }).optional()).mutation(async ({ ctx, input }) => {
+    await requireCommissioner({ openId: ctx.user.openId });
+    const roundNumber = input?.roundNumber ?? 2;
+    const { season } = await getCurrentLeagueAndSeason();
+    const draft = unwrap(await supabase.from("draft").select("id").eq("season_id", season.id).eq("draft_type", "rookie").maybeSingle());
+    if (!draft) throw new TRPCError({ code: "NOT_FOUND", message: "CVC rookie draft has not been configured." });
+    const lottery = unwrap(await supabase.from("rookie_draft_lottery").select("id, status, started_at, elapsed_ms_before_pause, revealed_count, franchise_count, reveal_interval_seconds, franchise_order").eq("draft_id", draft.id).eq("round_number", roundNumber).order("created_at", { ascending: false }).limit(1).maybeSingle());
+    if (!lottery || lottery.status !== "RUNNING") throw new TRPCError({ code: "BAD_REQUEST", message: `There is no running round ${roundNumber} lottery to pause.` });
+    const computed = revealedLotteryCount({ franchiseCount: lottery.franchise_count, revealIntervalSeconds: lottery.reveal_interval_seconds, revealedCount: lottery.revealed_count, elapsedMsBeforePause: Number(lottery.elapsed_ms_before_pause), startedAt: lottery.started_at, status: lottery.status });
+    if (computed > lottery.revealed_count) {
+      const positions = reverseLotteryPositions(lottery.franchise_order, computed).slice(lottery.revealed_count);
+      if (positions.length) unwrap(await supabase.from("rookie_draft_lottery_reveal").upsert(positions.map(p => ({ lottery_id: lottery.id, reveal_index: p.revealIndex, draft_position: p.draftPosition, franchise_id: p.franchiseId })), { onConflict: "lottery_id,reveal_index", ignoreDuplicates: true }).select("id"));
+    }
+    const elapsed = Number(lottery.elapsed_ms_before_pause) + Math.max(0, Date.now() - new Date(lottery.started_at!).getTime());
+    const now = new Date().toISOString();
+    unwrap(await supabase.from("rookie_draft_lottery").update({ status: "PAUSED", revealed_count: computed, elapsed_ms_before_pause: elapsed, paused_at: now, updated_at: now }).eq("id", lottery.id).select("id").single());
+    return { paused: true };
+  }),
+
+  resumeRookieLottery: protectedProcedure.input(z.object({ roundNumber: z.number().int().min(1).max(20).optional() }).optional()).mutation(async ({ ctx, input }) => {
+    await requireCommissioner({ openId: ctx.user.openId });
+    const roundNumber = input?.roundNumber ?? 2;
+    const { season } = await getCurrentLeagueAndSeason();
+    const draft = unwrap(await supabase.from("draft").select("id").eq("season_id", season.id).eq("draft_type", "rookie").maybeSingle());
+    if (!draft) throw new TRPCError({ code: "NOT_FOUND", message: "CVC rookie draft has not been configured." });
+    const lottery = unwrap(await supabase.from("rookie_draft_lottery").select("id, status").eq("draft_id", draft.id).eq("round_number", roundNumber).order("created_at", { ascending: false }).limit(1).maybeSingle());
+    if (!lottery || lottery.status !== "PAUSED") throw new TRPCError({ code: "BAD_REQUEST", message: `There is no paused round ${roundNumber} lottery to resume.` });
+    const now = new Date().toISOString();
+    unwrap(await supabase.from("rookie_draft_lottery").update({ status: "RUNNING", started_at: now, paused_at: null, updated_at: now }).eq("id", lottery.id).select("id").single());
+    return { resumed: true };
+  }),
+
+  abortRookieLottery: protectedProcedure.input(z.object({ roundNumber: z.number().int().min(1).max(20).optional(), reason: z.string().trim().min(4).max(500) })).mutation(async ({ ctx, input }) => {
+    const commissioner = await requireCommissioner({ openId: ctx.user.openId });
+    const roundNumber = input.roundNumber ?? 2;
+    const { league, season } = await getCurrentLeagueAndSeason();
+    const draft = unwrap(await supabase.from("draft").select("id").eq("season_id", season.id).eq("draft_type", "rookie").maybeSingle());
+    if (!draft) throw new TRPCError({ code: "NOT_FOUND", message: "CVC rookie draft has not been configured." });
+    const lottery = unwrap(await supabase.from("rookie_draft_lottery").select("id, status").eq("draft_id", draft.id).eq("round_number", roundNumber).order("created_at", { ascending: false }).limit(1).maybeSingle());
+    if (!lottery || !["RUNNING", "PAUSED", "READY"].includes(lottery.status)) throw new TRPCError({ code: "BAD_REQUEST", message: `There is no active round ${roundNumber} lottery to abort.` });
+    const now = new Date().toISOString();
+    unwrap(await supabase.from("rookie_draft_lottery").update({ status: "ABORTED", aborted_at: now, abort_reason: input.reason, updated_at: now }).eq("id", lottery.id).select("id").single());
+    await createAuditEvent(league.id, season.id, commissioner.id, "rookie_draft_lottery", lottery.id, "aborted", `Aborted the round ${roundNumber} rookie draft lottery: ${input.reason}`);
+    return { aborted: true };
   }),
 
   saveDraft: protectedProcedure.input(z.object({ label: z.string().min(2).max(100), draftType: z.enum(["snake", "linear", "auction", "rookie", "supplemental"]), status: z.enum(["setup", "lottery", "live", "paused", "complete"]), pickTimerSeconds: z.number().int().min(0).max(7200).nullable().optional(), lotteryEnabled: z.boolean(), startsAt: z.string().datetime().nullable().optional() })).mutation(async ({ ctx, input }) => {
