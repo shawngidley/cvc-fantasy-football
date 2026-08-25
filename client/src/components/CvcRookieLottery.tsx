@@ -18,7 +18,7 @@ export function CvcRookieLottery({ roundNumber = 2 }: { roundNumber?: number }) 
   const { owner } = useCvcOwnerAuth();
   const isCommissioner = ["commissioner", "administrator"].includes(owner?.role ?? "");
   const utils = trpc.useUtils();
-  const lottery = trpc.league.rookieLottery.useQuery({ roundNumber }, { refetchInterval: query => query.state.data?.status === "RUNNING" ? 4_000 : false });
+  const lottery = trpc.league.rookieLottery.useQuery({ roundNumber }, { refetchInterval: query => { const status = query.state.data?.status; if (status === "RUNNING") return 4_000; if (!query.state.data) return 8_000; return false; } });
   const [now, setNow] = useState(() => Date.now());
   const [abortReason, setAbortReason] = useState("");
 
@@ -42,16 +42,18 @@ export function CvcRookieLottery({ roundNumber = 2 }: { roundNumber?: number }) 
   if (lottery.isLoading) return null;
 
   if (!data) {
-    return isCommissioner ? <section className="mt-5 overflow-hidden rounded-3xl border border-white/10 bg-[#100d0a] text-white shadow-2xl">
+    return <section className="mt-5 overflow-hidden rounded-3xl border border-white/10 bg-[#100d0a] text-white shadow-2xl">
       <div className="px-6 py-10 text-center sm:px-12">
         <Timer className="mx-auto h-9 w-9 text-[#e2b23d]" />
         <p className="mt-4 font-display text-sm font-bold uppercase tracking-[.22em] text-[#e2b23d]">Round {roundNumber} draft lottery</p>
-        <h2 className="mt-2 font-display text-2xl font-extrabold uppercase">Not started yet</h2>
-        <p className="mx-auto mt-3 max-w-lg text-sm leading-6 text-stone-300">Shuffles all {roundNumber === 2 ? "10" : ""} round {roundNumber} picks with a server-side cryptographic draw, locked in with a commitment hash before anything is revealed. Positions reveal automatically every 20 seconds, in reverse — last pick first, first pick last.</p>
-        <button type="button" disabled={start.isPending} onClick={() => { if (window.confirm(`Start the round ${roundNumber} lottery? The draw locks in immediately and can't be changed once started (only aborted).`)) start.mutate({ roundNumber }); }} className="mt-6 rounded-lg bg-[#e2b23d] px-5 py-2.5 text-xs font-black uppercase tracking-[0.1em] text-[#100d0a] disabled:opacity-50">{start.isPending ? "Starting…" : `Start round ${roundNumber} lottery`}</button>
-        {start.error ? <p className="mt-2 text-sm text-red-300">{start.error.message}</p> : null}
+        <h2 className="mt-2 font-display text-2xl font-extrabold uppercase">{isCommissioner ? "Not started yet" : "Coming soon"}</h2>
+        <p className="mx-auto mt-3 max-w-lg text-sm leading-6 text-stone-300">{isCommissioner ? `Shuffles all round ${roundNumber} picks with a server-side cryptographic draw, locked in with a commitment hash before anything is revealed. Positions reveal automatically every 20 seconds, in reverse — last pick first, first pick last.` : `The commissioner hasn't started the round ${roundNumber} lottery yet. Check back here once it's underway — positions reveal live, one every 20 seconds.`}</p>
+        {isCommissioner ? <>
+          <button type="button" disabled={start.isPending} onClick={() => { if (window.confirm(`Start the round ${roundNumber} lottery? The draw locks in immediately and can't be changed once started (only aborted).`)) start.mutate({ roundNumber }); }} className="mt-6 rounded-lg bg-[#e2b23d] px-5 py-2.5 text-xs font-black uppercase tracking-[0.1em] text-[#100d0a] disabled:opacity-50">{start.isPending ? "Starting…" : `Start round ${roundNumber} lottery`}</button>
+          {start.error ? <p className="mt-2 text-sm text-red-300">{start.error.message}</p> : null}
+        </> : null}
       </div>
-    </section> : null;
+    </section>;
   }
 
   return <section className="relative mt-5 overflow-hidden rounded-3xl border border-white/10 bg-[#100d0a] text-white shadow-2xl">
