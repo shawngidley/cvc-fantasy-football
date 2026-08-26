@@ -18,7 +18,8 @@ const FALLBACK_TEAM_ABVS = ["ARI", "ATL", "BAL", "BUF", "CAR", "CHI", "CIN", "CL
 export type Tank01ActiveRosterSyncSummary = {
   teamsProcessed: number;
   totalRosterPlayers: number;
-  matchedPlayers: number;
+  matchedByStoredId: number;
+  matchedByNameNewlyLinked: number;
   matchedDst: number;
   errors: Record<string, string>;
   sampleRosterPlayer?: unknown;
@@ -26,16 +27,16 @@ export type Tank01ActiveRosterSyncSummary = {
 
 /** WRC's proven technique, adapted for CVC: Tank01's getNFLTeamRoster returns each
  * team's actual CURRENT roster -- a retired player simply cannot appear in it, unlike
- * FantasyPros' /players endpoint (a broad all-time database) or its ROS rankings (only
- * a 31% match rate in testing). Loops all 32 teams, unions every rostered player name,
- * and stamps last_seen_at for every CVC player matched -- plus unconditionally for
- * every DST entry, since all 32 NFL teams are always valid defense options.
+ * FantasyPros' /players endpoint (a broad all-time database) or its ROS rankings.
  *
- * A live run only matched 336 of 2682 rostered players (12.5%) -- too low to be just
- * suffix/punctuation formatting gaps, and Tank01RosterPlayer.longName is marked
- * optional in its own type definition (never confirmed against a live response). Rather
- * than guess at a different field name, this now captures one raw roster player object
- * so the actual field names can be inspected directly. */
+ * Unlike the first version of this sync, matching is now permanent, not re-guessed
+ * every run: any CVC player already carrying metadata.tank01_id (set by a previous run
+ * of this sync, or backfilled) is matched by that exact ID -- a simple, 100% reliable
+ * set-membership check, no name normalization involved at all. Only players without a
+ * stored tank01_id yet fall back to name matching (with suffix stripping, e.g. "Patrick
+ * Mahomes" vs "Patrick Mahomes II"), and when that succeeds, the confirmed ID is written
+ * back so this player never needs name matching again on any future run. Over repeated
+ * runs, the fraction relying on name matching should shrink toward zero. */
 export async function syncTank01ActiveRoster(): Promise<Tank01ActiveRosterSyncSummary> {
   const adapter = getNFLDataAdapter();
   if (!(adapter instanceof Tank01NFLDataAdapter)) throw new Error("Tank01 is not configured for CVC.");
@@ -52,7 +53,8 @@ export async function syncTank01ActiveRoster(): Promise<Tank01ActiveRosterSyncSu
   }
 
   const errors: Record<string, string> = {};
-  const rosterNames = new Set<string>();
+  const rosterIdsByName = new Map<string, string>(); // canonical(longName) -> tank01 playerID
+  const rosterPlayerIds = new Set<string>();
   let totalRosterPlayers = 0;
   let sampleRosterPlayer: unknown;
   const CONCURRENCY = 5;
@@ -64,8 +66,8 @@ export async function syncTank01ActiveRoster(): Promise<Tank01ActiveRosterSyncSu
         totalRosterPlayers += roster.length;
         if (!sampleRosterPlayer && roster.length) sampleRosterPlayer = roster[0];
         for (const player of roster) {
-          const name = player.longName;
-          if (name) rosterNames.add(canonical(name));
+          if (player.playerID) rosterPlayerIds.add(player.playerID);
+          if (player.longName && player.playerID) rosterIdsByName.set(canonical(player.longName), player.playerID);
         }
       } catch (error) {
         errors[abv] = error instanceof Error ? error.message : "Request failed";
@@ -74,13 +76,35 @@ export async function syncTank01ActiveRoster(): Promise<Tank01ActiveRosterSyncSu
   }
 
   const now = new Date().toISOString();
-  const players = unwrap(await supabase.from("player").select("id, display_name, position").neq("provider", "placeholder").limit(5000)) as { id: string; display_name: string; position: string | null }[];
-  const matchedIds = players.filter(player => player.position !== "DST" && rosterNames.has(canonical(player.display_name))).map(player => player.id);
+  const players = unwrap(await supabase.from("player").select("id, display_name, position, metadata").neq("provider", "placeholder").limit(5000)) as { id: string; display_name: string; position: string | null; metadata: Record<string, unknown> | null }[];
+
+  const activeIds: string[] = [];
+  const newlyLinked: { id: string; metadata: Record<string, unknown> }[] = [];
+  let matchedByStoredId = 0;
+  let matchedByNameNewlyLinked = 0;
+  for (const player of players) {
+    if (player.position === "DST") continue; // handled unconditionally below
+    const storedTank01Id = player.metadata?.tank01_id ? String(player.metadata.tank01_id) : null;
+    if (storedTank01Id) {
+      if (rosterPlayerIds.has(storedTank01Id)) { activeIds.push(player.id); matchedByStoredId += 1; }
+      continue;
+    }
+    const foundId = rosterIdsByName.get(canonical(player.display_name));
+    if (foundId) {
+      activeIds.push(player.id);
+      newlyLinked.push({ id: player.id, metadata: { ...(player.metadata ?? {}), tank01_id: foundId } });
+      matchedByNameNewlyLinked += 1;
+    }
+  }
   const dstIds = players.filter(player => player.position === "DST").map(player => player.id);
-  const allIds = [...matchedIds, ...dstIds];
-  for (let i = 0; i < allIds.length; i += 500) {
-    unwrap(await supabase.from("player").update({ last_seen_at: now }).in("id", allIds.slice(i, i + 500)).select("id"));
+
+  for (const link of newlyLinked) {
+    unwrap(await supabase.from("player").update({ metadata: link.metadata }).eq("id", link.id).select("id").single());
+  }
+  const allActiveIds = [...activeIds, ...dstIds];
+  for (let i = 0; i < allActiveIds.length; i += 500) {
+    unwrap(await supabase.from("player").update({ last_seen_at: now }).in("id", allActiveIds.slice(i, i + 500)).select("id"));
   }
 
-  return { teamsProcessed: teamAbvs.length - Object.keys(errors).length, totalRosterPlayers, matchedPlayers: matchedIds.length, matchedDst: dstIds.length, errors, sampleRosterPlayer };
+  return { teamsProcessed: teamAbvs.length - Object.keys(errors).length, totalRosterPlayers, matchedByStoredId, matchedByNameNewlyLinked, matchedDst: dstIds.length, errors, sampleRosterPlayer };
 }

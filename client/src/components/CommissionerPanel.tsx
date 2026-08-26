@@ -123,7 +123,7 @@ function SeasonStatsSyncModule() {
   });
   const utils = trpc.useUtils();
   const [rookieResult, setRookieResult] = useState<null | { countByPosition: Record<string, number>; matchedInDb: number; notYetSynced: number; flaggedNow: number; clearedStale: number; errors: Record<string, string>; samplePlayers?: Record<string, unknown> }>(null);
-  const [activeResult, setActiveResult] = useState<null | { teamsProcessed: number; totalRosterPlayers: number; matchedPlayers: number; matchedDst: number; errors: Record<string, string>; sampleRosterPlayer?: unknown }>(null);
+  const [activeResult, setActiveResult] = useState<null | { teamsProcessed: number; totalRosterPlayers: number; matchedByStoredId: number; matchedByNameNewlyLinked: number; matchedDst: number; errors: Record<string, string>; sampleRosterPlayer?: unknown }>(null);
   const syncPlayers = trpc.league.syncFantasyProsPlayers.useMutation({
     onSuccess: data => toast.success(`Synced ${data.totalReceived} players from FantasyPros (${data.inserted} new, ${data.enriched} updated).`),
     onError: error => toast.error(error.message),
@@ -133,7 +133,7 @@ function SeasonStatsSyncModule() {
       setActiveResult(data);
       await Promise.all([utils.auction.eligiblePlayers.invalidate(), utils.league.freeAgents.invalidate()]);
       const errorNote = Object.keys(data.errors).length ? ` (errors for: ${Object.keys(data.errors).join(", ")})` : "";
-      toast.success(`Confirmed ${data.matchedPlayers} rostered players + ${data.matchedDst} defenses as active, from ${data.teamsProcessed} teams.${errorNote} Retired/departed players will now fall out of Free Agents and the auction pool.`);
+      toast.success(`Confirmed ${data.matchedByStoredId + data.matchedByNameNewlyLinked} rostered players + ${data.matchedDst} defenses as active, from ${data.teamsProcessed} teams (${data.matchedByNameNewlyLinked} newly linked to a permanent Tank01 ID).${errorNote} Retired/departed players will now fall out of Free Agents and the auction pool.`);
     },
     onError: error => toast.error(error.message),
   });
@@ -160,11 +160,11 @@ function SeasonStatsSyncModule() {
     </div>
     <div className="rounded-lg border border-dashed border-cvc-deep/20 bg-cvc-tint p-4">
       <p className="text-sm font-semibold text-cvc-deep">Confirm active players</p>
-      <p className="mt-1 text-xs leading-5 text-slate-500">Pulls every current 32-team NFL roster directly from Tank01 and marks every matched CVC player as confirmed active (all 32 defenses are always marked active too). A retired or departed player simply can't appear on a current team roster, so this is what keeps them out of Free Agents and the auction pool — more reliable than name-matching against a ranking list. A player who drops off a later sync (no longer rostered anywhere) ages out of eligibility automatically. Run this periodically (weekly is plenty) to keep it accurate.</p>
+      <p className="mt-1 text-xs leading-5 text-slate-500">Pulls every current 32-team NFL roster directly from Tank01 and marks every matched CVC player as confirmed active (all 32 defenses are always marked active too). A retired or departed player simply can't appear on a current team roster, so this is what keeps them out of Free Agents and the auction pool. Each player only needs to be matched by name once — after that, their Tank01 ID is stored permanently and every future run is an exact ID lookup, not a fuzzy name match. A player who drops off a later sync (no longer rostered anywhere) ages out of eligibility automatically. Run this periodically (weekly is plenty) to keep it accurate.</p>
       <button type="button" className="cvc-button-compact mt-3" disabled={syncActive.isPending} onClick={() => syncActive.mutate()}><Save size={14} /> {syncActive.isPending ? "Syncing…" : "Confirm active players"}</button>
       {activeResult ? <div className="mt-3 rounded-md border border-slate-200 bg-white p-3 text-xs text-slate-600">
         <p><b className="text-cvc-deep">Teams processed:</b> {activeResult.teamsProcessed} · <b className="text-cvc-deep">Total rostered players seen:</b> {activeResult.totalRosterPlayers}</p>
-        <p className="mt-1"><b className="text-cvc-deep">Matched to a synced CVC player:</b> {activeResult.matchedPlayers} · <b className="text-cvc-deep">Defenses confirmed:</b> {activeResult.matchedDst}</p>
+        <p className="mt-1"><b className="text-cvc-deep">Matched by stored Tank01 ID:</b> {activeResult.matchedByStoredId} · <b className="text-cvc-deep">Newly matched by name and permanently linked:</b> {activeResult.matchedByNameNewlyLinked} · <b className="text-cvc-deep">Defenses confirmed:</b> {activeResult.matchedDst}</p>
         {Object.keys(activeResult.errors).length ? <p className="mt-1 text-red-700"><b>Team fetch errors:</b> {Object.entries(activeResult.errors).map(([team, message]) => `${team}: ${message}`).join("; ")}</p> : null}
         {activeResult.sampleRosterPlayer ? <details className="mt-2"><summary className="cursor-pointer text-cvc-deep">Raw sample roster player (for checking the name field)</summary><pre className="mt-1 max-h-64 overflow-auto rounded bg-slate-50 p-2 text-[10px]">{JSON.stringify(activeResult.sampleRosterPlayer, null, 2)}</pre></details> : null}
       </div> : null}
