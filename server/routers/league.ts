@@ -547,7 +547,7 @@ export const leagueRouter = router({
     return players;
   }),
 
-  freeAgents: publicProcedure.input(z.object({ search: z.string().trim().max(64).optional(), position: z.string().trim().max(12).optional(), limit: z.number().int().min(1).max(150).optional(), matchingRightsOnly: z.boolean().optional() }).optional()).query(async ({ input }) => {
+  freeAgents: publicProcedure.input(z.object({ search: z.string().trim().max(64).optional(), position: z.string().trim().max(12).optional(), limit: z.number().int().min(1).max(1000).optional(), matchingRightsOnly: z.boolean().optional() }).optional()).query(async ({ input }) => {
     const { season } = await getCurrentLeagueAndSeason();
     const limit = input?.limit ?? 75;
     const eligiblePositions = ["QB", "RB", "WR", "TE", "K", "DST"];

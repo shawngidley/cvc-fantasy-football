@@ -41,7 +41,10 @@ const positionStatColumns: Record<string, { label: string; key: string }[]> = {
 export function CvcWrcFreeAgents() {
   const { owner } = useCvcOwnerAuth(); const utils = trpc.useUtils();
   const [position, setPosition] = useState("ALL"); const [search, setSearch] = useState(""); const [sort, setSort] = useState<"name" | "position" | "team" | "fpts">("name"); const [direction, setDirection] = useState<"asc" | "desc">("asc"); const [selectedPlayerId, setSelectedPlayerId] = useState(""); const [amount, setAmount] = useState("0"); const [matchingRightsOnly, setMatchingRightsOnly] = useState(false);
-  const freeAgentInput = useMemo(() => ({ search: search.trim() || undefined, position: position === "ALL" ? undefined : position, limit: 100, matchingRightsOnly: matchingRightsOnly || undefined }), [position, search, matchingRightsOnly]);
+  // Raised from 100 to 1000 (matching the eligiblePlayers fix): with no search filter
+  // typed in, 100 was cutting off most of the real free-agent pool, same class of bug
+  // as the auction side's earlier 75/150/300 caps.
+  const freeAgentInput = useMemo(() => ({ search: search.trim() || undefined, position: position === "ALL" ? undefined : position, limit: 1000, matchingRightsOnly: matchingRightsOnly || undefined }), [position, search, matchingRightsOnly]);
   const pool = trpc.league.freeAgents.useQuery(freeAgentInput); const waiver = trpc.league.waiverStatus.useQuery(); const myBids = trpc.league.myFaabBids.useQuery(undefined, { enabled: Boolean(owner?.franchise) }); const queue = trpc.league.waiverBidQueue.useQuery(undefined, { enabled: ["commissioner", "administrator"].includes(owner?.role ?? "") });
   const submit = trpc.league.submitFaabBid.useMutation({ onSuccess: async () => { setSelectedPlayerId(""); setAmount("0"); await Promise.all([utils.league.myFaabBids.invalidate(), utils.league.activity.invalidate()]); } }); const resolve = trpc.league.resolveFaabBid.useMutation({ onSuccess: () => { utils.league.waiverBidQueue.invalidate(); utils.league.freeAgents.invalidate(); utils.league.activity.invalidate(); } });
   const players = [...(pool.data ?? [])].sort((a, b) => {
