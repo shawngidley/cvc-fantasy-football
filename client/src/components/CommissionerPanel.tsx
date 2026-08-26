@@ -123,7 +123,13 @@ function SeasonStatsSyncModule() {
   });
   const utils = trpc.useUtils();
   const [rookieResult, setRookieResult] = useState<null | { countByPosition: Record<string, number>; matchedInDb: number; notYetSynced: number; flaggedNow: number; clearedStale: number; errors: Record<string, string>; samplePlayers?: Record<string, unknown> }>(null);
-  const syncPlayers = trpc.league.syncFantasyProsPlayers.useMutation({ onError: error => toast.error(error.message) });
+  const syncPlayers = trpc.league.syncFantasyProsPlayers.useMutation({
+    onSuccess: async data => {
+      await Promise.all([utils.auction.eligiblePlayers.invalidate(), utils.league.freeAgents.invalidate()]);
+      toast.success(`Synced ${data.totalReceived} players from FantasyPros (${data.inserted} new, ${data.enriched} updated). Retired/departed players will now fall out of Free Agents and the auction pool.`);
+    },
+    onError: error => toast.error(error.message),
+  });
   const syncRookies = trpc.league.syncFantasyProsRookies.useMutation({
     onSuccess: data => {
       setRookieResult(data);
@@ -134,8 +140,6 @@ function SeasonStatsSyncModule() {
     },
     onError: error => toast.error(error.message),
   });
-  const runFantasyProsSync = async () => { await syncPlayers.mutateAsync(); await syncRookies.mutateAsync(); };
-  const rookieSyncing = syncPlayers.isPending || syncRookies.isPending;
   return <div className="grid gap-4">
     <div className="rounded-lg border border-dashed border-cvc-deep/20 bg-cvc-tint p-4">
       <p className="text-sm font-semibold text-cvc-deep">Season stats sync</p>
@@ -143,9 +147,14 @@ function SeasonStatsSyncModule() {
       <button type="button" className="cvc-button-compact mt-3" disabled={sync.isPending} onClick={() => sync.mutate({})}><Save size={14} /> {sync.isPending ? "Syncing…" : "Sync next batch"}</button>
     </div>
     <div className="rounded-lg border border-dashed border-cvc-deep/20 bg-cvc-tint p-4">
-      <p className="text-sm font-semibold text-cvc-deep">FantasyPros players &amp; rookie tags</p>
-      <p className="mt-1 text-xs leading-5 text-slate-500">Syncs the FantasyPros player list, then flags CVC players who appear on FantasyPros' rookie rankings (QB/RB/WR/TE/K) as rookies — this is what makes them searchable on the Rookie Draft page. The rookie-ranking endpoint isn't confirmed against a live response, so check the breakdown below after running this; if every count is 0, the ranking type guess needs adjusting.</p>
-      <button type="button" className="cvc-button-compact mt-3" disabled={rookieSyncing} onClick={runFantasyProsSync}><Save size={14} /> {rookieSyncing ? "Syncing…" : "Sync FantasyPros players & rookies"}</button>
+      <p className="text-sm font-semibold text-cvc-deep">FantasyPros players</p>
+      <p className="mt-1 text-xs leading-5 text-slate-500">Syncs the FantasyPros player list and marks every player found in this run as "still active." This is what keeps retired/departed players out of Free Agents and the auction pool — run it periodically (weekly is plenty) so that filtering stays accurate. Safe to run anytime; doesn't touch rookie flags.</p>
+      <button type="button" className="cvc-button-compact mt-3" disabled={syncPlayers.isPending} onClick={() => syncPlayers.mutate()}><Save size={14} /> {syncPlayers.isPending ? "Syncing…" : "Sync FantasyPros players"}</button>
+    </div>
+    <div className="rounded-lg border border-dashed border-red-300 bg-red-50 p-4">
+      <p className="text-sm font-semibold text-cvc-deep">Rookie flag sync <span className="font-normal text-red-700">— experimental, not recommended</span></p>
+      <p className="mt-1 text-xs leading-5 text-slate-500">Attempts to flag rookies via FantasyPros' rookie-rankings endpoint using a guessed ranking-type parameter that's been confirmed to return incorrect results (it returned Josh Allen as a "rookie" QB in testing). The season's actual rookie flags were instead set correctly via a one-time manual match against FantasyPros' real rookie-rankings CSV export. Running this again would overwrite those correct flags with wrong data — only use it if you're deliberately re-attempting the API approach for a future season, not as routine maintenance.</p>
+      <button type="button" className="cvc-button-compact mt-3 bg-red-600 hover:bg-red-700" disabled={syncRookies.isPending} onClick={() => { if (window.confirm("This will overwrite the currently-correct rookie flags with results from a guessed, previously-wrong API parameter. Are you sure?")) syncRookies.mutate(); }}><Save size={14} /> {syncRookies.isPending ? "Syncing…" : "Attempt rookie flag sync anyway"}</button>
       {rookieResult ? <div className="mt-3 rounded-md border border-slate-200 bg-white p-3 text-xs text-slate-600">
         <p><b className="text-cvc-deep">Rookies found on FantasyPros by position:</b> {Object.entries(rookieResult.countByPosition).map(([pos, count]) => `${pos}: ${count}`).join(", ") || "none"}</p>
         <p className="mt-1"><b className="text-cvc-deep">Matched to a synced CVC player:</b> {rookieResult.matchedInDb} · <b className="text-cvc-deep">Not yet in CVC's player list:</b> {rookieResult.notYetSynced}</p>

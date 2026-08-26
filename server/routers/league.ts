@@ -583,6 +583,14 @@ export const leagueRouter = router({
     }
 
     let playerQuery = supabase.from("player").select("id, provider, display_name, position, nfl_team, status, metadata").neq("provider", "placeholder").in("position", eligiblePositions).order("display_name").limit(limit + 220);
+    // Same last_seen_at filter as auction.eligiblePlayers, excluding players who dropped
+    // off FantasyPros' most recent list (very likely retired/out of the league). Not
+    // applied to the matchingRightsOnly path above -- a matching-rights tag means the
+    // player was just actively rostered, a stronger and more specific signal than the
+    // general "still on FantasyPros' list" check. Skipped entirely if no sync has ever
+    // run (fails open, not closed, so it never hides the whole pool).
+    const cacheStatus = await fantasyProsCacheStatus();
+    if (cacheStatus.fetchedAt) playerQuery = playerQuery.gte("last_seen_at", cacheStatus.fetchedAt);
     if (input?.search) playerQuery = playerQuery.ilike("display_name", `%${input.search.replace(/[%_]/g, "")}%`);
     if (input?.position) playerQuery = playerQuery.eq("position", input.position.toUpperCase());
     const players = unwrap(await playerQuery) ?? [];

@@ -3,6 +3,7 @@ import { z } from "zod";
 import { supabase, unwrap } from "../supabase";
 import { protectedProcedure, publicProcedure, router } from "../_core/trpc";
 import { cvcContractTier, cvcFranchiseTerms } from "../../shared/cvcProtectionPolicy";
+import { fantasyProsCacheStatus } from "../fantasyProsCache";
 
 export function calculateAuctionLegalMaxBid(startingBudget: number, spentBudget: number, rosterCount: number) {
   return startingBudget - spentBudget - Math.max(0, 14 - rosterCount);
@@ -79,7 +80,16 @@ export const auctionRouter = router({
     const { season, draft } = await context();
     const limit = input?.limit ?? 75;
     if (input?.position && !isCvcAuctionPosition(input.position)) return [];
+    const cacheStatus = await fantasyProsCacheStatus();
     let playerQuery = supabase.from("player").select("id, display_name, position, nfl_team, status, metadata").neq("provider", "placeholder").in("position", input?.position ? [input.position] : CVC_AUCTION_POSITIONS).order("display_name").limit(limit + 220);
+    // Excludes players who dropped off FantasyPros' most recent player list -- very
+    // likely retired or out of the league (confirmed nfl_team is nearly always
+    // populated regardless, since FantasyPros doesn't clear it on retirement -- see the
+    // last_seen_at migration notes). Only applied once at least one sync has actually
+    // run: before that, last_seen_at is null for every player, and requiring it would
+    // hide the ENTIRE pool rather than narrow it, so the filter is skipped rather than
+    // failing closed.
+    if (cacheStatus.fetchedAt) playerQuery = playerQuery.gte("last_seen_at", cacheStatus.fetchedAt);
     if (input?.search) playerQuery = playerQuery.ilike("display_name", `%${input.search.replace(/[%_]/g, "")}%`);
     if (input?.position) playerQuery = playerQuery.eq("position", input.position);
     const [playersResult, activeAssignmentsResult, awardedResult, rookieDraftResult] = await Promise.all([
