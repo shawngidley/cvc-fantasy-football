@@ -26,15 +26,24 @@ function VoicePickRecorder({ teams }: { teams: any[] }) {
   const eligible = trpc.auction.eligiblePlayers.useQuery({ limit: 1000 });
   const [listening, setListening] = useState(false);
   const [transcript, setTranscript] = useState("");
-  const [parsedPlayerId, setParsedPlayerId] = useState("");
+  // Holds the full matched player object (id/name/position/team), not just an id —
+  // set either by voice matching (parse()) or by picking a search suggestion below, so
+  // the confirmation chip always has a name to show regardless of which path filled it.
+  const [parsedPlayer, setParsedPlayer] = useState<{ id: string; display_name: string; position: string | null; nfl_team: string | null } | null>(null);
   const [parsedFranchiseId, setParsedFranchiseId] = useState("");
   const [parsedAmount, setParsedAmount] = useState("");
+  // Type-ahead search for correcting/entering the player manually — the previous long
+  // <select> of up to 1000 players was unusable to scroll through, especially on the
+  // phone someone's stuck using because their browser can't do voice input at all.
+  const [playerSearch, setPlayerSearch] = useState("");
+  const [showSuggestions, setShowSuggestions] = useState(false);
+  const suggestions = trpc.auction.eligiblePlayers.useQuery({ search: playerSearch.trim() || undefined, limit: 8 }, { enabled: playerSearch.trim().length > 1 && !parsedPlayer });
 
   const recognition = useMemo(() => useSpeechRecognition(), []);
 
   const record = trpc.auction.recordPick.useMutation({
     onSuccess: async () => {
-      setTranscript(""); setParsedPlayerId(""); setParsedFranchiseId(""); setParsedAmount("");
+      setTranscript(""); setParsedPlayer(null); setParsedFranchiseId(""); setParsedAmount(""); setPlayerSearch("");
       await Promise.all([utils.auction.board.invalidate(), utils.auction.eligiblePlayers.invalidate(), utils.league.freeAgents.invalidate(), utils.league.overview.invalidate()]);
     },
   });
@@ -44,9 +53,12 @@ function VoicePickRecorder({ teams }: { teams: any[] }) {
     const playerMatch = bestMatch(text, eligible.data ?? [], (p: any) => p.display_name);
     const franchiseMatch = bestMatch(text, teams, (t: any) => firstOf(t.franchise)?.name ?? "");
     setParsedAmount(amount ? String(amount) : "");
-    setParsedPlayerId(playerMatch ? playerMatch.item.id : "");
+    setParsedPlayer(playerMatch ? playerMatch.item : null);
     setParsedFranchiseId(franchiseMatch ? franchiseMatch.item.franchise_id : "");
   };
+
+  const selectPlayer = (player: any) => { setParsedPlayer(player); setPlayerSearch(""); setShowSuggestions(false); };
+  const clearPlayer = () => { setParsedPlayer(null); setPlayerSearch(""); };
 
   const startListening = () => {
     if (!recognition) return;
@@ -57,9 +69,8 @@ function VoicePickRecorder({ teams }: { teams: any[] }) {
     recognition.start();
   };
   const stopListening = () => { recognition?.stop(); setListening(false); };
-  const clear = () => { setTranscript(""); setParsedPlayerId(""); setParsedFranchiseId(""); setParsedAmount(""); };
+  const clear = () => { setTranscript(""); setParsedPlayer(null); setParsedFranchiseId(""); setParsedAmount(""); setPlayerSearch(""); };
 
-  const selectedPlayer = eligible.data?.find((p: any) => p.id === parsedPlayerId);
   const selectedTeam = teams.find(t => t.franchise_id === parsedFranchiseId);
 
   if (!recognition) return <section className="cvc-card mb-6"><div className="cvc-card-title">Voice pick recorder</div><div className="cvc-card-stripe" /><div className="cvc-card-body"><p className="text-sm text-slate-600">Voice recording isn't supported in this browser. Try Chrome on desktop or Android.</p></div></section>;
@@ -71,12 +82,19 @@ function VoicePickRecorder({ teams }: { teams: any[] }) {
       {transcript ? <p className="text-sm italic text-slate-600">Heard: "{transcript}"</p> : null}
     </div>
     {transcript ? <div className="mt-4 grid gap-3 sm:grid-cols-3">
-      <label className="cvc-field"><span>Player</span><select value={parsedPlayerId} onChange={event => setParsedPlayerId(event.target.value)} className="w-full rounded-md border border-slate-200 bg-white px-3 py-2 text-sm"><option value="">Not matched — choose manually</option>{eligible.data?.map((p: any) => <option key={p.id} value={p.id}>{p.display_name} · {p.position || "—"} · {p.nfl_team || "FA"}</option>)}</select></label>
+      <label className="cvc-field"><span>Player</span>
+        <div className="relative mt-1">
+          {parsedPlayer ? <div className="flex items-center justify-between rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-sm"><span className="font-semibold text-cvc-deep">{parsedPlayer.display_name} · {parsedPlayer.position || "—"} · {parsedPlayer.nfl_team || "FA"}</span><button type="button" onClick={clearPlayer} className="text-xs font-bold uppercase tracking-[.06em] text-slate-500 hover:text-cvc-accent">Change</button></div> : <>
+            <input value={playerSearch} onChange={event => { setPlayerSearch(event.target.value); setShowSuggestions(true); }} onFocus={() => setShowSuggestions(true)} placeholder="Not matched — type a player name" className="w-full rounded-md border border-slate-200 px-3 py-2 text-sm" />
+            {showSuggestions && playerSearch.trim().length > 1 ? <div className="absolute z-20 mt-1 w-full overflow-hidden rounded-md border border-slate-200 bg-white shadow-xl">{suggestions.isLoading ? <p className="px-3 py-2 text-xs text-slate-400">Searching…</p> : suggestions.data?.length ? suggestions.data.map((player: any) => <button type="button" key={player.id} onClick={() => selectPlayer(player)} className="block w-full border-b border-slate-100 px-3 py-2 text-left text-sm last:border-b-0 hover:bg-slate-50"><span className="font-semibold text-cvc-deep">{player.display_name}</span> <span className="text-xs text-slate-500">· {player.position || "—"} · {player.nfl_team || "FA"}</span></button>) : <p className="px-3 py-2 text-xs text-slate-400">No eligible players match.</p>}</div> : null}
+          </>}
+        </div>
+      </label>
       <label className="cvc-field"><span>Winning franchise</span><select value={parsedFranchiseId} onChange={event => setParsedFranchiseId(event.target.value)} className="w-full rounded-md border border-slate-200 bg-white px-3 py-2 text-sm"><option value="">Not matched — choose manually</option>{teams.map(t => <option key={t.franchise_id} value={t.franchise_id}>{firstOf(t.franchise)?.name}</option>)}</select></label>
       <label className="cvc-field"><span>Salary</span><input value={parsedAmount} onChange={event => setParsedAmount(event.target.value.replace(/\D/g, ""))} className="w-full rounded-md border border-slate-200 px-3 py-2 text-sm" inputMode="numeric" /></label>
     </div> : null}
     {transcript ? <div className="mt-4 flex flex-wrap items-center gap-3">
-      <button type="button" disabled={!parsedPlayerId || !parsedFranchiseId || !parsedAmount || record.isPending} onClick={() => record.mutate({ playerId: parsedPlayerId, franchiseId: parsedFranchiseId, amount: Number(parsedAmount) })} className="cvc-button-compact disabled:cursor-not-allowed disabled:opacity-50">{record.isPending ? "Recording…" : `Confirm: ${selectedPlayer?.display_name ?? "?"} to ${firstOf(selectedTeam?.franchise)?.name ?? "?"} for $${parsedAmount || "?"}`}</button>
+      <button type="button" disabled={!parsedPlayer || !parsedFranchiseId || !parsedAmount || record.isPending} onClick={() => record.mutate({ playerId: parsedPlayer!.id, franchiseId: parsedFranchiseId, amount: Number(parsedAmount) })} className="cvc-button-compact disabled:cursor-not-allowed disabled:opacity-50">{record.isPending ? "Recording…" : `Confirm: ${parsedPlayer?.display_name ?? "?"} to ${firstOf(selectedTeam?.franchise)?.name ?? "?"} for $${parsedAmount || "?"}`}</button>
       <button type="button" onClick={clear} className="text-xs font-bold uppercase tracking-[.08em] text-slate-500">Clear</button>
     </div> : null}
     {record.error ? <p className="mt-2 text-sm text-red-700">{record.error.message}</p> : null}
