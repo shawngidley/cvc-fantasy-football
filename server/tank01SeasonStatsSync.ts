@@ -5,7 +5,7 @@ import { supabase, unwrap } from "./supabase";
 const ELIGIBLE_POSITIONS = ["QB", "RB", "WR", "TE", "K", "DST"];
 const CONCURRENCY = 5;
 
-type CvcPlayer = { id: string; display_name: string; position: string | null; nfl_team: string | null };
+type CvcPlayer = { id: string; display_name: string; position: string | null; nfl_team: string | null; metadata: Record<string, unknown> | null };
 
 export type SeasonStatsSyncSummary = {
   status: "skipped" | "completed";
@@ -83,7 +83,7 @@ export async function syncTank01SeasonStats(seasonId: string, limit = 40): Promi
   if (!(adapter instanceof Tank01NFLDataAdapter)) return { status: "skipped", reason: "Tank01 is not configured.", attempted: 0, updated: 0, notFound: 0, remaining: 0, teamsUpdated: 0 };
 
   const rules = unwrap(await supabase.from("scoring_rule").select("stat_key, value, applies_to_positions").eq("season_id", seasonId)) ?? [];
-  const players = unwrap(await supabase.from("player").select("id, display_name, position, nfl_team").neq("provider", "placeholder").in("position", ELIGIBLE_POSITIONS).order("display_name")) as CvcPlayer[] ?? [];
+  const players = unwrap(await supabase.from("player").select("id, display_name, position, nfl_team, metadata").neq("provider", "placeholder").in("position", ELIGIBLE_POSITIONS).order("display_name")) as CvcPlayer[] ?? [];
   if (!players.length) return { status: "completed", attempted: 0, updated: 0, notFound: 0, remaining: 0, teamsUpdated: 0 };
 
   const staleCutoff = new Date(Date.now() - 12 * 60 * 60 * 1000).toISOString();
@@ -105,7 +105,17 @@ export async function syncTank01SeasonStats(seasonId: string, limit = 40): Promi
     const chunk = batch.slice(i, i + CONCURRENCY);
     await Promise.all(chunk.map(async player => {
       try {
-        const row = await adapter.getPlayerInfo(player.display_name);
+        // Prefer an exact ID lookup over the name search whenever a Tank01 ID is
+        // already confirmed (from the active-roster sync) -- confirmed live that the
+        // name-based search fails systematically for real, active players (a whole
+        // batch came back 0 of 40, all clean "not found", not thrown errors). Falls
+        // back to the name search if the ID lookup comes back empty too: the exact
+        // query parameter Tank01 expects for an ID lookup (playerID) hasn't been
+        // confirmed against a live response, so this can't regress below the previous
+        // name-only behavior even if that guess turns out wrong.
+        const tank01Id = player.metadata?.tank01_id ? String(player.metadata.tank01_id) : null;
+        const byId = tank01Id ? await adapter.getPlayerInfoById(tank01Id).catch(() => null) : null;
+        const row = byId ?? await adapter.getPlayerInfo(player.display_name);
         if (!row) { notFound += 1; return; }
         const stats = extractSeasonStats(row as Record<string, unknown>, player.position ?? "", rules);
         unwrap(await supabase.from("player_season_stat").upsert({ season_id: seasonId, player_id: player.id, ...stats, provider: "Tank01", synced_at: new Date().toISOString() }, { onConflict: "season_id,player_id" }).select("id").single());

@@ -117,10 +117,28 @@ export class Tank01NFLDataAdapter implements NFLDataAdapter {
     // anything -- it just blocks that whole concurrency chunk (and therefore the
     // batch, and therefore the "Sync all players" loop) forever. Confirmed live: the
     // auto-repeat sync got stuck partway through with no error and no progress.
+    //
+    // Also confirmed live: an entire batch came back 0 of 40 found by name, all clean
+    // "not found" results rather than thrown errors -- the playerName-based search
+    // itself is unreliable, not a network/rate-limit issue. Prefer getPlayerInfoById
+    // below when a player already has a confirmed Tank01 ID (from tonight's
+    // active-roster sync); this name-based path remains the fallback for players who
+    // don't have one linked yet.
     const response = await fetch(`https://${this.host}/getNFLPlayerInfo?playerName=${encodeURIComponent(playerName)}&getStats=true`, { headers: this.headers(), signal: AbortSignal.timeout(15_000) });
     if (!response.ok) throw new Error(`Tank01 getNFLPlayerInfo failed with status ${response.status}`);
     const payload = await response.json() as { body?: Record<string, unknown> | Record<string, unknown>[]; error?: string };
     if (payload.error) throw new Error(`Tank01 getNFLPlayerInfo returned ${payload.error}`);
+    return Array.isArray(payload.body) ? payload.body[0] ?? null : payload.body ?? null;
+  }
+
+  /** Looks up a player by their confirmed Tank01 playerID (from listTeamRoster) rather
+   * than searching by name -- an exact ID lookup instead of a fuzzy name search that's
+   * confirmed to fail systematically for real, active players. */
+  async getPlayerInfoById(playerId: string) {
+    const response = await fetch(`https://${this.host}/getNFLPlayerInfo?playerID=${encodeURIComponent(playerId)}&getStats=true`, { headers: this.headers(), signal: AbortSignal.timeout(15_000) });
+    if (!response.ok) throw new Error(`Tank01 getNFLPlayerInfo (by ID) failed with status ${response.status}`);
+    const payload = await response.json() as { body?: Record<string, unknown> | Record<string, unknown>[]; error?: string };
+    if (payload.error) throw new Error(`Tank01 getNFLPlayerInfo (by ID) returned ${payload.error}`);
     return Array.isArray(payload.body) ? payload.body[0] ?? null : payload.body ?? null;
   }
 }

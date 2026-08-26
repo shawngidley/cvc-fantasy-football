@@ -435,7 +435,14 @@ export const leagueRouter = router({
       supabase.from("draft_pick").select("player_id, draft:draft_id(season_id)").not("player_id", "is", null),
     ]);
     const activePlayerIds = new Set((unwrap(activeAssignmentsResult) ?? []).map(assignment => assignment.player_id));
-    const selectedPlayerIds = new Set((unwrap(selectedPicksResult) ?? []).filter((row: any) => row.draft?.[0]?.season_id === season.id).map((row: any) => row.player_id));
+    // Same embedded-relation shape bug just fixed in recordDraftSelection: row.draft
+    // can come back as a plain object, not always an array, so row.draft?.[0] silently
+    // returned undefined and this filter never matched anything. In practice
+    // activePlayerIds (via roster_assignment, set immediately by recordDraftSelection)
+    // already excludes most already-drafted rookies, so this was a redundant
+    // safety net rather than the primary defense -- but worth fixing correctly
+    // regardless, rather than leaving a check that silently never does anything.
+    const selectedPlayerIds = new Set((unwrap(selectedPicksResult) ?? []).filter((row: any) => (Array.isArray(row.draft) ? row.draft[0] : row.draft)?.season_id === season.id).map((row: any) => row.player_id));
     return (unwrap(playersResult) ?? []).filter(player => {
       const metadata = (player.metadata ?? {}) as { is_rookie?: boolean };
       return metadata.is_rookie && !activePlayerIds.has(player.id) && !selectedPlayerIds.has(player.id);
@@ -453,8 +460,16 @@ export const leagueRouter = router({
   recordDraftSelection: protectedProcedure.input(z.object({ draftPickId: z.string().uuid(), playerId: z.string().uuid(), winningFranchiseId: z.string().uuid(), salary: z.number().int().min(0).max(115), note: z.string().max(500).optional() })).mutation(async ({ ctx, input }) => {
     const commissioner = await requireCommissioner({ openId: ctx.user.openId }); const { league, season } = await getCurrentLeagueAndSeason();
     const pick = unwrap(await supabase.from("draft_pick").select("id, draft_id, current_franchise_id, round_number, pick_number, pick_status, draft:draft_id(season_id, draft_type)").eq("id", input.draftPickId).maybeSingle());
-    if (!pick || pick.draft?.[0]?.season_id !== season.id || pick.pick_status !== "open") throw new TRPCError({ code: "BAD_REQUEST", message: "This CVC draft pick is not available for selection." });
-    if (!['rookie', 'supplemental'].includes(pick.draft?.[0]?.draft_type ?? '')) throw new TRPCError({ code: "BAD_REQUEST", message: "CVC player selection is reserved for rookie or supplemental drafts." });
+    // Supabase embedded relations can come back as either an array or a single object
+    // depending on the relationship shape -- pick.draft?.[0] assumed it was always an
+    // array. When it's actually a plain object, that indexing silently returns
+    // undefined, so the season_id check below always failed and every valid, open pick
+    // got rejected as "not available for selection" regardless of its real state.
+    // Confirmed live: all 20 rookie-draft picks showed pick_status='open' in the
+    // database, yet recording a selection failed on every one of them.
+    const pickDraft = Array.isArray(pick?.draft) ? pick.draft[0] : pick?.draft;
+    if (!pick || pickDraft?.season_id !== season.id || pick.pick_status !== "open") throw new TRPCError({ code: "BAD_REQUEST", message: "This CVC draft pick is not available for selection." });
+    if (!['rookie', 'supplemental'].includes(pickDraft?.draft_type ?? '')) throw new TRPCError({ code: "BAD_REQUEST", message: "CVC player selection is reserved for rookie or supplemental drafts." });
     const winningFranchise = unwrap(await supabase.from("franchise").select("id, name").eq("id", input.winningFranchiseId).eq("league_id", league.id).eq("is_active", true).maybeSingle());
     if (!winningFranchise) throw new TRPCError({ code: "NOT_FOUND", message: "The winning CVC franchise was not found." });
     const player = unwrap(await supabase.from("player").select("id, display_name, metadata").eq("id", input.playerId).maybeSingle()); if (!player) throw new TRPCError({ code: "NOT_FOUND", message: "CVC player was not found." });
