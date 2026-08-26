@@ -490,6 +490,27 @@ export const leagueRouter = router({
     await createAuditEvent(league.id, season.id, commissioner.id, "draft_pick", pick.id, "selected", `Recorded CVC rookie draft selection ${player.display_name} to ${winningFranchise.name}.`); return { selected: true };
   }),
 
+  // Undoes a rookie-draft selection: releases the roster spot, marks the contract
+  // released, and resets the pick back to open so it can be re-recorded. Mirrors
+  // auction.correctAward exactly (same release/release/reset/log pattern) -- the
+  // rookie draft previously had no equivalent correction path at all.
+  correctDraftSelection: protectedProcedure.input(z.object({ draftPickId: z.string().uuid(), reason: z.string().trim().max(280).optional() })).mutation(async ({ ctx, input }) => {
+    const commissioner = await requireCommissioner({ openId: ctx.user.openId }); const { league, season } = await getCurrentLeagueAndSeason();
+    const pick = unwrap(await supabase.from("draft_pick").select("id, player_id, current_franchise_id, round_number, pick_number, pick_status, draft:draft_id(season_id, draft_type)").eq("id", input.draftPickId).maybeSingle());
+    const pickDraft = Array.isArray(pick?.draft) ? pick.draft[0] : pick?.draft;
+    if (!pick || pickDraft?.season_id !== season.id || pick.pick_status !== "selected" || !pick.player_id) throw new TRPCError({ code: "BAD_REQUEST", message: "Only a completed CVC rookie draft selection can be corrected." });
+    if (!['rookie', 'supplemental'].includes(pickDraft?.draft_type ?? '')) throw new TRPCError({ code: "BAD_REQUEST", message: "CVC selection correction is reserved for rookie or supplemental drafts." });
+    const roster = unwrap(await supabase.from("roster_assignment").select("id, franchise_id").eq("season_id", season.id).eq("player_id", pick.player_id).is("released_at", null).order("acquired_at", { ascending: false }).limit(1).maybeSingle());
+    if (!roster) throw new TRPCError({ code: "CONFLICT", message: "The selection cannot be corrected because its active roster record is unavailable." });
+    const player = unwrap(await supabase.from("player").select("display_name").eq("id", pick.player_id).maybeSingle());
+    unwrap(await supabase.from("roster_assignment").update({ roster_state: "released", released_at: new Date().toISOString() }).eq("id", roster.id).select("id").single());
+    unwrap(await supabase.from("player_contract").update({ contract_status: "released" }).eq("season_id", season.id).eq("franchise_id", roster.franchise_id).eq("player_id", pick.player_id).select("id"));
+    unwrap(await supabase.from("draft_pick").update({ player_id: null, pick_status: "open", selected_at: null, notes: input.reason ?? "Commissioner correction" }).eq("id", pick.id).select("id").single());
+    unwrap(await supabase.from("transaction").insert({ season_id: season.id, franchise_id: roster.franchise_id, actor_owner_id: commissioner.id, transaction_type: "commissioner_adjustment", status: "final", summary: `Rookie draft selection corrected: R${pick.round_number}.${String(pick.pick_number).padStart(2, "0")} reopened`, details: { draft_pick_id: pick.id, player_id: pick.player_id, reason: input.reason } }).select("id").single());
+    await createAuditEvent(league.id, season.id, commissioner.id, "draft_pick", pick.id, "corrected", `Corrected CVC rookie draft selection ${player?.display_name ?? "a player"} — pick reopened.`);
+    return { success: true } as const;
+  }),
+
   franchiseRoster: publicProcedure.input(z.object({ franchiseId: z.string().uuid() })).query(async ({ input }) => {
     const { data: franchise, error: franchiseError } = await supabase.from("franchise").select("id, name, abbreviation, division_name, brand_color, logo_url, current_owner_id").eq("id", input.franchiseId).single();
     if (franchiseError || !franchise) throw new TRPCError({ code: "NOT_FOUND", message: "CVC franchise was not found." });
