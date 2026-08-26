@@ -12,7 +12,11 @@ type OpenPick = { id: string; round_number: number; pick_number: number; current
 function RookieVoicePickRecorder({ openPicks }: { openPicks: OpenPick[] }) {
   const utils = trpc.useUtils();
   const overview = trpc.league.overview.useQuery();
-  const rookies = trpc.league.eligibleRookies.useQuery({ limit: 150 });
+  // Not yet truncated today (114 total rookies vs. the old 150 cap), but this is the
+  // exact same latent bug the Auction Room voice recorder just hit as its unrostered
+  // pool grew past 150 — matching that fix here too so this doesn't quietly break
+  // later in the season as rookies get promoted from practice squads.
+  const rookies = trpc.league.eligibleRookies.useQuery({ limit: 1000 });
   const [listening, setListening] = useState(false);
   const [transcript, setTranscript] = useState("");
   const [parsedPlayerId, setParsedPlayerId] = useState("");

@@ -421,7 +421,7 @@ export const leagueRouter = router({
     if (!pick) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "CVC draft pick could not be saved." }); await createAuditEvent(league.id, season.id, commissioner.id, "draft_pick", pick.id, "saved", `Saved CVC pick ${pick.pick_number} for ${franchise.name}.`); return pick;
   }),
 
-  eligibleRookies: publicProcedure.input(z.object({ search: z.string().trim().max(64).optional(), position: z.string().trim().max(12).optional(), limit: z.number().int().min(1).max(150).optional() }).optional()).query(async ({ input }) => {
+  eligibleRookies: publicProcedure.input(z.object({ search: z.string().trim().max(64).optional(), position: z.string().trim().max(12).optional(), limit: z.number().int().min(1).max(1000).optional() }).optional()).query(async ({ input }) => {
     const { season } = await getCurrentLeagueAndSeason();
     const limit = input?.limit ?? 20;
     const rookiePositions = ["QB", "RB", "WR", "TE", "K"];
