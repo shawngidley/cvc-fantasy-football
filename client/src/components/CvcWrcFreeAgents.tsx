@@ -40,7 +40,7 @@ const positionStatColumns: Record<string, { label: string; key: string }[]> = {
 
 export function CvcWrcFreeAgents() {
   const { owner } = useCvcOwnerAuth(); const utils = trpc.useUtils();
-  const [position, setPosition] = useState("ALL"); const [search, setSearch] = useState(""); const [sort, setSort] = useState<"name" | "position" | "team" | "gp" | "fpts" | "fpg">("name"); const [direction, setDirection] = useState<"asc" | "desc">("asc"); const [selectedPlayerId, setSelectedPlayerId] = useState(""); const [amount, setAmount] = useState("0"); const [matchingRightsOnly, setMatchingRightsOnly] = useState(false);
+  const [position, setPosition] = useState("ALL"); const [search, setSearch] = useState(""); const [sort, setSort] = useState<"name" | "position" | "team" | "gp" | "fpts" | "fpg">("fpts"); const [direction, setDirection] = useState<"asc" | "desc">("desc"); const [selectedPlayerId, setSelectedPlayerId] = useState(""); const [amount, setAmount] = useState("0"); const [matchingRightsOnly, setMatchingRightsOnly] = useState(false);
   // Raised from 100 to 1000 (matching the eligiblePlayers fix): with no search filter
   // typed in, 100 was cutting off most of the real free-agent pool, same class of bug
   // as the auction side's earlier 75/150/300 caps.
