@@ -71,7 +71,7 @@ function VoicePickRecorder({ teams }: { teams: any[] }) {
       {transcript ? <p className="text-sm italic text-slate-600">Heard: "{transcript}"</p> : null}
     </div>
     {transcript ? <div className="mt-4 grid gap-3 sm:grid-cols-3">
-      <label className="cvc-field"><span>Player</span><select value={parsedPlayerId} onChange={event => setParsedPlayerId(event.target.value)} className="w-full rounded-md border border-slate-200 bg-white px-3 py-2 text-sm"><option value="">Not matched — choose manually</option>{eligible.data?.map((p: any) => <option key={p.id} value={p.id}>{p.display_name}</option>)}</select></label>
+      <label className="cvc-field"><span>Player</span><select value={parsedPlayerId} onChange={event => setParsedPlayerId(event.target.value)} className="w-full rounded-md border border-slate-200 bg-white px-3 py-2 text-sm"><option value="">Not matched — choose manually</option>{eligible.data?.map((p: any) => <option key={p.id} value={p.id}>{p.display_name} · {p.position || "—"} · {p.nfl_team || "FA"}</option>)}</select></label>
       <label className="cvc-field"><span>Winning franchise</span><select value={parsedFranchiseId} onChange={event => setParsedFranchiseId(event.target.value)} className="w-full rounded-md border border-slate-200 bg-white px-3 py-2 text-sm"><option value="">Not matched — choose manually</option>{teams.map(t => <option key={t.franchise_id} value={t.franchise_id}>{firstOf(t.franchise)?.name}</option>)}</select></label>
       <label className="cvc-field"><span>Salary</span><input value={parsedAmount} onChange={event => setParsedAmount(event.target.value.replace(/\D/g, ""))} className="w-full rounded-md border border-slate-200 px-3 py-2 text-sm" inputMode="numeric" /></label>
     </div> : null}
