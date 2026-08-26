@@ -35,19 +35,34 @@ export function normalizeFantasyProsPlayers(payload: unknown) {
   });
 }
 
+/** Resolves which existing CVC player (if any) an incoming FantasyPros record should
+ * enrich, rather than create a duplicate for. Tries, in order: (1) an existing row
+ * already tagged with this exact fantasypros_id, (2) an exact name+team match, (3) an
+ * unambiguous name-only match -- confirmed as the fix for ~123 real duplicate rows,
+ * where the original CVC workbook import didn't have nfl_team populated yet at sync
+ * time, so name+team failed and a brand new row got created instead of enriching the
+ * real one. The name-only fallback is only used when the name is unique among existing
+ * players, so it can never merge two genuinely different real people sharing a name. */
+export function resolveMatchingPlayer(incoming: { externalId: string; displayName: string; nflTeam: string | null }, existing: CvcPlayer[]): CvcPlayer | null {
+  const byFantasyProsId = existing.find(player => player.provider === "fantasypros" && player.external_id === incoming.externalId);
+  if (byFantasyProsId) return byFantasyProsId;
+  const nameTeamKey = `${canonical(incoming.displayName)}|${canonical(incoming.nflTeam)}`;
+  const byNameAndTeam = existing.find(player => `${canonical(player.display_name)}|${canonical(player.nfl_team)}` === nameTeamKey);
+  if (byNameAndTeam) return byNameAndTeam;
+  const nameKey = canonical(incoming.displayName);
+  const nameMatches = existing.filter(player => canonical(player.display_name) === nameKey);
+  return nameMatches.length === 1 ? nameMatches[0] : null;
+}
+
 export async function syncFantasyProsSnapshot(snapshot: FantasyProsSnapshot): Promise<FantasyProsSyncSummary> {
   const normalized = normalizeFantasyProsPlayers(snapshot.payload);
   const existing = unwrap(await supabase.from("player").select("id, provider, external_id, display_name, position, nfl_team, metadata").limit(5000)) as CvcPlayer[];
-  const byFantasyProsId = new Map(existing.filter(player => player.provider === "fantasypros" && player.external_id).map(player => [player.external_id!, player]));
-  const byNameAndTeam = new Map(existing.map(player => [`${canonical(player.display_name)}|${canonical(player.nfl_team)}`, player]));
   const inserts: { provider: string; external_id: string; display_name: string; position: string | null; nfl_team: string | null; status: string; metadata: Record<string, unknown> }[] = [];
   const enrichments: { id: string; position: string | null; nfl_team: string | null; metadata: Record<string, unknown> }[] = [];
   let skipped = 0;
 
   for (const player of normalized) {
-    const providerRecord = byFantasyProsId.get(player.externalId);
-    const matchingCvcRecord = byNameAndTeam.get(`${canonical(player.displayName)}|${canonical(player.nflTeam)}`);
-    const target = providerRecord ?? matchingCvcRecord;
+    const target = resolveMatchingPlayer(player, existing);
     if (target) {
       const priorMetadata = target.metadata ?? {};
       const alreadyCurrent = priorMetadata.fantasypros_id === player.externalId && target.position === player.position && target.nfl_team === player.nflTeam;
