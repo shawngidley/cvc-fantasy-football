@@ -13,7 +13,7 @@ export type Tank01SyncSummary = {
   reason?: string;
 };
 
-type SnapshotRow = { franchise_id: string; player: { display_name: string; position: string | null; nfl_team: string | null }[] | null };
+type SnapshotRow = { franchise_id: string; slot_code: string; player: { display_name: string; position: string | null; nfl_team: string | null }[] | null };
 
 async function currentContext() {
   const season = unwrap(await supabase.from("season").select("id, league_id, year").order("year", { ascending: false }).limit(1).single());
@@ -61,7 +61,7 @@ export async function syncTank01Scores(now = new Date()): Promise<Tank01SyncSumm
   if (!matchups.length) return { status: "skipped", matchupsUpdated: 0, reason: "The CVC week has no matchups." };
   const franchiseIds = Array.from(new Set(matchups.flatMap(item => [item.home_franchise_id, item.away_franchise_id])));
   await snapshotLineups(season.id, week.id, franchiseIds);
-  const snapshots = unwrap(await supabase.from("weekly_lineup_snapshot").select("franchise_id, player:player_id(display_name, position, nfl_team)").eq("schedule_week_id", week.id)) as SnapshotRow[] ?? [];
+  const snapshots = unwrap(await supabase.from("weekly_lineup_snapshot").select("franchise_id, slot_code, player:player_id(display_name, position, nfl_team)").eq("schedule_week_id", week.id)) as SnapshotRow[] ?? [];
   const tankScores = await tankScoresForWeek(adapter, week.week_number, season.year, rules);
   if (!tankScores.size) {
     unwrap(await supabase.from("tank01_scoring_sync_state").upsert({ season_id: season.id, last_attempt_at: now.toISOString(), last_error: null, updated_at: now.toISOString() }, { onConflict: "season_id" }).select("id").single());
@@ -69,6 +69,13 @@ export async function syncTank01Scores(now = new Date()): Promise<Tank01SyncSumm
   }
   const franchiseTotals = new Map<string, number>();
   for (const entry of snapshots) {
+    // Confirmed live: weekly_lineup_snapshot includes bench players too (assigned_slot_code
+    // is 'BENCH', not null, so snapshotLineups' not-null filter above never excluded them) --
+    // this loop summed every snapshot row with no starter-only filter, meaning official,
+    // persisted matchup scores could have been inflated by bench player performance, not
+    // just a display-only bug. BENCH is CVC's only non-starter slot_code (confirmed via
+    // roster_slot), so this exact exclusion is sufficient.
+    if (entry.slot_code?.toUpperCase() === "BENCH") continue;
     const player = entry.player?.[0];
     if (!player) continue;
     const position = player.position === "DEF" ? "DST" : player.position ?? "";
