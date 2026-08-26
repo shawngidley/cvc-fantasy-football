@@ -123,7 +123,7 @@ function SeasonStatsSyncModule() {
   });
   const utils = trpc.useUtils();
   const [rookieResult, setRookieResult] = useState<null | { countByPosition: Record<string, number>; matchedInDb: number; notYetSynced: number; flaggedNow: number; clearedStale: number; errors: Record<string, string>; samplePlayers?: Record<string, unknown> }>(null);
-  const [activeResult, setActiveResult] = useState<null | { teamsProcessed: number; totalRosterPlayers: number; matchedPlayers: number; matchedDst: number; errors: Record<string, string> }>(null);
+  const [activeResult, setActiveResult] = useState<null | { teamsProcessed: number; totalRosterPlayers: number; matchedPlayers: number; matchedDst: number; errors: Record<string, string>; sampleRosterPlayer?: unknown }>(null);
   const syncPlayers = trpc.league.syncFantasyProsPlayers.useMutation({
     onSuccess: data => toast.success(`Synced ${data.totalReceived} players from FantasyPros (${data.inserted} new, ${data.enriched} updated).`),
     onError: error => toast.error(error.message),
@@ -166,6 +166,7 @@ function SeasonStatsSyncModule() {
         <p><b className="text-cvc-deep">Teams processed:</b> {activeResult.teamsProcessed} · <b className="text-cvc-deep">Total rostered players seen:</b> {activeResult.totalRosterPlayers}</p>
         <p className="mt-1"><b className="text-cvc-deep">Matched to a synced CVC player:</b> {activeResult.matchedPlayers} · <b className="text-cvc-deep">Defenses confirmed:</b> {activeResult.matchedDst}</p>
         {Object.keys(activeResult.errors).length ? <p className="mt-1 text-red-700"><b>Team fetch errors:</b> {Object.entries(activeResult.errors).map(([team, message]) => `${team}: ${message}`).join("; ")}</p> : null}
+        {activeResult.sampleRosterPlayer ? <details className="mt-2"><summary className="cursor-pointer text-cvc-deep">Raw sample roster player (for checking the name field)</summary><pre className="mt-1 max-h-64 overflow-auto rounded bg-slate-50 p-2 text-[10px]">{JSON.stringify(activeResult.sampleRosterPlayer, null, 2)}</pre></details> : null}
       </div> : null}
     </div>
     <div className="rounded-lg border border-dashed border-red-300 bg-red-50 p-4">

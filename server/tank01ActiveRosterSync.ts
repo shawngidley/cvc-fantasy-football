@@ -15,15 +15,21 @@ export type Tank01ActiveRosterSyncSummary = {
   matchedPlayers: number;
   matchedDst: number;
   errors: Record<string, string>;
+  sampleRosterPlayer?: unknown;
 };
 
 /** WRC's proven technique, adapted for CVC: Tank01's getNFLTeamRoster returns each
  * team's actual CURRENT roster -- a retired player simply cannot appear in it, unlike
  * FantasyPros' /players endpoint (a broad all-time database) or its ROS rankings (only
- * a 31% match rate against CVC's player table in testing). Loops all 32 teams, unions
- * every rostered player name, and stamps last_seen_at for every CVC player matched --
- * plus unconditionally for every DST entry, since all 32 NFL teams are always valid
- * defense options regardless of roster contents. */
+ * a 31% match rate in testing). Loops all 32 teams, unions every rostered player name,
+ * and stamps last_seen_at for every CVC player matched -- plus unconditionally for
+ * every DST entry, since all 32 NFL teams are always valid defense options.
+ *
+ * A live run only matched 336 of 2682 rostered players (12.5%) -- too low to be just
+ * suffix/punctuation formatting gaps, and Tank01RosterPlayer.longName is marked
+ * optional in its own type definition (never confirmed against a live response). Rather
+ * than guess at a different field name, this now captures one raw roster player object
+ * so the actual field names can be inspected directly. */
 export async function syncTank01ActiveRoster(): Promise<Tank01ActiveRosterSyncSummary> {
   const adapter = getNFLDataAdapter();
   if (!(adapter instanceof Tank01NFLDataAdapter)) throw new Error("Tank01 is not configured for CVC.");
@@ -42,6 +48,7 @@ export async function syncTank01ActiveRoster(): Promise<Tank01ActiveRosterSyncSu
   const errors: Record<string, string> = {};
   const rosterNames = new Set<string>();
   let totalRosterPlayers = 0;
+  let sampleRosterPlayer: unknown;
   const CONCURRENCY = 5;
   for (let i = 0; i < teamAbvs.length; i += CONCURRENCY) {
     const chunk = teamAbvs.slice(i, i + CONCURRENCY);
@@ -49,6 +56,7 @@ export async function syncTank01ActiveRoster(): Promise<Tank01ActiveRosterSyncSu
       try {
         const roster = await adapter.listTeamRoster(abv);
         totalRosterPlayers += roster.length;
+        if (!sampleRosterPlayer && roster.length) sampleRosterPlayer = roster[0];
         for (const player of roster) {
           const name = player.longName;
           if (name) rosterNames.add(canonical(name));
@@ -68,5 +76,5 @@ export async function syncTank01ActiveRoster(): Promise<Tank01ActiveRosterSyncSu
     unwrap(await supabase.from("player").update({ last_seen_at: now }).in("id", allIds.slice(i, i + 500)).select("id"));
   }
 
-  return { teamsProcessed: teamAbvs.length - Object.keys(errors).length, totalRosterPlayers, matchedPlayers: matchedIds.length, matchedDst: dstIds.length, errors };
+  return { teamsProcessed: teamAbvs.length - Object.keys(errors).length, totalRosterPlayers, matchedPlayers: matchedIds.length, matchedDst: dstIds.length, errors, sampleRosterPlayer };
 }
