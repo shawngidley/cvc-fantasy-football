@@ -97,3 +97,30 @@ export async function getFantasyProsRookiePlayerIds(season: number): Promise<{ i
   return { idsByPosition, errors, samplePlayers };
 }
 
+// FantasyPros' /players endpoint turned out to be a broad all-time player database, not
+// scoped to currently-active players (confirmed: a sync touched 3807 of 3955 players --
+// virtually everyone -- so it can't distinguish active from retired at all). Their
+// consensus-rankings endpoint with type=ROS ("rest of season"), by contrast, is already
+// confirmed against a live response earlier in this project to return real, current,
+// sensible players (Jonathan Taylor as the #1 RB) -- a genuinely retired player simply
+// wouldn't have a ROS ranking. Used here as the actual "still active" signal instead.
+const ACTIVE_CHECK_POSITIONS = ["QB", "RB", "WR", "TE", "K", "DST"] as const;
+
+export async function getFantasyProsActivePlayerIds(season: number): Promise<{ idsByPosition: Record<string, string[]>; errors: Record<string, string> }> {
+  const apiKey = process.env.FANTASYPROS_API_KEY;
+  if (!apiKey) throw new Error("FantasyPros is not configured for CVC.");
+  const idsByPosition: Record<string, string[]> = {};
+  const errors: Record<string, string> = {};
+  for (const position of ACTIVE_CHECK_POSITIONS) {
+    try {
+      await waitForRequestWindow();
+      const response = await fetch(`https://api.fantasypros.com/public/v2/json/nfl/${season}/consensus-rankings?type=ROS&position=${position}`, { headers: { "x-api-key": apiKey }, signal: AbortSignal.timeout(15_000) });
+      if (!response.ok) { errors[position] = `Request failed with status ${response.status}`; continue; }
+      const payload = await response.json() as { players?: { player_id?: number | string }[] };
+      idsByPosition[position] = (payload.players ?? []).map(player => player.player_id).filter((id): id is number | string => id !== undefined).map(String);
+    } catch (error) {
+      errors[position] = error instanceof Error ? error.message : "Request failed";
+    }
+  }
+  return { idsByPosition, errors };
+}

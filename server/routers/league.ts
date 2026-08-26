@@ -2,8 +2,8 @@ import { TRPCError } from "@trpc/server";
 import { z } from "zod";
 import { protectedProcedure, publicProcedure, router } from "../_core/trpc";
 import { getFantasyProsDataAdapter, getNFLDataAdapter } from "../nflDataAdapter";
-import { fantasyProsCacheStatus, getFantasyProsRookiePlayerIds } from "../fantasyProsCache";
-import { syncFantasyProsSnapshot, syncFantasyProsRookieFlags } from "../fantasyProsSync";
+import { fantasyProsCacheStatus, getFantasyProsActivePlayerIds, getFantasyProsRookiePlayerIds } from "../fantasyProsCache";
+import { syncFantasyProsSnapshot, syncFantasyProsActiveFlags, syncFantasyProsRookieFlags } from "../fantasyProsSync";
 import { syncTank01SeasonStats } from "../tank01SeasonStatsSync";
 import { LOTTERY_REVEAL_INTERVAL_SECONDS, lotteryCommitment, revealedLotteryCount, reverseLotteryPositions, secureShuffle } from "../rookieDraftLottery";
 import { activeLiveLineup } from "../liveScoringLineup";
@@ -584,13 +584,13 @@ export const leagueRouter = router({
 
     let playerQuery = supabase.from("player").select("id, provider, display_name, position, nfl_team, status, metadata").neq("provider", "placeholder").in("position", eligiblePositions).order("display_name").limit(limit + 220);
     // Same last_seen_at filter as auction.eligiblePlayers, excluding players who dropped
-    // off FantasyPros' most recent list (very likely retired/out of the league). Not
-    // applied to the matchingRightsOnly path above -- a matching-rights tag means the
-    // player was just actively rostered, a stronger and more specific signal than the
-    // general "still on FantasyPros' list" check. Skipped entirely if no sync has ever
+    // off FantasyPros' most recent ROS-rankings-confirmed active list (see
+    // syncFantasyProsActiveFlags). Not applied to the matchingRightsOnly path above -- a
+    // matching-rights tag means the player was just actively rostered, a stronger and
+    // more specific signal on its own. Skipped entirely if no active-flag sync has ever
     // run (fails open, not closed, so it never hides the whole pool).
-    const cacheStatus = await fantasyProsCacheStatus();
-    if (cacheStatus.fetchedAt) playerQuery = playerQuery.gte("last_seen_at", cacheStatus.fetchedAt);
+    const mostRecentSync = unwrap(await supabase.from("player").select("last_seen_at").not("last_seen_at", "is", null).order("last_seen_at", { ascending: false }).limit(1).maybeSingle());
+    if (mostRecentSync?.last_seen_at) playerQuery = playerQuery.gte("last_seen_at", mostRecentSync.last_seen_at);
     if (input?.search) playerQuery = playerQuery.ilike("display_name", `%${input.search.replace(/[%_]/g, "")}%`);
     if (input?.position) playerQuery = playerQuery.eq("position", input.position.toUpperCase());
     const players = unwrap(await playerQuery) ?? [];
@@ -657,6 +657,14 @@ export const leagueRouter = router({
     const adapter = getFantasyProsDataAdapter();
     if (!adapter) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "FantasyPros is not configured for CVC." });
     return syncFantasyProsSnapshot(await adapter.listPlayerSnapshot());
+  }),
+
+  syncFantasyProsActive: protectedProcedure.mutation(async ({ ctx }) => {
+    await requireCommissioner({ openId: ctx.user.openId });
+    if (!process.env.FANTASYPROS_API_KEY) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "FantasyPros is not configured for CVC." });
+    const { season } = await getCurrentLeagueAndSeason();
+    const { idsByPosition, errors } = await getFantasyProsActivePlayerIds(season.year);
+    return syncFantasyProsActiveFlags(idsByPosition, errors);
   }),
 
   syncFantasyProsRookies: protectedProcedure.mutation(async ({ ctx }) => {

@@ -40,15 +40,8 @@ export async function syncFantasyProsSnapshot(snapshot: FantasyProsSnapshot): Pr
   const existing = unwrap(await supabase.from("player").select("id, provider, external_id, display_name, position, nfl_team, metadata").limit(5000)) as CvcPlayer[];
   const byFantasyProsId = new Map(existing.filter(player => player.provider === "fantasypros" && player.external_id).map(player => [player.external_id!, player]));
   const byNameAndTeam = new Map(existing.map(player => [`${canonical(player.display_name)}|${canonical(player.nfl_team)}`, player]));
-  const inserts: { provider: string; external_id: string; display_name: string; position: string | null; nfl_team: string | null; status: string; metadata: Record<string, unknown>; last_seen_at: string }[] = [];
+  const inserts: { provider: string; external_id: string; display_name: string; position: string | null; nfl_team: string | null; status: string; metadata: Record<string, unknown> }[] = [];
   const enrichments: { id: string; position: string | null; nfl_team: string | null; metadata: Record<string, unknown> }[] = [];
-  // Players present in this sync whose other fields (position/team/metadata) didn't
-  // change — still needs last_seen_at bumped to prove they're confirmed still on
-  // FantasyPros' current list, just via a lighter batched update than a full field
-  // rewrite. Previously these were skipped entirely with no DB write at all, which
-  // meant last_seen_at would never advance for the large majority of unchanged
-  // players — defeating the whole point of using it to detect who's dropped off.
-  const touchedOnlyIds: string[] = [];
   let skipped = 0;
 
   for (const player of normalized) {
@@ -58,23 +51,42 @@ export async function syncFantasyProsSnapshot(snapshot: FantasyProsSnapshot): Pr
     if (target) {
       const priorMetadata = target.metadata ?? {};
       const alreadyCurrent = priorMetadata.fantasypros_id === player.externalId && target.position === player.position && target.nfl_team === player.nflTeam;
-      if (alreadyCurrent) { touchedOnlyIds.push(target.id); skipped += 1; continue; }
+      if (alreadyCurrent) { skipped += 1; continue; }
       enrichments.push({ id: target.id, position: player.position ?? target.position, nfl_team: player.nflTeam ?? target.nfl_team, metadata: { ...priorMetadata, ...player.metadata } });
       continue;
     }
-    inserts.push({ provider: "fantasypros", external_id: player.externalId, display_name: player.displayName, position: player.position, nfl_team: player.nflTeam, status: "active", metadata: player.metadata, last_seen_at: snapshot.fetchedAt });
+    inserts.push({ provider: "fantasypros", external_id: player.externalId, display_name: player.displayName, position: player.position, nfl_team: player.nflTeam, status: "active", metadata: player.metadata });
   }
 
   for (let index = 0; index < inserts.length; index += 250) {
     unwrap(await supabase.from("player").upsert(inserts.slice(index, index + 250), { onConflict: "provider,external_id" }).select("id"));
   }
   for (const enrichment of enrichments) {
-    unwrap(await supabase.from("player").update({ position: enrichment.position, nfl_team: enrichment.nfl_team, metadata: enrichment.metadata, last_seen_at: snapshot.fetchedAt, updated_at: new Date().toISOString() }).eq("id", enrichment.id).select("id").single());
-  }
-  for (let index = 0; index < touchedOnlyIds.length; index += 500) {
-    unwrap(await supabase.from("player").update({ last_seen_at: snapshot.fetchedAt }).in("id", touchedOnlyIds.slice(index, index + 500)).select("id"));
+    unwrap(await supabase.from("player").update({ position: enrichment.position, nfl_team: enrichment.nfl_team, metadata: enrichment.metadata, updated_at: new Date().toISOString() }).eq("id", enrichment.id).select("id").single());
   }
   return { source: snapshot.source, fetchedAt: snapshot.fetchedAt, totalReceived: normalized.length, inserted: inserts.length, enriched: enrichments.length, skipped };
+}
+
+export type FantasyProsActiveSyncSummary = { countByPosition: Record<string, number>; matchedInDb: number; notYetSynced: number; touched: number; errors: Record<string, string> };
+
+/** Sets player.last_seen_at for players confirmed present in FantasyPros' current
+ * ROS rankings (see getFantasyProsActivePlayerIds) -- the actual "still active" signal,
+ * unlike the broad /players endpoint. Matches on metadata.fantasypros_id, same as the
+ * rookie flag sync, for the same reason (provider/external_id columns are only set for
+ * freshly-inserted players, not ones matched by name+team during enrichment). Does NOT
+ * touch anyone not in this run: a player who drops off a later ROS ranking simply keeps
+ * their old last_seen_at and ages out of the eligibility filter relative to newer ones. */
+export async function syncFantasyProsActiveFlags(idsByPosition: Record<string, string[]>, errors: Record<string, string>): Promise<FantasyProsActiveSyncSummary> {
+  const activeExternalIds = new Set(Object.values(idsByPosition).flat());
+  const countByPosition = Object.fromEntries(Object.entries(idsByPosition).map(([position, ids]) => [position, ids.length]));
+  const existing = unwrap(await supabase.from("player").select("id, metadata").limit(5000)) as { id: string; metadata: Record<string, unknown> | null }[];
+  const matchedIds = existing.filter(player => player.metadata?.fantasypros_id && activeExternalIds.has(String(player.metadata.fantasypros_id))).map(player => player.id);
+  const matchedExternalIds = new Set(existing.filter(player => player.metadata?.fantasypros_id && activeExternalIds.has(String(player.metadata.fantasypros_id))).map(player => String(player.metadata!.fantasypros_id)));
+  const now = new Date().toISOString();
+  for (let index = 0; index < matchedIds.length; index += 500) {
+    unwrap(await supabase.from("player").update({ last_seen_at: now }).in("id", matchedIds.slice(index, index + 500)).select("id"));
+  }
+  return { countByPosition, matchedInDb: matchedIds.length, notYetSynced: activeExternalIds.size - matchedExternalIds.size, touched: matchedIds.length, errors };
 }
 
 export type FantasyProsRookieSyncSummary = { countByPosition: Record<string, number>; matchedInDb: number; notYetSynced: number; flaggedNow: number; clearedStale: number; errors: Record<string, string> };

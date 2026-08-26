@@ -123,10 +123,18 @@ function SeasonStatsSyncModule() {
   });
   const utils = trpc.useUtils();
   const [rookieResult, setRookieResult] = useState<null | { countByPosition: Record<string, number>; matchedInDb: number; notYetSynced: number; flaggedNow: number; clearedStale: number; errors: Record<string, string>; samplePlayers?: Record<string, unknown> }>(null);
+  const [activeResult, setActiveResult] = useState<null | { countByPosition: Record<string, number>; matchedInDb: number; notYetSynced: number; touched: number; errors: Record<string, string> }>(null);
   const syncPlayers = trpc.league.syncFantasyProsPlayers.useMutation({
+    onSuccess: data => toast.success(`Synced ${data.totalReceived} players from FantasyPros (${data.inserted} new, ${data.enriched} updated).`),
+    onError: error => toast.error(error.message),
+  });
+  const syncActive = trpc.league.syncFantasyProsActive.useMutation({
     onSuccess: async data => {
+      setActiveResult(data);
       await Promise.all([utils.auction.eligiblePlayers.invalidate(), utils.league.freeAgents.invalidate()]);
-      toast.success(`Synced ${data.totalReceived} players from FantasyPros (${data.inserted} new, ${data.enriched} updated). Retired/departed players will now fall out of Free Agents and the auction pool.`);
+      const errorNote = Object.keys(data.errors).length ? ` (errors for: ${Object.keys(data.errors).join(", ")})` : "";
+      if (data.touched === 0) toast.error(`No players matched — the ROS-rankings approach may not be working either. See the breakdown below.${errorNote}`);
+      else toast.success(`Confirmed ${data.touched} players as still active.${errorNote} Retired/departed players will now fall out of Free Agents and the auction pool.`);
     },
     onError: error => toast.error(error.message),
   });
@@ -148,8 +156,18 @@ function SeasonStatsSyncModule() {
     </div>
     <div className="rounded-lg border border-dashed border-cvc-deep/20 bg-cvc-tint p-4">
       <p className="text-sm font-semibold text-cvc-deep">FantasyPros players</p>
-      <p className="mt-1 text-xs leading-5 text-slate-500">Syncs the FantasyPros player list and marks every player found in this run as "still active." This is what keeps retired/departed players out of Free Agents and the auction pool — run it periodically (weekly is plenty) so that filtering stays accurate. Safe to run anytime; doesn't touch rookie flags.</p>
+      <p className="mt-1 text-xs leading-5 text-slate-500">Syncs the FantasyPros player list (names, positions, NFL teams). This is FantasyPros' full player database, not scoped to currently-active players — it does not affect who shows up in Free Agents or the auction pool. Use "Confirm active players" below for that.</p>
       <button type="button" className="cvc-button-compact mt-3" disabled={syncPlayers.isPending} onClick={() => syncPlayers.mutate()}><Save size={14} /> {syncPlayers.isPending ? "Syncing…" : "Sync FantasyPros players"}</button>
+    </div>
+    <div className="rounded-lg border border-dashed border-cvc-deep/20 bg-cvc-tint p-4">
+      <p className="text-sm font-semibold text-cvc-deep">Confirm active players</p>
+      <p className="mt-1 text-xs leading-5 text-slate-500">Checks FantasyPros' current rest-of-season rankings (QB/RB/WR/TE/K/DST) and marks every player found there as confirmed still active — this is what keeps retired/departed players out of Free Agents and the auction pool. A player who stops appearing in these rankings on a later run simply won't get re-confirmed, and ages out of eligibility. Run this periodically (weekly is plenty) to keep it accurate.</p>
+      <button type="button" className="cvc-button-compact mt-3" disabled={syncActive.isPending} onClick={() => syncActive.mutate()}><Save size={14} /> {syncActive.isPending ? "Syncing…" : "Confirm active players"}</button>
+      {activeResult ? <div className="mt-3 rounded-md border border-slate-200 bg-white p-3 text-xs text-slate-600">
+        <p><b className="text-cvc-deep">Ranked players found by position:</b> {Object.entries(activeResult.countByPosition).map(([pos, count]) => `${pos}: ${count}`).join(", ") || "none"}</p>
+        <p className="mt-1"><b className="text-cvc-deep">Matched to a synced CVC player and confirmed active:</b> {activeResult.matchedInDb} · <b className="text-cvc-deep">Not yet in CVC's player list:</b> {activeResult.notYetSynced}</p>
+        {Object.keys(activeResult.errors).length ? <p className="mt-1 text-red-700"><b>Errors:</b> {Object.entries(activeResult.errors).map(([pos, message]) => `${pos}: ${message}`).join("; ")}</p> : null}
+      </div> : null}
     </div>
     <div className="rounded-lg border border-dashed border-red-300 bg-red-50 p-4">
       <p className="text-sm font-semibold text-cvc-deep">Rookie flag sync <span className="font-normal text-red-700">— experimental, not recommended</span></p>
