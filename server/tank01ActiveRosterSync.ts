@@ -1,7 +1,13 @@
 import { getNFLDataAdapter, Tank01NFLDataAdapter } from "./nflDataAdapter";
 import { supabase, unwrap } from "./supabase";
 
-const canonical = (value: string | null | undefined) => (value ?? "").trim().toLowerCase().replace(/[^a-z0-9]/g, "");
+// Strips common trailing name suffixes (Jr/Sr/II/III/IV) before the full alphanumeric
+// strip below -- confirmed via a live Tank01 sample that longName is correctly
+// populated (e.g. "Chad Ryland"), so the low 12.5% match rate on the first live run is
+// much more likely explained by systematic suffix mismatches between sources (e.g.
+// Tank01's "Patrick Mahomes" vs CVC's "Patrick Mahomes II") than a wrong field.
+const SUFFIX_PATTERN = /\s+(jr\.?|sr\.?|ii|iii|iv|v)$/i;
+const canonical = (value: string | null | undefined) => (value ?? "").trim().replace(SUFFIX_PATTERN, "").toLowerCase().replace(/[^a-z0-9]/g, "");
 
 // Standard 32 NFL team abbreviations, used only as a fallback if Tank01's own team list
 // can't be parsed -- the sync prefers fetching the live list first (below) so it isn't
