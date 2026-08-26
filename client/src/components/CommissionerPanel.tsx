@@ -114,6 +114,7 @@ function PendingCutsModule() {
 }
 
 function SeasonStatsSyncModule() {
+  const utils = trpc.useUtils();
   const sync = trpc.league.syncSeasonStats.useMutation({
     onSuccess: data => {
       if (data.status === "skipped") { toast.error(data.reason ?? "Season stats sync is unavailable."); return; }
@@ -121,7 +122,31 @@ function SeasonStatsSyncModule() {
     },
     onError: error => toast.error(error.message),
   });
-  const utils = trpc.useUtils();
+  // Runs the same batch mutation repeatedly (client-side loop, no new endpoint needed)
+  // until nothing remains, instead of requiring a manual click per batch of 40 -- with
+  // a large player pool (600+ after tonight's cleanup) that could mean ~15 clicks.
+  // Shows one running progress line instead of a toast per batch to avoid spamming 15
+  // separate notifications.
+  const [autoSyncing, setAutoSyncing] = useState(false);
+  const [autoProgress, setAutoProgress] = useState<{ totalUpdated: number; totalAttempted: number } | null>(null);
+  const syncAll = async () => {
+    setAutoSyncing(true);
+    let totalUpdated = 0; let totalAttempted = 0;
+    try {
+      // Safety cap: stops after 60 batches (2400 players) even if something keeps
+      // reporting remaining > 0, so a bug elsewhere can't loop this forever.
+      for (let i = 0; i < 60; i += 1) {
+        const result = await sync.mutateAsync({});
+        if (result.status === "skipped") { toast.error(result.reason ?? "Season stats sync is unavailable."); break; }
+        totalUpdated += result.updated; totalAttempted += result.attempted;
+        setAutoProgress({ totalUpdated, totalAttempted });
+        if (!result.remaining) { toast.success(`All players are up to date — synced ${totalUpdated} total.`); break; }
+      }
+    } finally {
+      setAutoSyncing(false);
+      await utils.league.freeAgents.invalidate();
+    }
+  };
   const [rookieResult, setRookieResult] = useState<null | { countByPosition: Record<string, number>; matchedInDb: number; notYetSynced: number; flaggedNow: number; clearedStale: number; errors: Record<string, string>; samplePlayers?: Record<string, unknown> }>(null);
   const [activeResult, setActiveResult] = useState<null | { teamsProcessed: number; totalRosterPlayers: number; matchedByStoredId: number; matchedByNameNewlyLinked: number; matchedDst: number; errors: Record<string, string>; sampleRosterPlayer?: unknown }>(null);
   const syncPlayers = trpc.league.syncFantasyProsPlayers.useMutation({
@@ -151,7 +176,7 @@ function SeasonStatsSyncModule() {
     <div className="rounded-lg border border-dashed border-cvc-deep/20 bg-cvc-tint p-4">
       <p className="text-sm font-semibold text-cvc-deep">Season stats sync</p>
       <p className="mt-1 text-xs leading-5 text-slate-500">Pulls season-total stats from Tank01 for every rostered and free-agent CVC player (QB/RB/WR/TE/K/DST), caches them for display on Free Agents, and updates each player's current NFL team on their CVC record (skipped for D/ST, since that record is the team itself). Each click processes up to 40 players who haven't been synced in the last 12 hours — click repeatedly until "All players are up to date" if the pool is large.</p>
-      <button type="button" className="cvc-button-compact mt-3" disabled={sync.isPending} onClick={() => sync.mutate({})}><Save size={14} /> {sync.isPending ? "Syncing…" : "Sync next batch"}</button>
+      <div className="mt-3 flex flex-wrap items-center gap-3"><button type="button" className="cvc-button-compact" disabled={sync.isPending || autoSyncing} onClick={() => sync.mutate({})}><Save size={14} /> {sync.isPending && !autoSyncing ? "Syncing…" : "Sync next batch"}</button><button type="button" className="cvc-button-secondary" disabled={sync.isPending || autoSyncing} onClick={syncAll}>{autoSyncing ? "Syncing all…" : "Sync all players"}</button>{autoProgress ? <span className="text-xs text-slate-500">{autoProgress.totalUpdated} of {autoProgress.totalAttempted} synced so far{autoSyncing ? "…" : "."}</span> : null}</div>
     </div>
     <div className="rounded-lg border border-dashed border-cvc-deep/20 bg-cvc-tint p-4">
       <p className="text-sm font-semibold text-cvc-deep">FantasyPros players</p>
