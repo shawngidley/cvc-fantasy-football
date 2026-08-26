@@ -118,7 +118,9 @@ function SeasonStatsSyncModule() {
   const sync = trpc.league.syncSeasonStats.useMutation({
     onSuccess: data => {
       if (data.status === "skipped") { toast.error(data.reason ?? "Season stats sync is unavailable."); return; }
-      toast.success(`Synced ${data.updated} of ${data.attempted} players${data.notFound ? ` (${data.notFound} not found on Tank01)` : ""}${data.teamsUpdated ? ` — ${data.teamsUpdated} moved to a new NFL team` : ""}.${data.remaining ? ` ${data.remaining} still pending — click again to continue.` : " All players are up to date."}`);
+      const errorNote = data.updated === 0 && data.sampleError ? ` Sample error: ${data.sampleError}` : "";
+      if (data.updated === 0 && data.attempted > 0) toast.error(`Synced 0 of ${data.attempted} players — something's likely wrong (rate limit, timeout, or API issue), not just unmatched names.${errorNote}`);
+      else toast.success(`Synced ${data.updated} of ${data.attempted} players${data.notFound ? ` (${data.notFound} not found on Tank01)` : ""}${data.teamsUpdated ? ` — ${data.teamsUpdated} moved to a new NFL team` : ""}.${data.remaining ? ` ${data.remaining} still pending — click again to continue.` : " All players are up to date."}${errorNote}`);
     },
     onError: error => toast.error(error.message),
   });

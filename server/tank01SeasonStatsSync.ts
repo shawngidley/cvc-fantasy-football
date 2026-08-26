@@ -15,6 +15,7 @@ export type SeasonStatsSyncSummary = {
   notFound: number;
   remaining: number;
   teamsUpdated: number;
+  sampleError?: string | null;
 };
 
 const numeric = (value: unknown): number | null => {
@@ -94,6 +95,12 @@ export async function syncTank01SeasonStats(seasonId: string, limit = 40): Promi
   let updated = 0;
   let notFound = 0;
   let teamsUpdated = 0;
+  // Captures the first real error hit this batch (e.g. a Tank01 rate-limit response, a
+  // timeout, a malformed response) instead of silently folding every failure into a
+  // bare notFound count -- confirmed live that an entire batch can come back 0 of 40
+  // updated, which a plain count can't distinguish from "these 40 players genuinely
+  // aren't on Tank01" vs. a systemic problem like rate limiting.
+  let sampleError: string | null = null;
   for (let i = 0; i < batch.length; i += CONCURRENCY) {
     const chunk = batch.slice(i, i + CONCURRENCY);
     await Promise.all(chunk.map(async player => {
@@ -114,8 +121,11 @@ export async function syncTank01SeasonStats(seasonId: string, limit = 40): Promi
           }
         }
         updated += 1;
-      } catch { notFound += 1; }
+      } catch (error) {
+        notFound += 1;
+        if (!sampleError) sampleError = `${player.display_name}: ${error instanceof Error ? error.message : String(error)}`;
+      }
     }));
   }
-  return { status: "completed", attempted: batch.length, updated, notFound, remaining: Math.max(0, pending.length - batch.length), teamsUpdated };
+  return { status: "completed", attempted: batch.length, updated, notFound, remaining: Math.max(0, pending.length - batch.length), teamsUpdated, sampleError };
 }
