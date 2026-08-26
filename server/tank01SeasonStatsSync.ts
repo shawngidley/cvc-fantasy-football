@@ -83,7 +83,17 @@ export async function syncTank01SeasonStats(seasonId: string, limit = 40): Promi
   if (!(adapter instanceof Tank01NFLDataAdapter)) return { status: "skipped", reason: "Tank01 is not configured.", attempted: 0, updated: 0, notFound: 0, remaining: 0, teamsUpdated: 0 };
 
   const rules = unwrap(await supabase.from("scoring_rule").select("stat_key, value, applies_to_positions").eq("season_id", seasonId)) ?? [];
-  const players = unwrap(await supabase.from("player").select("id, display_name, position, nfl_team, metadata").neq("provider", "placeholder").in("position", ELIGIBLE_POSITIONS).order("display_name")) as CvcPlayer[] ?? [];
+  let playerQuery = supabase.from("player").select("id, display_name, position, nfl_team, metadata").neq("provider", "placeholder").in("position", ELIGIBLE_POSITIONS).order("display_name");
+  // Same active-player filter as eligiblePlayers/freeAgents -- without it, this synced
+  // every player ever imported, including long-retired ones (confirmed live: Aaron
+  // Elling, a kicker whose NFL career ended around 2008). Tank01 correctly has no data
+  // for players like that, so entire batches -- especially early alphabetical ones,
+  // which happened to include several old "A" names -- came back 0 of 40 synced, not
+  // because of a lookup bug but because most of that batch was never going to be found
+  // by design. This also means far fewer wasted API calls overall.
+  const mostRecentSync = unwrap(await supabase.from("player").select("last_seen_at").not("last_seen_at", "is", null).order("last_seen_at", { ascending: false }).limit(1).maybeSingle());
+  if (mostRecentSync?.last_seen_at) playerQuery = playerQuery.gte("last_seen_at", mostRecentSync.last_seen_at);
+  const players = unwrap(await playerQuery) as CvcPlayer[] ?? [];
   if (!players.length) return { status: "completed", attempted: 0, updated: 0, notFound: 0, remaining: 0, teamsUpdated: 0 };
 
   const staleCutoff = new Date(Date.now() - 12 * 60 * 60 * 1000).toISOString();
