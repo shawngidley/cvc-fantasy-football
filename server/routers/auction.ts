@@ -160,7 +160,10 @@ export const auctionRouter = router({
     // contract, $9-or-less earns 2 years (shared/cvcProtectionPolicy.cvcContractTier —
     // the same rule already used for franchise-tag terms elsewhere in the app).
     const contractYears = cvcFranchiseTerms(cvcContractTier(input.amount));
-    unwrap(await supabase.from("player_contract").upsert({ season_id: season.id, franchise_id: input.franchiseId, player_id: nomination.player_id, salary: input.amount, expires_year: season.year + contractYears - 1, source_marker: null, contract_status: "active" }, { onConflict: "season_id,franchise_id,player_id" }).select("id").single());
+    // Corrected: contracts drafted in season.year run FOR contractYears full seasons,
+    // so a 3-year deal signed in 2026 covers 2026-2029 and expires_year should be 2029
+    // (season.year + contractYears), not 2028 (season.year + contractYears - 1).
+    unwrap(await supabase.from("player_contract").upsert({ season_id: season.id, franchise_id: input.franchiseId, player_id: nomination.player_id, salary: input.amount, expires_year: season.year + contractYears, source_marker: null, contract_status: "active" }, { onConflict: "season_id,franchise_id,player_id" }).select("id").single());
     unwrap(await supabase.from("transaction").insert({ season_id: season.id, franchise_id: input.franchiseId, actor_owner_id: actor.id, transaction_type: "draft_pick", status: "final", summary: `Auction award for $${input.amount}`, details: { nominationId: nomination.id, amount: input.amount } }));
     return { success: true, legalMax };
   }),
@@ -206,7 +209,9 @@ export const auctionRouter = router({
     if (!nomination) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "CVC voice pick could not be saved." });
     unwrap(await supabase.from("roster_assignment").insert({ season_id: season.id, franchise_id: input.franchiseId, player_id: input.playerId, roster_state: "active" }));
     const contractYears = cvcFranchiseTerms(cvcContractTier(input.amount));
-    unwrap(await supabase.from("player_contract").upsert({ season_id: season.id, franchise_id: input.franchiseId, player_id: input.playerId, salary: input.amount, expires_year: season.year + contractYears - 1, source_marker: null, contract_status: "active" }, { onConflict: "season_id,franchise_id,player_id" }).select("id").single());
+    // Same correction as recordPick above: expires_year = season.year + contractYears,
+    // not season.year + contractYears - 1.
+    unwrap(await supabase.from("player_contract").upsert({ season_id: season.id, franchise_id: input.franchiseId, player_id: input.playerId, salary: input.amount, expires_year: season.year + contractYears, source_marker: null, contract_status: "active" }, { onConflict: "season_id,franchise_id,player_id" }).select("id").single());
     unwrap(await supabase.from("transaction").insert({ season_id: season.id, franchise_id: input.franchiseId, actor_owner_id: actor.id, transaction_type: "draft_pick", status: "final", summary: `Auction pick recorded for $${input.amount}`, details: { nominationId: nomination.id, amount: input.amount, source: "commissioner_console" } }));
     return { success: true, legalMax };
   }),

@@ -481,7 +481,11 @@ export const leagueRouter = router({
     // (unlike auction picks, where term length depends on salary) and is tagged with
     // the "R" source marker so it's identifiable as a rookie-draft-originated contract
     // elsewhere in the app (e.g. the Rosters page contract/right marker).
-    unwrap(await supabase.from("player_contract").upsert({ season_id: season.id, franchise_id: input.winningFranchiseId, player_id: player.id, salary: input.salary, expires_year: season.year + 3 - 1, source_marker: "R", contract_status: "active" }, { onConflict: "season_id,franchise_id,player_id" }).select("id").single());
+    // Corrected: a 3-year rookie contract drafted in season.year covers season.year
+    // through season.year+2 (3 seasons total) and expires_year should be
+    // season.year + 3 (2029 for 2026), not season.year + 3 - 1 (2028) -- same fix as
+    // the auction contract creation above.
+    unwrap(await supabase.from("player_contract").upsert({ season_id: season.id, franchise_id: input.winningFranchiseId, player_id: player.id, salary: input.salary, expires_year: season.year + 3, source_marker: "R", contract_status: "active" }, { onConflict: "season_id,franchise_id,player_id" }).select("id").single());
     unwrap(await supabase.from("transaction").insert({ season_id: season.id, franchise_id: input.winningFranchiseId, actor_owner_id: commissioner.id, transaction_type: "draft_pick", status: "final", summary: `CVC rookie draft R${pick.round_number}.${String(pick.pick_number).padStart(2, "0")}: ${player.display_name} to ${winningFranchise.name} for $${input.salary}`, details: { draft_pick_id: pick.id, player_id: player.id, salary: input.salary, pick_holder_franchise_id: pick.current_franchise_id } }).select("id").single());
     await createAuditEvent(league.id, season.id, commissioner.id, "draft_pick", pick.id, "selected", `Recorded CVC rookie draft selection ${player.display_name} to ${winningFranchise.name}.`); return { selected: true };
   }),
