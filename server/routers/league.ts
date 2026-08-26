@@ -5,6 +5,7 @@ import { getFantasyProsDataAdapter, getNFLDataAdapter } from "../nflDataAdapter"
 import { fantasyProsCacheStatus, getFantasyProsActivePlayerIds, getFantasyProsRookiePlayerIds } from "../fantasyProsCache";
 import { syncFantasyProsSnapshot, syncFantasyProsActiveFlags, syncFantasyProsRookieFlags } from "../fantasyProsSync";
 import { syncTank01SeasonStats } from "../tank01SeasonStatsSync";
+import { syncTank01ActiveRoster } from "../tank01ActiveRosterSync";
 import { LOTTERY_REVEAL_INTERVAL_SECONDS, lotteryCommitment, revealedLotteryCount, reverseLotteryPositions, secureShuffle } from "../rookieDraftLottery";
 import { activeLiveLineup } from "../liveScoringLineup";
 import { supabase, unwrap } from "../supabase";
@@ -665,6 +666,11 @@ export const leagueRouter = router({
     const { season } = await getCurrentLeagueAndSeason();
     const { idsByPosition, errors } = await getFantasyProsActivePlayerIds(season.year);
     return syncFantasyProsActiveFlags(idsByPosition, errors);
+  }),
+
+  syncTank01ActiveRoster: protectedProcedure.mutation(async ({ ctx }) => {
+    await requireCommissioner({ openId: ctx.user.openId });
+    return syncTank01ActiveRoster();
   }),
 
   syncFantasyProsRookies: protectedProcedure.mutation(async ({ ctx }) => {
