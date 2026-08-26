@@ -72,14 +72,20 @@ export class Tank01NFLDataAdapter implements NFLDataAdapter {
     return { "x-rapidapi-host": this.host, "x-rapidapi-key": this.apiKey };
   }
 
+  // All Tank01 calls below now use a 15s timeout, matching the pattern already used
+  // for FantasyPros calls elsewhere -- none of them had one before, confirmed as the
+  // cause of the "Sync all players" hang (getPlayerInfo). The same gap existed on
+  // listGamesForWeek/getBoxScore, which the live scoring cron calls every 5 minutes
+  // during games, and listTeams/listTeamRoster, which the active-roster sync calls --
+  // any of these could have hung indefinitely the same way without ever throwing.
   async listTeams() {
-    const response = await fetch(`https://${this.host}/getNFLTeams`, { headers: this.headers() });
+    const response = await fetch(`https://${this.host}/getNFLTeams`, { headers: this.headers(), signal: AbortSignal.timeout(15_000) });
     if (!response.ok) throw new Error(`Tank01 getNFLTeams failed with status ${response.status}`);
     return response.json() as Promise<{ body?: unknown[]; error?: string }>;
   }
 
   async listTeamRoster(teamAbv: string) {
-    const response = await fetch(`https://${this.host}/getNFLTeamRoster?teamAbv=${encodeURIComponent(teamAbv)}`, { headers: this.headers() });
+    const response = await fetch(`https://${this.host}/getNFLTeamRoster?teamAbv=${encodeURIComponent(teamAbv)}`, { headers: this.headers(), signal: AbortSignal.timeout(15_000) });
     if (!response.ok) throw new Error(`Tank01 getNFLTeamRoster failed with status ${response.status}`);
     const payload = await response.json() as { body?: { roster?: Tank01RosterPlayer[] }; error?: string };
     if (payload.error) throw new Error(`Tank01 getNFLTeamRoster returned ${payload.error}`);
@@ -88,7 +94,7 @@ export class Tank01NFLDataAdapter implements NFLDataAdapter {
 
   async listGamesForWeek(week: number, season: number) {
     const params = new URLSearchParams({ week: String(week), season: String(season), seasonType: "Regular Season" });
-    const response = await fetch(`https://${this.host}/getNFLGamesForWeek?${params.toString()}`, { headers: this.headers() });
+    const response = await fetch(`https://${this.host}/getNFLGamesForWeek?${params.toString()}`, { headers: this.headers(), signal: AbortSignal.timeout(15_000) });
     if (!response.ok) throw new Error(`Tank01 getNFLGamesForWeek failed with status ${response.status}`);
     const payload = await response.json() as { body?: Tank01Game[]; error?: string };
     if (payload.error) throw new Error(`Tank01 getNFLGamesForWeek returned ${payload.error}`);
@@ -96,7 +102,7 @@ export class Tank01NFLDataAdapter implements NFLDataAdapter {
   }
 
   async getBoxScore(gameId: string) {
-    const response = await fetch(`https://${this.host}/getNFLBoxScore?gameID=${encodeURIComponent(gameId)}`, { headers: this.headers() });
+    const response = await fetch(`https://${this.host}/getNFLBoxScore?gameID=${encodeURIComponent(gameId)}`, { headers: this.headers(), signal: AbortSignal.timeout(15_000) });
     if (!response.ok) throw new Error(`Tank01 getNFLBoxScore failed with status ${response.status}`);
     const payload = await response.json() as { body?: Tank01BoxScore; error?: string };
     if (payload.error) throw new Error(`Tank01 getNFLBoxScore returned ${payload.error}`);
@@ -104,7 +110,14 @@ export class Tank01NFLDataAdapter implements NFLDataAdapter {
   }
 
   async getPlayerInfo(playerName: string) {
-    const response = await fetch(`https://${this.host}/getNFLPlayerInfo?playerName=${encodeURIComponent(playerName)}&getStats=true`, { headers: this.headers() });
+    // Timeout added: this call previously had none, unlike every other Tank01/
+    // FantasyPros fetch in this codebase (which all use a 15s AbortSignal.timeout).
+    // Without it, a single hanging Tank01 response never resolves OR rejects, so the
+    // per-player try/catch in syncTank01SeasonStats never gets a chance to catch
+    // anything -- it just blocks that whole concurrency chunk (and therefore the
+    // batch, and therefore the "Sync all players" loop) forever. Confirmed live: the
+    // auto-repeat sync got stuck partway through with no error and no progress.
+    const response = await fetch(`https://${this.host}/getNFLPlayerInfo?playerName=${encodeURIComponent(playerName)}&getStats=true`, { headers: this.headers(), signal: AbortSignal.timeout(15_000) });
     if (!response.ok) throw new Error(`Tank01 getNFLPlayerInfo failed with status ${response.status}`);
     const payload = await response.json() as { body?: Record<string, unknown> | Record<string, unknown>[]; error?: string };
     if (payload.error) throw new Error(`Tank01 getNFLPlayerInfo returned ${payload.error}`);
