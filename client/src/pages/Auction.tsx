@@ -19,7 +19,11 @@ const firstOf = (value: any) => Array.isArray(value) ? value[0] : value;
 
 function VoicePickRecorder({ teams }: { teams: any[] }) {
   const utils = trpc.useUtils();
-  const eligible = trpc.auction.eligiblePlayers.useQuery({ limit: 150 });
+  // Loads the full eligible pool once (no search filter) so voice matching can score
+  // against every candidate locally, not just an alphabetically-truncated slice — the
+  // previous 150-player cap meant anyone whose name fell later in the alphabet than
+  // roughly the first 150 eligible players couldn't be voice-matched at all.
+  const eligible = trpc.auction.eligiblePlayers.useQuery({ limit: 1000 });
   const [listening, setListening] = useState(false);
   const [transcript, setTranscript] = useState("");
   const [parsedPlayerId, setParsedPlayerId] = useState("");

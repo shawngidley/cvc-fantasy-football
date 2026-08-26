@@ -75,7 +75,7 @@ export const auctionRouter = router({
     const recent = unwrap(await supabase.from("auction_nomination").select("id, player_id, high_bid, player(display_name), leader:franchise!auction_nomination_high_franchise_id_fkey(name)").eq("draft_id", draft.id).eq("status", "awarded").order("awarded_at", { ascending: false }).limit(8));
     return { draft, states: liveStates, active, recent };
   }),
-  eligiblePlayers: publicProcedure.input(z.object({ search: z.string().trim().max(64).optional(), position: z.string().trim().max(12).optional(), limit: z.number().int().min(1).max(150).optional() }).optional()).query(async ({ input }) => {
+  eligiblePlayers: publicProcedure.input(z.object({ search: z.string().trim().max(64).optional(), position: z.string().trim().max(12).optional(), limit: z.number().int().min(1).max(1000).optional() }).optional()).query(async ({ input }) => {
     const { season, draft } = await context();
     const limit = input?.limit ?? 75;
     if (input?.position && !isCvcAuctionPosition(input.position)) return [];
