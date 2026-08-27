@@ -54,12 +54,31 @@ async function fetchLive(limit: number): Promise<FantasyProsNewsItem[]> {
 export async function getFantasyProsNews(limit = 100): Promise<{ items: FantasyProsNewsItem[]; source: "cache" | "network" | "stale_cache" }> {
   const cacheRow = unwrap(await supabase.from("provider_cache").select("payload, fetched_at, expires_at, last_error").eq("cache_key", CACHE_KEY).maybeSingle());
   const now = Date.now();
+  const cachedItems = (row: typeof cacheRow) => {
+    if (!row) return [];
+    const cached = row.payload as FantasyProsNewsItem[] | { items: FantasyProsNewsItem[] } | null;
+    return Array.isArray(cached) ? cached : cached?.items ?? [];
+  };
   if (cacheRow && new Date(cacheRow.expires_at).getTime() > now) {
-    const cached = cacheRow.payload as FantasyProsNewsItem[] | { items: FantasyProsNewsItem[] } | null;
-    return { items: Array.isArray(cached) ? cached : cached?.items ?? [], source: "cache" };
+    return { items: cachedItems(cacheRow), source: "cache" };
   }
   try {
     const items = await fetchLive(limit);
+    const existing = cachedItems(cacheRow);
+    // Vercel serverless functions don't share module-level state (the rate limiter in
+    // fantasyProsCache.ts) across concurrent instances, so simultaneous requests can
+    // still hit FantasyPros' real rate limit -- which came back as a 200 OK with a
+    // genuinely empty items array, not a distinguishable error (confirmed live: good
+    // 80-item cached data got silently overwritten with []). If a live fetch comes back
+    // empty while we're already holding real cached items, treat it as suspicious rather
+    // than authoritative: keep serving the existing items and only refresh the cache's
+    // expiry, instead of overwriting good data with a likely-throttled empty response.
+    if (items.length === 0 && existing.length > 0) {
+      const fetchedAt = new Date().toISOString();
+      const expiresAt = new Date(now + CACHE_TTL_MS).toISOString();
+      unwrap(await supabase.from("provider_cache").update({ fetched_at: fetchedAt, expires_at: expiresAt, last_error: "Live fetch returned zero items while cache held real data -- likely rate-limited; kept serving existing cache.", updated_at: fetchedAt }).eq("cache_key", CACHE_KEY).select("cache_key").single());
+      return { items: existing, source: "stale_cache" };
+    }
     const fetchedAt = new Date().toISOString();
     const expiresAt = new Date(now + CACHE_TTL_MS).toISOString();
     unwrap(await supabase.from("provider_cache").upsert({ cache_key: CACHE_KEY, provider: "FantasyPros", payload: items, fetched_at: fetchedAt, expires_at: expiresAt, last_error: null, updated_at: fetchedAt }, { onConflict: "cache_key" }).select("cache_key").single());
@@ -68,8 +87,7 @@ export async function getFantasyProsNews(limit = 100): Promise<{ items: FantasyP
     const message = error instanceof Error ? error.message : "FantasyPros news request failed";
     if (cacheRow) {
       unwrap(await supabase.from("provider_cache").update({ last_error: message, updated_at: new Date().toISOString() }).eq("cache_key", CACHE_KEY).select("cache_key").single());
-      const cached = cacheRow.payload as FantasyProsNewsItem[] | { items: FantasyProsNewsItem[] } | null;
-      return { items: Array.isArray(cached) ? cached : cached?.items ?? [], source: "stale_cache" };
+      return { items: cachedItems(cacheRow), source: "stale_cache" };
     }
     throw error;
   }
