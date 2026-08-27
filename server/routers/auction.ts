@@ -72,7 +72,10 @@ export const auctionRouter = router({
     for (const row of unwrap(assignmentsResult) ?? []) rosterCountByFranchise.set(row.franchise_id, (rosterCountByFranchise.get(row.franchise_id) ?? 0) + 1);
     const liveStates = states.map(state => ({ ...state, spent_budget: spentByFranchise.get(state.franchise_id) ?? 0, roster_count: rosterCountByFranchise.get(state.franchise_id) ?? 0 }));
     const active = unwrap(await supabase.from("auction_nomination").select("id, player_id, high_franchise_id, high_bid, status, player(display_name, position, nfl_team), nominator:franchise!auction_nomination_nominating_franchise_id_fkey(name), leader:franchise!auction_nomination_high_franchise_id_fkey(name)").eq("draft_id", draft.id).eq("status", "active").maybeSingle());
-    const recent = unwrap(await supabase.from("auction_nomination").select("id, player_id, high_bid, player(display_name), leader:franchise!auction_nomination_high_franchise_id_fkey(name)").eq("draft_id", draft.id).eq("status", "awarded").order("awarded_at", { ascending: false }).limit(8));
+    // No cap here (was limit(8)) -- the Auction Room now shows the full award
+    // history in a scrollable table, not just the last few, so owners can see
+    // every result of the auction, not only the most recent handful.
+    const recent = unwrap(await supabase.from("auction_nomination").select("id, player_id, high_bid, player(display_name, nfl_team), leader:franchise!auction_nomination_high_franchise_id_fkey(name)").eq("draft_id", draft.id).eq("status", "awarded").order("awarded_at", { ascending: false }));
     return { draft, states: liveStates, active, recent };
   }),
   eligiblePlayers: publicProcedure.input(z.object({ search: z.string().trim().max(64).optional(), position: z.string().trim().max(12).optional(), limit: z.number().int().min(1).max(1000).optional() }).optional()).query(async ({ input }) => {
