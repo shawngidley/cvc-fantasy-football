@@ -215,6 +215,15 @@ export const auctionRouter = router({
     // Same correction as recordPick above: expires_year = season.year + contractYears,
     // not season.year + contractYears - 1.
     unwrap(await supabase.from("player_contract").upsert({ season_id: season.id, franchise_id: input.franchiseId, player_id: input.playerId, salary: input.amount, expires_year: season.year + contractYears, source_marker: null, contract_status: "active" }, { onConflict: "season_id,franchise_id,player_id" }).select("id").single());
+    // Being awarded here resolves any restriction (rookie/waiver match, franchise,
+    // transition) that put this player into the auction pool in the first place --
+    // previously these stayed status='active' forever, so franchiseRoster kept
+    // showing the old -R/-W marker (e.g. "2028-W") even after a fresh, unrestricted
+    // contract was created. If the franchise that held the right is the one who won
+    // the player back, that's the right being exercised; any other franchise winning
+    // means the original holder declined/lost the match.
+    const activeRights = unwrap(await supabase.from("player_right").select("id, franchise_id").eq("season_id", season.id).eq("player_id", input.playerId).eq("status", "active")) ?? [];
+    await Promise.all(activeRights.map(right => supabase.from("player_right").update({ status: right.franchise_id === input.franchiseId ? "exercised" : "declined", updated_at: new Date().toISOString() }).eq("id", right.id).select("id").single().then(unwrap)));
     unwrap(await supabase.from("transaction").insert({ season_id: season.id, franchise_id: input.franchiseId, actor_owner_id: actor.id, transaction_type: "draft_pick", status: "final", summary: `Auction pick recorded for $${input.amount}`, details: { nominationId: nomination.id, amount: input.amount, source: "commissioner_console" } }));
     return { success: true, legalMax };
   }),
