@@ -3,6 +3,7 @@ import { z } from "zod";
 import { protectedProcedure, publicProcedure, router } from "../_core/trpc";
 import { getFantasyProsDataAdapter, getNFLDataAdapter } from "../nflDataAdapter";
 import { fantasyProsCacheStatus, getFantasyProsActivePlayerIds, getFantasyProsRookiePlayerIds } from "../fantasyProsCache";
+import { getFantasyProsNews } from "../fantasyProsNews";
 import { syncFantasyProsSnapshot, syncFantasyProsActiveFlags, syncFantasyProsRookieFlags } from "../fantasyProsSync";
 import { syncTank01SeasonStats } from "../tank01SeasonStatsSync";
 import { syncTank01ActiveRoster } from "../tank01ActiveRosterSync";
@@ -582,6 +583,14 @@ export const leagueRouter = router({
     });
   }),
 
+  // Unbounded (unlike playerDirectory's 150-row cap), because this exists purely so the
+  // News page can match Tank01 headlines against the full eligible-position player
+  // universe client-side -- capping it would silently miss real matches for players who
+  // just don't happen to sort into the first 150 alphabetically.
+  newsPlayerIndex: publicProcedure.query(async () => {
+    return unwrap(await supabase.from("player").select("id, display_name, position, nfl_team").in("position", ["QB", "RB", "WR", "TE", "K"])) ?? [];
+  }),
+
   playerDirectory: publicProcedure.input(z.object({ search: z.string().trim().max(64).optional(), position: z.string().trim().max(12).optional(), limit: z.number().int().min(1).max(150).optional() }).optional()).query(async ({ input }) => {
     const limit = input?.limit ?? 75;
     let query = supabase.from("player").select("id, display_name, position, nfl_team, status, metadata").order("display_name").limit(limit);
@@ -687,6 +696,36 @@ export const leagueRouter = router({
   nflProviderStatus: publicProcedure.query(async () => getNFLDataAdapter().status()),
 
   fantasyProsCacheStatus: publicProcedure.query(async () => fantasyProsCacheStatus()),
+
+  // Powers the News page's FantasyPros source. FantasyPros' own news items only carry a
+  // team_id, not position -- rather than round-tripping through their consensus-rankings
+  // endpoints per position (as WRC's model does, since WRC has no authoritative player
+  // table of its own), CVC already has real player records with position/nfl_team, so a
+  // single name-matched lookup against `player` fills in position/team more simply, and
+  // also gives us the exact display_name/nfl_team CVC already uses everywhere else.
+  fantasyProsNews: publicProcedure.input(z.object({ limit: z.number().int().min(1).max(100).optional() }).optional()).query(async ({ input }) => {
+    const result = await getFantasyProsNews(input?.limit ?? 100);
+    const eligible = new Set(["QB", "RB", "WR", "TE", "K"]);
+    const players = unwrap(await supabase.from("player").select("id, display_name, position, nfl_team").in("position", Array.from(eligible))) ?? [];
+    const normalize = (name: string) => name.toLowerCase().replace(/\./g, "").replace(/\b(jr|sr|ii|iii|iv)\b/g, "").replace(/\s+/g, " ").trim();
+    const byName = new Map(players.map(row => [normalize(row.display_name), row]));
+    const injuryKeywords = ["injured", "injury", "questionable", "doubtful", "out", " ir ", "placed on", "ruled out", "limited", "missed", "surgery", "knee", "hamstring", "ankle", "shoulder", "concussion", "rib", "back", "wrist", "hip", "illness"];
+    const items = result.items
+      .map(item => {
+        const match = byName.get(normalize(item.playerName));
+        const text = `${item.title} ${item.description} ${item.impact}`.toLowerCase();
+        return {
+          ...item,
+          playerId: match?.id ?? null,
+          playerName: match?.display_name || item.playerName,
+          position: match?.position ?? null,
+          team: match?.nfl_team || item.team,
+          isInjury: injuryKeywords.some(keyword => text.includes(keyword)),
+        };
+      })
+      .filter(item => item.position && eligible.has(item.position));
+    return { items, source: result.source };
+  }),
 
   refreshFantasyProsPlayers: protectedProcedure.mutation(async ({ ctx }) => {
     await requireCommissioner({ openId: ctx.user.openId });

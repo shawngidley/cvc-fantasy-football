@@ -16,7 +16,7 @@ export type FantasyProsSnapshot = {
 
 type CacheRow = { payload: unknown; fetched_at: string; expires_at: string; last_error: string | null };
 
-async function waitForRequestWindow() {
+export async function waitForRequestWindow() {
   const delay = Math.max(0, MIN_REQUEST_INTERVAL_MS - (Date.now() - lastRequestAt));
   if (delay) await new Promise(resolve => setTimeout(resolve, delay));
   lastRequestAt = Date.now();
