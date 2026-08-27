@@ -588,7 +588,7 @@ export const leagueRouter = router({
   // universe client-side -- capping it would silently miss real matches for players who
   // just don't happen to sort into the first 150 alphabetically.
   newsPlayerIndex: publicProcedure.query(async () => {
-    return unwrap(await supabase.from("player").select("id, display_name, position, nfl_team").in("position", ["QB", "RB", "WR", "TE", "K"])) ?? [];
+    return unwrap(await supabase.from("player").select("id, display_name, position, nfl_team, metadata").in("position", ["QB", "RB", "WR", "TE", "K"])) ?? [];
   }),
 
   playerDirectory: publicProcedure.input(z.object({ search: z.string().trim().max(64).optional(), position: z.string().trim().max(12).optional(), limit: z.number().int().min(1).max(150).optional() }).optional()).query(async ({ input }) => {

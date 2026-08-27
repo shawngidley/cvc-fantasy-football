@@ -51,19 +51,36 @@ export function CvcWrcPlayerNews() {
   useEffect(() => { void loadTank01(); }, []);
 
   const playerByName = useMemo(() => new Map((playerIndex.data ?? []).map(row => [normalizeName(row.display_name), row])), [playerIndex.data]);
+  // Tank01 news items carry their own playerIDs (Tank01's player ID scheme) -- CVC
+  // already links these into player.metadata.tank01_id via tank01ActiveRosterSync /
+  // tank01SeasonStatsSync, so matching on that structured ID is reliable, unlike guessing
+  // a name out of the headline text (see tankMapped below, used only as a fallback).
+  const playerByTank01Id = useMemo(() => {
+    const map = new Map<string, NonNullable<typeof playerIndex.data>[number]>();
+    for (const row of playerIndex.data ?? []) {
+      const id = (row.metadata as Record<string, unknown> | null)?.tank01_id;
+      if (id != null) map.set(String(id), row);
+    }
+    return map;
+  }, [playerIndex.data]);
 
   const tankMapped = useMemo<CvcNewsItem[]>(() => {
     return tankItems.map(item => {
       const title = item.title ?? "";
-      // Tank01 news doesn't carry a player name field directly -- the same
-      // leading-name-before-a-verb heuristic FantasyPros' own feed needs (their
-      // generic items omit player_name too) works here as well, since both are
-      // headline-style "Player Name did X" text.
-      const cleaned = title.replace(/\s*\([^)]*\)/g, "").trim();
-      const verbs = "is|to|week|primed|signing|signs|released|waived|misses|suffers|works|returns|dealing|placed|goes|not|will|plays|starts|exits|practices|participated|expected|day|activated|traded|cut";
-      const match = cleaned.match(new RegExp(`^([A-Z][A-Za-z.'-]*(?:\\s+(?:[A-Z][A-Za-z.'-]*|Jr\\.?|Sr\\.?|II|III)){1,3})(?=\\s+(?:${verbs})\\b)`));
-      const inferredName = match?.[1] ?? "";
-      const player = inferredName ? playerByName.get(normalizeName(inferredName)) : undefined;
+      const byId = item.playerIDs?.map(id => playerByTank01Id.get(String(id))).find(Boolean);
+      let player = byId;
+      if (!player) {
+        // Fallback for items with no matching tank01_id link yet: same leading-name-
+        // before-a-verb heuristic FantasyPros' own feed needs for its unstructured
+        // items. Inherently misses headlines using a verb not in this list (e.g.
+        // "restructures") -- kept only as a fallback since the ID match above covers
+        // most items reliably.
+        const cleaned = title.replace(/\s*\([^)]*\)/g, "").trim();
+        const verbs = "is|to|week|primed|signing|signs|released|waived|misses|suffers|works|returns|dealing|placed|goes|not|will|plays|starts|exits|practices|participated|expected|day|activated|traded|cut|restructures|agrees|clears|questionable|doubtful|out|ruled|active|inactive|elevated|promoted|demoted|extends|tears|fractures|sprains|avoids|undergoes|has|had|remains|continues";
+        const match = cleaned.match(new RegExp(`^([A-Z][A-Za-z.'-]*(?:\\s+(?:[A-Z][A-Za-z.'-]*|Jr\\.?|Sr\\.?|II|III)){1,3})(?=\\s+(?:${verbs})\\b)`));
+        const inferredName = match?.[1] ?? "";
+        player = inferredName ? playerByName.get(normalizeName(inferredName)) : undefined;
+      }
       if (!player) return null as CvcNewsItem | null;
       const text = title.toLowerCase();
       const mapped: CvcNewsItem = {
@@ -74,7 +91,7 @@ export function CvcWrcPlayerNews() {
       };
       return mapped;
     }).filter((item): item is CvcNewsItem => item !== null);
-  }, [tankItems, playerByName]);
+  }, [tankItems, playerByName, playerByTank01Id]);
 
   const fantasyProsMapped = useMemo<CvcNewsItem[]>(() => {
     return (fantasyPros.data?.items ?? []).map(item => ({
