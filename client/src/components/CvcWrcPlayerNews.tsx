@@ -125,7 +125,7 @@ export function CvcWrcPlayerNews() {
 
     {/* TEMP DEBUG BANNER -- remove once the empty-page issue is found */}
     <div className="mb-4 rounded-lg border border-yellow-500 bg-yellow-950/60 p-3 font-mono text-[11px] text-yellow-200">
-      DEBUG2: source={source} | isLoading={String(fantasyPros.isLoading)} | isFetching={String(fantasyPros.isFetching)} | isError={String(fantasyPros.isError)} | error={String(fantasyPros.error?.message ?? "none")} | dataUpdatedAt={new Date(fantasyPros.dataUpdatedAt).toISOString()} | items.length={String(fantasyPros.data?.items?.length ?? "no data")} | data.source={String(fantasyPros.data?.source ?? "n/a")} | mapped.length={fantasyProsMapped.length} | shown.length={shown.length} | render-branch={isUnavailable ? "unavailable" : (tankError && source !== "FANTASYPROS") ? "tankError" : isLoading ? "loading" : shown.length ? "LIST" : "empty-state"}
+      DEBUG3: source={source} | items.length={String(fantasyPros.data?.items?.length ?? "no data")} | data.source={String(fantasyPros.data?.source ?? "n/a")} | payloadType={String(fantasyPros.data?.debugPayloadType ?? "n/a")} | payloadPreview={String(fantasyPros.data?.debugPayloadPreview ?? "n/a")}
     </div>
 
     <div className="overflow-hidden rounded-2xl border border-white/10 bg-white text-cvc-deep">

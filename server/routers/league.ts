@@ -724,7 +724,7 @@ export const leagueRouter = router({
         };
       })
       .filter(item => item.position && eligible.has(item.position));
-    return { items, source: result.source };
+    return { items, source: result.source, debugPayloadType: result.debugPayloadType, debugPayloadPreview: result.debugPayloadPreview };
   }),
 
   refreshFantasyProsPlayers: protectedProcedure.mutation(async ({ ctx }) => {

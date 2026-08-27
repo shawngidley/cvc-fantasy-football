@@ -51,7 +51,7 @@ async function fetchLive(limit: number): Promise<FantasyProsNewsItem[]> {
  * fresh cache when available, otherwise fetch live and cache the result, and on a failed
  * live fetch fall back to serving stale cache (with lastError recorded) rather than a hard
  * error, so a transient FantasyPros outage doesn't blank the News page for CVC owners. */
-export async function getFantasyProsNews(limit = 100): Promise<{ items: FantasyProsNewsItem[]; source: "cache" | "network" | "stale_cache" }> {
+export async function getFantasyProsNews(limit = 100): Promise<{ items: FantasyProsNewsItem[]; source: "cache" | "network" | "stale_cache"; debugPayloadType?: string; debugPayloadPreview?: string }> {
   const cacheRow = unwrap(await supabase.from("provider_cache").select("payload, fetched_at, expires_at, last_error").eq("cache_key", CACHE_KEY).maybeSingle());
   const now = Date.now();
   const cachedItems = (row: typeof cacheRow) => {
@@ -60,7 +60,14 @@ export async function getFantasyProsNews(limit = 100): Promise<{ items: FantasyP
     return Array.isArray(cached) ? cached : cached?.items ?? [];
   };
   if (cacheRow && new Date(cacheRow.expires_at).getTime() > now) {
-    return { items: cachedItems(cacheRow), source: "cache" };
+    const items = cachedItems(cacheRow);
+    // TEMP DIAGNOSTIC: DB confirmed real, non-expired data here via direct SQL, but the
+    // cache branch keeps computing zero items from it -- surfacing the actual runtime
+    // type/shape of cacheRow.payload as received by this code, since something between
+    // "what SQL shows" and "what this extraction produces" doesn't add up.
+    return items.length > 0
+      ? { items, source: "cache" }
+      : { items, source: "cache", debugPayloadType: typeof cacheRow.payload, debugPayloadPreview: JSON.stringify(cacheRow.payload).slice(0, 500) };
   }
   try {
     const items = await fetchLive(limit);
