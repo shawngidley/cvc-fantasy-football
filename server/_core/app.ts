@@ -45,6 +45,7 @@ export function createApp(): Express {
     createExpressMiddleware({
       router: appRouter,
       createContext,
+      allowMethodOverride: true,
     })
   );
   return app;
