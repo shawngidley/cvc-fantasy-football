@@ -34,6 +34,12 @@ export function createApp(): Express {
   app.use(express.urlencoded({ limit: "50mb", extended: true }));
   app.get("/api/tank01/:endpoint", proxyTank01Request);
   app.post("/api/scheduled/tank01-scoring-sync", runTank01ScoringSync);
+  // Defense-in-depth alongside forcing POST client-side (main.tsx): explicitly tell any
+  // intermediate cache (browser, proxy, CDN) never to store tRPC responses. Confirmed
+  // suspicious in production: a GET-based tRPC query kept returning a stale, verified-
+  // wrong result even after the underlying database data was confirmed correct and
+  // browser-side caches (service worker, site data) were cleared.
+  app.use("/api/trpc", (_req, res, next) => { res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate"); next(); });
   app.use(
     "/api/trpc",
     createExpressMiddleware({

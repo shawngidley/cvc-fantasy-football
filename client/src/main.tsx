@@ -33,6 +33,16 @@ const trpcClient = trpc.createClient({
     httpBatchLink({
       url: "/api/trpc",
       transformer: superjson,
+      // Forces POST for every request (queries included). httpBatchLink defaults to GET
+      // for query-type procedures, which is normally a nice caching optimization, but it
+      // also means a query's response is a plain cacheable GET -- an intermediate cache
+      // anywhere in the path (browser HTTP cache, a proxy, Vercel's edge) can serve a
+      // stale response independent of anything client-side like a service worker or
+      // "Clear site data". Confirmed suspicious here: the news feed's underlying data was
+      // verified correct in the database, but the app kept receiving a stale empty result.
+      // POST responses aren't cached by default anywhere, which removes this whole class
+      // of bug even if it wasn't specifically confirmed as the cause.
+      methodOverride: "POST",
       fetch(input, init) {
         return globalThis.fetch(input, {
           ...(init ?? {}),
