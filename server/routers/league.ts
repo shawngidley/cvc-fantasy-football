@@ -78,7 +78,11 @@ async function applyRookieLotteryResults(lotteryId: string, draftId: string, rou
     const franchiseId = franchiseOrder[index];
     return pick ? { pick, franchiseId } : null;
   }).filter((item): item is { pick: { id: string; pick_number: number }; franchiseId: string } => item !== null);
-  await Promise.all(updates.map(({ pick, franchiseId }) => supabase.from("draft_pick").update({ original_franchise_id: franchiseId, current_franchise_id: franchiseId, updated_at: new Date().toISOString() }).eq("id", pick.id).select("id").single().then(unwrap)));
+  // draft_pick has no updated_at column (only created_at) -- including one here
+  // caused every write to be rejected by PostgREST with "Could not find the
+  // 'updated_at' column of 'draft_pick' in the schema cache", so this apply
+  // step failed 100% of the time and the lottery's results never landed.
+  await Promise.all(updates.map(({ pick, franchiseId }) => supabase.from("draft_pick").update({ original_franchise_id: franchiseId, current_franchise_id: franchiseId }).eq("id", pick.id).select("id").single().then(unwrap)));
   unwrap(await supabase.from("rookie_draft_lottery").update({ results_applied: true, updated_at: new Date().toISOString() }).eq("id", lotteryId).select("id").single());
 }
 
