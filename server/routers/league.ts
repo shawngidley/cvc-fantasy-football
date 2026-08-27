@@ -704,13 +704,13 @@ export const leagueRouter = router({
   // single name-matched lookup against `player` fills in position/team more simply, and
   // also gives us the exact display_name/nfl_team CVC already uses everywhere else.
   fantasyProsNews: publicProcedure.input(z.object({ limit: z.number().int().min(1).max(100).optional() }).optional()).query(async ({ input }) => {
-    const result = await getFantasyProsNews(input?.limit ?? 100);
+    const rawItems = await getFantasyProsNews(input?.limit ?? 100);
     const eligible = new Set(["QB", "RB", "WR", "TE", "K"]);
     const players = unwrap(await supabase.from("player").select("id, display_name, position, nfl_team").in("position", Array.from(eligible))) ?? [];
     const normalize = (name: string) => name.toLowerCase().replace(/\./g, "").replace(/\b(jr|sr|ii|iii|iv)\b/g, "").replace(/\s+/g, " ").trim();
     const byName = new Map(players.map(row => [normalize(row.display_name), row]));
     const injuryKeywords = ["injured", "injury", "questionable", "doubtful", "out", " ir ", "placed on", "ruled out", "limited", "missed", "surgery", "knee", "hamstring", "ankle", "shoulder", "concussion", "rib", "back", "wrist", "hip", "illness"];
-    const items = result.items
+    const items = rawItems
       .map(item => {
         const match = byName.get(normalize(item.playerName));
         const text = `${item.title} ${item.description} ${item.impact}`.toLowerCase();
@@ -724,7 +724,7 @@ export const leagueRouter = router({
         };
       })
       .filter(item => item.position && eligible.has(item.position));
-    return { items, source: result.source, debugPayloadType: result.debugPayloadType, debugPayloadPreview: result.debugPayloadPreview };
+    return { items };
   }),
 
   refreshFantasyProsPlayers: protectedProcedure.mutation(async ({ ctx }) => {
