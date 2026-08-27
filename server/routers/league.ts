@@ -957,6 +957,7 @@ export const leagueRouter = router({
       matchups: matchups.map(item => ({
         id: item.id,
         home: franchise(item.home)?.name ?? "Home", away: franchise(item.away)?.name ?? "Away",
+        homeFranchiseId: item.home_franchise_id, awayFranchiseId: item.away_franchise_id,
         homeLogoUrl: franchise(item.home)?.logo_url ?? null, awayLogoUrl: franchise(item.away)?.logo_url ?? null,
         homeScore: item.home_score, awayScore: item.away_score, resultState: item.result_state,
         homeLineup: lineupFor(item.home_franchise_id), awayLineup: lineupFor(item.away_franchise_id),

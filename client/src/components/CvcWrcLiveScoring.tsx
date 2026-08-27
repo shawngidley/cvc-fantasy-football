@@ -2,6 +2,7 @@ import { useMemo, useState } from "react";
 import { getCvcLivePoints, useCvcTank01LiveScores } from "@/hooks/useCvcTank01LiveScores";
 import { trpc } from "@/lib/trpc";
 import { TeamLogo } from "@/components/TeamLogo";
+import { useCvcOwnerAuth } from "@/hooks/useCvcOwnerAuth";
 
 const teamInitial = (name: string) => name.split(/\s+/).map(part => part[0]).join("").slice(0, 2).toUpperCase();
 const opponentLabel = (team: string | null | undefined, matchups: ReturnType<typeof useCvcTank01LiveScores>["nflMatchups"]) => {
@@ -24,9 +25,17 @@ export function CvcWrcLiveScoring() {
   const rules = trpc.league.scoringRules.useQuery();
   const slots = trpc.league.rosterSlots.useQuery();
   const live = useCvcTank01LiveScores(board.data?.week?.weekNumber, 2026, rules.data ?? []);
+  const { isAuthenticated } = useCvcOwnerAuth();
+  const myFranchise = trpc.league.myFranchise.useQuery(undefined, { enabled: isAuthenticated });
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const matchups = board.data?.matchups ?? [];
-  const selected = matchups.find(matchup => matchup.id === selectedId) ?? matchups[0];
+  // Live scoring should open on the logged-in owner's own game by default, not
+  // whichever matchup happens to sort first. Only kicks in until the person
+  // manually picks a different matchup (selectedId then takes over); recomputed
+  // each render (not stored in state) so it also applies once myFranchise loads
+  // in, since that query resolves after the initial render.
+  const myMatchup = myFranchise.data ? matchups.find(matchup => matchup.homeFranchiseId === myFranchise.data.id || matchup.awayFranchiseId === myFranchise.data.id) : undefined;
+  const selected = matchups.find(matchup => matchup.id === selectedId) ?? myMatchup ?? matchups[0];
   const selectedAway = useMemo(() => [...(selected?.awayLineup ?? [])].filter(entry => isStarterSlot(entry.slot)).sort((a, b) => slotRank(a.slot) - slotRank(b.slot)), [selected]);
   const selectedHome = useMemo(() => [...(selected?.homeLineup ?? [])].filter(entry => isStarterSlot(entry.slot)).sort((a, b) => slotRank(a.slot) - slotRank(b.slot)), [selected]);
   // Bench players (assigned_slot_code = 'BENCH') were previously mixed into the same
