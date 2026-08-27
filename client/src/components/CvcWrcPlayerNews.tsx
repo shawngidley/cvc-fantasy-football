@@ -123,6 +123,11 @@ export function CvcWrcPlayerNews() {
 
     <div className="mb-4 flex flex-wrap gap-2">{positions.map(value => <button key={value} onClick={() => setPosition(value)} className={`rounded-full border px-3 py-1.5 text-xs font-black ${position === value ? "border-cvc-accent bg-cvc-accent text-cvc-deep" : "border-white/20 bg-white/5 text-slate-200"}`}>{value}</button>)}</div>
 
+    {/* TEMP DEBUG BANNER -- remove once the empty-page issue is found */}
+    <div className="mb-4 rounded-lg border border-yellow-500 bg-yellow-950/60 p-3 font-mono text-[11px] text-yellow-200">
+      DEBUG2: source={source} | isLoading={String(fantasyPros.isLoading)} | isFetching={String(fantasyPros.isFetching)} | isError={String(fantasyPros.isError)} | error={String(fantasyPros.error?.message ?? "none")} | dataUpdatedAt={new Date(fantasyPros.dataUpdatedAt).toISOString()} | items.length={String(fantasyPros.data?.items?.length ?? "no data")} | data.source={String(fantasyPros.data?.source ?? "n/a")} | mapped.length={fantasyProsMapped.length} | shown.length={shown.length} | render-branch={isUnavailable ? "unavailable" : (tankError && source !== "FANTASYPROS") ? "tankError" : isLoading ? "loading" : shown.length ? "LIST" : "empty-state"}
+    </div>
+
     <div className="overflow-hidden rounded-2xl border border-white/10 bg-white text-cvc-deep">
       <div className="border-b-4 border-cvc-accent px-5 py-4"><div className="flex items-center gap-2"><Newspaper size={17} className="text-cvc-accent" /><span className="text-xs font-black uppercase tracking-[0.16em]">NFL Player News</span><span className="ml-auto text-xs text-slate-500">{isLoading ? "Loading…" : source === "FANTASYPROS" ? `${shown.length} articles · Last 7 days` : `${shown.length} articles`}</span></div></div>
       {isUnavailable ? (
