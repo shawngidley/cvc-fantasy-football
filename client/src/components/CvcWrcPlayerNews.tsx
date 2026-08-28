@@ -31,7 +31,7 @@ export function CvcWrcPlayerNews() {
   const [tankError, setTankError] = useState("");
   const [myTeamOnly, setMyTeamOnly] = useState(false);
   const [position, setPosition] = useState("ALL");
-  const [source, setSource] = useState<NewsSource>("FANTASYPROS");
+  const [source, setSource] = useState<NewsSource>("ALL");
 
   const loadTank01 = async (force = false) => {
     setTankLoading(true); setTankError("");
