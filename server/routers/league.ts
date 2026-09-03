@@ -676,6 +676,47 @@ export const leagueRouter = router({
     return attachSeasonStats(tagged, season.id);
   }),
 
+  // "All Players" tab equivalent -- same eligible-position pool as freeAgents, but
+  // without excluding rostered players. Each rostered player is tagged with their
+  // owning franchise name so the page can show "Rostered · <Franchise>" instead of
+  // "Available".
+  allPlayers: publicProcedure.input(z.object({ search: z.string().trim().max(64).optional(), position: z.string().trim().max(12).optional(), limit: z.number().int().min(1).max(1000).optional() }).optional()).query(async ({ input }) => {
+    const { season } = await getCurrentLeagueAndSeason();
+    const limit = input?.limit ?? 200;
+    const eligiblePositions = ["QB", "RB", "WR", "TE", "K", "DST"];
+    if (input?.position && !eligiblePositions.includes(input.position.toUpperCase())) throw new TRPCError({ code: "BAD_REQUEST", message: "CVC players are limited to QB, RB, WR, TE, K, and D/ST." });
+    let playerQuery = supabase.from("player").select("id, provider, display_name, position, nfl_team, status, metadata").neq("provider", "placeholder").in("position", eligiblePositions).order("display_name").limit(limit);
+    if (input?.search) playerQuery = playerQuery.ilike("display_name", `%${input.search.replace(/[%_]/g, "")}%`);
+    if (input?.position) playerQuery = playerQuery.eq("position", input.position.toUpperCase());
+    const players = unwrap(await playerQuery) ?? [];
+    const assignments = unwrap(await supabase.from("roster_assignment").select("player_id, franchise:franchise_id(name)").eq("season_id", season.id).is("released_at", null).in("player_id", players.map(player => player.id))) ?? [];
+    const franchiseByPlayerId = new Map<string, string>();
+    for (const row of assignments as any[]) {
+      const franchiseField = row.franchise as { name: string } | { name: string }[] | null;
+      const name = Array.isArray(franchiseField) ? franchiseField[0]?.name : franchiseField?.name;
+      if (name) franchiseByPlayerId.set(row.player_id, name);
+    }
+    const tagged = players.map(player => {
+      const franchiseName = franchiseByPlayerId.get(player.id);
+      return franchiseName ? { ...player, rosteredByFranchiseName: franchiseName } : player;
+    });
+    return attachSeasonStats(tagged, season.id);
+  }),
+
+  // Watchlist tab: resolves the owner's saved player ids into full player + season-stat
+  // rows, same shape as freeAgents/allPlayers so the page can render them identically.
+  watchlistPlayers: protectedProcedure.query(async ({ ctx }) => {
+    const owner = await getOwnerAccess({ openId: ctx.user.openId });
+    if (!owner) throw new TRPCError({ code: "FORBIDDEN", message: "A CVC owner session is required." });
+    const franchise = unwrap(await supabase.from("franchise").select("id").eq("current_owner_id", owner.id).eq("is_active", true).limit(1).maybeSingle());
+    if (!franchise) return [];
+    const { season } = await getCurrentLeagueAndSeason();
+    const watched = unwrap(await supabase.from("watchlist").select("player_id").eq("franchise_id", franchise.id)) ?? [];
+    if (!watched.length) return [];
+    const players = unwrap(await supabase.from("player").select("id, provider, display_name, position, nfl_team, status, metadata").in("id", watched.map(row => row.player_id))) ?? [];
+    return attachSeasonStats(players, season.id);
+  }),
+
 
   playerDetail: publicProcedure.input(z.object({ playerId: z.string().uuid() })).query(async ({ input }) => {
     const player = unwrap(await supabase.from("player").select("id, provider, external_id, display_name, position, nfl_team, status, metadata, created_at, updated_at").eq("id", input.playerId).maybeSingle());
@@ -857,6 +898,46 @@ export const leagueRouter = router({
     const franchise = unwrap(await supabase.from("franchise").select("id").eq("current_owner_id", owner.id).eq("is_active", true).limit(1).maybeSingle());
     if (!franchise) return [];
     return unwrap(await supabase.from("faab_bid").select("id, amount, priority, status, submitted_at, player:player_id(id, display_name, position, nfl_team), period:waiver_period_id(label, closes_at, status)").eq("franchise_id", franchise.id).order("submitted_at", { ascending: false }).limit(100)) ?? [];
+  }),
+
+  // CVC has no stored per-franchise FAAB budget column -- computed as an assumed
+  // $1000 starting budget (matching WRC's own displayed value) minus every 'won' bid
+  // this season. If CVC's actual starting FAAB budget differs, update STARTING_FAAB
+  // below to match.
+  myFaabBalance: protectedProcedure.query(async ({ ctx }) => {
+    const STARTING_FAAB = 1000;
+    const owner = await getOwnerAccess({ openId: ctx.user.openId });
+    if (!owner) throw new TRPCError({ code: "FORBIDDEN", message: "A CVC owner session is required." });
+    const franchise = unwrap(await supabase.from("franchise").select("id").eq("current_owner_id", owner.id).eq("is_active", true).limit(1).maybeSingle());
+    if (!franchise) return { balance: null };
+    const { season } = await getCurrentLeagueAndSeason();
+    const periodIds = (unwrap(await supabase.from("waiver_period").select("id").eq("season_id", season.id)) ?? []).map(period => period.id);
+    const spent = periodIds.length
+      ? (unwrap(await supabase.from("faab_bid").select("amount").eq("franchise_id", franchise.id).eq("status", "won").in("waiver_period_id", periodIds)) ?? []).reduce((total, bid) => total + bid.amount, 0)
+      : 0;
+    return { balance: STARTING_FAAB - spent };
+  }),
+
+  watchlist: protectedProcedure.query(async ({ ctx }) => {
+    const owner = await getOwnerAccess({ openId: ctx.user.openId });
+    if (!owner) throw new TRPCError({ code: "FORBIDDEN", message: "A CVC owner session is required." });
+    const franchise = unwrap(await supabase.from("franchise").select("id").eq("current_owner_id", owner.id).eq("is_active", true).limit(1).maybeSingle());
+    if (!franchise) return [];
+    return unwrap(await supabase.from("watchlist").select("player_id, added_at").eq("franchise_id", franchise.id).order("added_at", { ascending: false })) ?? [];
+  }),
+
+  toggleWatchlistPlayer: protectedProcedure.input(z.object({ playerId: z.string().uuid() })).mutation(async ({ ctx, input }) => {
+    const owner = await getOwnerAccess({ openId: ctx.user.openId });
+    if (!owner) throw new TRPCError({ code: "FORBIDDEN", message: "A CVC owner session is required." });
+    const franchise = unwrap(await supabase.from("franchise").select("id").eq("current_owner_id", owner.id).eq("is_active", true).limit(1).maybeSingle());
+    if (!franchise) throw new TRPCError({ code: "FORBIDDEN", message: "Your account is not currently mapped to a CVC franchise." });
+    const existing = unwrap(await supabase.from("watchlist").select("id").eq("franchise_id", franchise.id).eq("player_id", input.playerId).maybeSingle());
+    if (existing) {
+      unwrap(await supabase.from("watchlist").delete().eq("id", existing.id).select("id").single());
+      return { watching: false };
+    }
+    unwrap(await supabase.from("watchlist").insert({ franchise_id: franchise.id, player_id: input.playerId }).select("id").single());
+    return { watching: true };
   }),
 
   waiverBidQueue: protectedProcedure.query(async ({ ctx }) => {
