@@ -47,6 +47,45 @@ async function request<T>(path: string, cacheTtlMs: number): Promise<T> {
   return value;
 }
 
+export type FantasyProsInjury = {
+  playerId: number;
+  name: string;
+  team: string;
+  position: string;
+  status: string;
+  shortStatus: string;
+  injuryType: string;
+  practiceInjuryType: string;
+  comment: string;
+  updated: string;
+  probabilityOfPlaying: number | null;
+  practices: string[];
+};
+
+export async function getFantasyProsInjuries(year: number, week: number): Promise<FantasyProsInjury[]> {
+  const data = asRecord(await request<unknown>(
+    `/nfl/injuries?year=${year}&week=${week}&include_probabilities=true`,
+    20 * 60_000,
+  ));
+  return asArray(data.injuries).map(item => {
+    const row = asRecord(item);
+    return {
+      playerId: asNumber(row.player_id) ?? 0,
+      name: asString(row.name),
+      team: asString(row.team_id),
+      position: asString(row.position_id),
+      status: asString(row.status),
+      shortStatus: asString(row.status_short),
+      injuryType: asString(row.injury_type),
+      practiceInjuryType: asString(row.practice_report_injury_type),
+      comment: asString(row.comment),
+      updated: asString(row.injury_update_date),
+      probabilityOfPlaying: asNumber(row.probability_of_playing),
+      practices: [asString(row.practice_1), asString(row.practice_2), asString(row.practice_3)].filter(Boolean),
+    };
+  }).filter(item => item.name && item.status);
+}
+
 export async function getFantasyProsNews(limit = 50): Promise<FantasyProsNewsItem[]> {
   const query = new URLSearchParams({ limit: String(Math.min(Math.max(limit, 1), 100)), order_by: "updated" });
   const data = asRecord(await request<unknown>(`/nfl/news?${query.toString()}`, 15 * 60_000));

@@ -3,7 +3,7 @@ import { z } from "zod";
 import { protectedProcedure, publicProcedure, router } from "../_core/trpc";
 import { getFantasyProsDataAdapter, getNFLDataAdapter } from "../nflDataAdapter";
 import { fantasyProsCacheStatus, getFantasyProsActivePlayerIds, getFantasyProsRookiePlayerIds } from "../fantasyProsCache";
-import { getFantasyProsNews } from "../fantasyProsNews";
+import { getFantasyProsInjuries, getFantasyProsNews } from "../fantasyProsNews";
 import { syncFantasyProsSnapshot, syncFantasyProsActiveFlags, syncFantasyProsRookieFlags } from "../fantasyProsSync";
 import { syncTank01SeasonStats } from "../tank01SeasonStatsSync";
 import { syncTank01ActiveRoster } from "../tank01ActiveRosterSync";
@@ -725,6 +725,44 @@ export const leagueRouter = router({
       })
       .filter(item => item.position && eligible.has(item.position));
     return { items };
+  }),
+
+  // Powers the Standings page's Injuries panel. Resolves "current week" the same way
+  // liveScoringBoard does (first 'live' week, falling back to first 'upcoming') rather
+  // than computing it from a hardcoded date table like WRC's getCurrentWeek(), since CVC
+  // already tracks this in schedule_week.
+  fantasyProsInjuries: publicProcedure.query(async () => {
+    const { season } = await getCurrentLeagueAndSeason();
+    const weeks = unwrap(await supabase.from("schedule_week").select("id, week_number, status").eq("season_id", season.id).order("week_number")) ?? [];
+    const currentWeek = weeks.find(item => item.status === "live") ?? weeks.find(item => item.status === "upcoming") ?? weeks[0];
+    if (!currentWeek) return { items: [], weekNumber: null };
+    const rawInjuries = await getFantasyProsInjuries(season.year, currentWeek.week_number);
+    const eligible = new Set(["QB", "RB", "WR", "TE", "K"]);
+    const players = unwrap(await supabase.from("player").select("id, display_name, position, nfl_team").in("position", Array.from(eligible))) ?? [];
+    const normalize = (name: string) => name.toLowerCase().replace(/\./g, "").replace(/\b(jr|sr|ii|iii|iv)\b/g, "").replace(/\s+/g, " ").trim();
+    const byName = new Map(players.map(row => [normalize(row.display_name), row]));
+    const items = rawInjuries
+      .map(injury => {
+        const match = byName.get(normalize(injury.name));
+        const status = injury.shortStatus || injury.status || "Injury update";
+        const description = [
+          injury.comment || `${injury.name} is currently listed as ${status}.`,
+          injury.practiceInjuryType ? `Practice injury: ${injury.practiceInjuryType}` : "",
+          injury.probabilityOfPlaying != null ? `${injury.probabilityOfPlaying}% chance to play` : "",
+          injury.practices.length ? `Practice: ${injury.practices.join(" / ")}` : "",
+        ].filter(Boolean).join(" · ");
+        return {
+          playerId: match?.id ?? null,
+          playerName: match?.display_name || injury.name,
+          position: match?.position ?? injury.position,
+          team: match?.nfl_team || injury.team,
+          headline: `${status}${injury.injuryType ? ` · ${injury.injuryType}` : ""}`,
+          description,
+          published: injury.updated || new Date().toISOString(),
+        };
+      })
+      .filter(item => item.position && eligible.has(item.position));
+    return { items, weekNumber: currentWeek.week_number };
   }),
 
   refreshFantasyProsPlayers: protectedProcedure.mutation(async ({ ctx }) => {
