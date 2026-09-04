@@ -9,6 +9,7 @@
     "api/index.js": { "maxDuration": 120 }
   },
   "crons": [
-    { "path": "/api/scheduled/tank01-scoring-sync", "schedule": "*/5 * * * *" }
+    { "path": "/api/scheduled/tank01-scoring-sync", "schedule": "*/5 * * * *" },
+    { "path": "/api/scheduled/nfl-team-assignment-sync", "schedule": "0 9 * * *" }
   ]
 }
