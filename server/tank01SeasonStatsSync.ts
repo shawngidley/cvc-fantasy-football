@@ -32,7 +32,7 @@ function asRecord(value: unknown): Record<string, string | number | undefined> {
 // Tank01 field name for the team abbreviation isn't confirmed against a live response in
 // this codebase, so check several plausible keys defensively (matching the cautious style
 // already used for other unverified Tank01 fields, e.g. useTeamSchedule's comment in
-// CvcWrcPlayerProfile.tsx) and simply leave nfl_team unchanged if none are present.
+// CvcPlayerProfile.tsx) and simply leave nfl_team unchanged if none are present.
 export function extractCurrentTeam(row: Record<string, unknown>): string | null {
   const raw = row.team ?? row.teamAbv ?? row.currentTeam ?? row.team_abv ?? row.nflTeam;
   if (raw === undefined || raw === null) return null;

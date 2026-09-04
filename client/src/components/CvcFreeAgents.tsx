@@ -68,7 +68,7 @@ function PlayerCell({ player, isWatched, onToggleWatch, canWatch }: { player: an
   </div>;
 }
 
-export function CvcWrcFreeAgents() {
+export function CvcFreeAgents() {
   const { owner } = useCvcOwnerAuth();
   const utils = trpc.useUtils();
   const [tab, setTab] = useState<"free-agents" | "all-players" | "watchlist" | "manage-bids">("free-agents");

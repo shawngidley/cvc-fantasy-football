@@ -4,7 +4,7 @@ import { trpc } from "@/lib/trpc";
 
 function money(value: unknown) { return `$${Number(value ?? 0).toFixed(2)}`; }
 
-export function CvcWrcMoney() {
+export function CvcMoney() {
   const overview = trpc.league.overview.useQuery();
   const teams = [...(overview.data?.franchises ?? [])].sort((a, b) => Number(a.display_order ?? 999) - Number(b.display_order ?? 999));
   const owedTotal = teams.reduce((sum, team) => sum + Number(team.moneyOwed ?? 0), 0);

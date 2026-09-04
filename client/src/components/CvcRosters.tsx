@@ -52,7 +52,7 @@ function RosterCard({ franchise, mine }: { franchise: any; mine?: boolean }) {
   </section>;
 }
 
-export function CvcWrcRosters() {
+export function CvcRosters() {
   const overview = trpc.league.overview.useQuery(); const { owner } = useCvcOwnerAuth(); const [division, setDivision] = useState("All");
   const franchises = overview.data?.franchises ?? [];
   const extraDivisions = Array.from(new Set(franchises.map(team => team.division_name).filter((name): name is string => Boolean(name && name !== "East" && name !== "West"))));

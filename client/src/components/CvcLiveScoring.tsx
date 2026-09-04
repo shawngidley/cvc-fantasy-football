@@ -20,7 +20,7 @@ const SLOT_ORDER = ["QB", "RB1", "RB2", "WR1", "WR2", "TE", "FLEX", "K", "DST"];
 const slotRank = (code: unknown) => { const rank = SLOT_ORDER.indexOf(String(code ?? "").toUpperCase()); return rank === -1 ? SLOT_ORDER.length : rank; };
 const isStarterSlot = (code: unknown) => SLOT_ORDER.includes(String(code ?? "").toUpperCase());
 
-export function CvcWrcLiveScoring() {
+export function CvcLiveScoring() {
   const board = trpc.league.liveScoringBoard.useQuery();
   const rules = trpc.league.scoringRules.useQuery();
   const slots = trpc.league.rosterSlots.useQuery();

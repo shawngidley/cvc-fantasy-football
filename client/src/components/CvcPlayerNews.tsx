@@ -19,7 +19,7 @@ function normalizeName(name: string) {
   return name.toLowerCase().replace(/\./g, "").replace(/\b(jr|sr|ii|iii|iv)\b/g, "").replace(/\s+/g, " ").trim();
 }
 
-export function CvcWrcPlayerNews() {
+export function CvcPlayerNews() {
   const auth = useCvcOwnerAuth();
   const mine = trpc.league.myFranchise.useQuery(undefined, { enabled: auth.isAuthenticated });
   const roster = trpc.league.franchiseRoster.useQuery({ franchiseId: mine.data?.id ?? "00000000-0000-0000-0000-000000000000" }, { enabled: Boolean(mine.data?.id) });

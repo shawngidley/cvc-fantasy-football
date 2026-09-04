@@ -9,7 +9,7 @@ const iconFor = (type: string) => type === "add" || type === "waiver_award" ? <A
 const labelFor = (type: string) => type.replaceAll("_", " ").toUpperCase();
 const isAutoCut = (item: any) => item.transaction_type === "drop" && item.details?.source === "auto_cut_sweep";
 
-export function CvcWrcTransactions() {
+export function CvcTransactions() {
   const activity = trpc.league.activity.useQuery(); const [filter, setFilter] = useState("ALL"); const [team, setTeam] = useState("ALL");
   const { owner } = useCvcOwnerAuth();
   const isCommissioner = owner ? ["commissioner", "administrator"].includes(owner.role) : false;

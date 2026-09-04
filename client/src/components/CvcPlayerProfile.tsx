@@ -23,7 +23,7 @@ function looksLikeInjury(text: string) { return /injur|questionable|doubtful| ru
 const normalizeTeam = (team: string | null | undefined) => ({ kan: "kc", tam: "tb", arz: "ari", jax: "jac", was: "wsh" }[(team ?? "").toLowerCase()] ?? (team ?? "").toLowerCase());
 
 /** Fetches Tank01's getNFLPlayerInfo for one player, cached by name for the session. Every
- * field below beyond `espnHeadshot` (already used in Protections.tsx/CvcWrcOwnerLineup.tsx)
+ * field below beyond `espnHeadshot` (already used in Protections.tsx/CvcOwnerLineup.tsx)
  * is read defensively and simply omitted if Tank01 doesn't return it — this endpoint requires
  * TANK01_RAPIDAPI_KEY, which is not configured in every environment. */
 function useTank01PlayerInfo(displayName: string | undefined) {
@@ -44,7 +44,7 @@ function useTank01PlayerInfo(displayName: string | undefined) {
   return { row, loading };
 }
 
-/** Reuses the same cached feed as CvcWrcPlayerNews.tsx, filtered client-side to one player's
+/** Reuses the same cached feed as CvcPlayerNews.tsx, filtered client-side to one player's
  * name — cheaper than a dedicated per-player fetch and consistent with the existing pattern. */
 function usePlayerNews(displayName: string | undefined) {
   const [items, setItems] = useState<TankNewsItem[]>([]);
@@ -105,7 +105,7 @@ function gameOpponent(game: TankRecord, team: string) {
   return away.toUpperCase() === abv ? { opponent: home, atOrVs: "@" } : { opponent: away, atOrVs: "vs" };
 }
 
-export function CvcWrcPlayerProfile() {
+export function CvcPlayerProfile() {
   const [, params] = useRoute("/player/:playerId");
   const playerId = params?.playerId ?? "";
   const valid = /^[0-9a-f]{8}-[0-9a-f-]{27}$/i.test(playerId);
@@ -113,7 +113,7 @@ export function CvcWrcPlayerProfile() {
   const [tab, setTab] = useState<"stats" | "schedule" | "gamelog">("stats");
   const { row: tank, loading: loadingInfo } = useTank01PlayerInfo(detail.data?.display_name);
   const { items: news, loading: loadingNews } = usePlayerNews(detail.data?.display_name);
-  // Same source and matching approach as the main News page (CvcWrcPlayerNews.tsx) --
+  // Same source and matching approach as the main News page (CvcPlayerNews.tsx) --
   // fetches the general FantasyPros feed and filters client-side to this one player via
   // the shared canonical name normalizer, rather than a separate per-player API call.
   const fantasyProsNews = trpc.league.fantasyProsNews.useQuery({ limit: 100 }, { staleTime: 15 * 60_000 });

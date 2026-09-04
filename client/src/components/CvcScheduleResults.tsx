@@ -25,7 +25,7 @@ function ResultState({ state }: { state: string }) {
   return <span className="rounded-full bg-slate-200 px-2 py-1 text-[10px] font-black uppercase tracking-[0.12em] text-slate-600">Scheduled</span>;
 }
 
-export function CvcWrcScheduleResults() {
+export function CvcScheduleResults() {
   const overview = trpc.league.overview.useQuery();
   const groups = useMemo<Array<{ week: number; label: string; matchups: Matchup[] }>>(() => {
     const rows = [...((overview.data?.matchups ?? []) as Matchup[])].sort((a, b) => Number(a.week?.week_number ?? 0) - Number(b.week?.week_number ?? 0));

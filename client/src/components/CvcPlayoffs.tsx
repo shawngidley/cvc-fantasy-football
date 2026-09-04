@@ -5,7 +5,7 @@ function BracketGame({ title, week, first, second, championship = false }: { tit
   return <section className="overflow-hidden rounded-xl border border-white/10 bg-white text-cvc-deep shadow-[0_8px_24px_rgba(0,0,0,0.16)]"><div className={championship ? "flex items-center gap-2 bg-gradient-to-r from-[#dcae37] to-[#f3cd65] px-4 py-2.5" : "border-b-4 border-cvc-accent bg-[#123040] px-4 py-2.5 text-white"}>{championship ? <Trophy size={16}/> : null}<p className="font-display text-sm uppercase tracking-[0.08em]">{title} <span className="text-xs font-sans font-semibold opacity-70">— {week}</span></p></div><div className="px-4 py-2">{[first, second].map((name, index) => <div key={name} className={index ? "flex items-center justify-between py-2" : "flex items-center justify-between border-b border-slate-200 py-2"}><span className="text-sm font-semibold">{name}</span><span className="font-display text-lg text-slate-400">—</span></div>)}</div></section>;
 }
 
-export function CvcWrcPlayoffs() {
+export function CvcPlayoffs() {
   const overview = trpc.league.overview.useQuery();
   if (overview.isLoading) return <div className="rounded-xl border border-dashed border-white/20 bg-white/5 p-7 text-center text-sm text-slate-300">Loading CVC postseason configuration…</div>;
   if (overview.error || !overview.data?.season) return <div className="rounded-xl border border-dashed border-white/20 bg-white/5 p-7 text-center text-sm text-slate-300">CVC playoff configuration is not available yet.</div>;

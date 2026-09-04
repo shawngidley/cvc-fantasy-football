@@ -12,7 +12,7 @@ function activeTab(): DraftTab {
 
 const dollars = (value: number | null | undefined) => `$${Number(value ?? 0).toFixed(0)}`;
 
-export function CvcWrcDraftHub() {
+export function CvcDraftHub() {
   const [, setLocation] = useLocation();
   const [tab, setTab] = useState<DraftTab>(activeTab);
   const [search, setSearch] = useState("");

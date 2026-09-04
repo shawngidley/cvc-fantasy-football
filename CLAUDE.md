@@ -66,7 +66,7 @@ Procedure levels (`server/_core/trpc.ts`): `publicProcedure`, `protectedProcedur
 
 ### Frontend structure
 
-Vite + React 19 + wouter (not react-router) for routing, TanStack Query + tRPC React client (`client/src/lib/trpc.ts`), Tailwind v4, shadcn/radix-based `components/ui/`. Path aliases: `@/*` → `client/src/*`, `@shared/*` → `shared/*` (defined in both `tsconfig.json` and `vite.config.ts`/`vitest.config.ts` — keep them in sync if changed). Most CVC page-level views are large single components under `client/src/components/CvcWrc*.tsx` rendered by the generic `client/src/pages/LeaguePages.tsx` (`<LeaguePage kind="...">` switch) rather than one component per route file.
+Vite + React 19 + wouter (not react-router) for routing, TanStack Query + tRPC React client (`client/src/lib/trpc.ts`), Tailwind v4, shadcn/radix-based `components/ui/`. Path aliases: `@/*` → `client/src/*`, `@shared/*` → `shared/*` (defined in both `tsconfig.json` and `vite.config.ts`/`vitest.config.ts` — keep them in sync if changed). Most CVC page-level views are large single components under `client/src/components/Cvc*.tsx` rendered by the generic `client/src/pages/LeaguePages.tsx` (`<LeaguePage kind="...">` switch) rather than one component per route file.
 
 ### Environment variables
 

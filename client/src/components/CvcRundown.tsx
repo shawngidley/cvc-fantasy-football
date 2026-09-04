@@ -12,7 +12,7 @@ type Matchup = {
   week?: { week_number?: number | null; label?: string | null } | null;
 };
 
-export function CvcWrcRundown() {
+export function CvcRundown() {
   const overview = trpc.league.overview.useQuery();
   const mine = trpc.league.myFranchise.useQuery();
   const groups = useMemo<Array<{ week: number; label: string; matchups: Matchup[] }>>(() => {

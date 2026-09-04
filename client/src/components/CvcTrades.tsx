@@ -43,7 +43,7 @@ function TradeSidePicker({ title, players, picks, selectedPlayerIds, selectedPic
   </section>;
 }
 
-export function CvcWrcTrades() {
+export function CvcTrades() {
   const auth = useCvcOwnerAuth();
   const mine = trpc.league.myFranchise.useQuery(undefined, { enabled: auth.isAuthenticated });
   const overview = trpc.league.overview.useQuery();

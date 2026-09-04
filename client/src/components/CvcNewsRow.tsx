@@ -15,7 +15,7 @@ export type CvcNewsItem = {
 };
 
 // Same per-row lazy headshot fetch + module-level cache pattern already used in
-// CvcWrcPlayerProfile.tsx, CvcWrcOwnerLineup.tsx, and Protections.tsx -- kept
+// CvcPlayerProfile.tsx, CvcOwnerLineup.tsx, and Protections.tsx -- kept
 // consistent with those rather than introducing a shared hook none of them use.
 const headshotCache = new Map<string, string | null>();
 function useHeadshot(playerName: string, pos: string) {

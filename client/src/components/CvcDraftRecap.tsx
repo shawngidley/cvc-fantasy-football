@@ -210,7 +210,7 @@ function FragmentRow({ pick, showRoundDivider }: { pick: any; showRoundDivider: 
   </>;
 }
 
-export function CvcWrcDraftRecap() {
+export function CvcDraftRecap() {
   const { owner } = useCvcOwnerAuth();
   const isCommissioner = ["commissioner", "administrator"].includes(owner?.role ?? "");
   const board = trpc.league.draftBoard.useQuery();
