@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "NODE_ENV=development tsx watch server/_core/index.ts",
     "build": "vite build && esbuild server/_core/index.ts --platform=node --packages=external --bundle --format=esm --outdir=dist",
-    "bundle:api": "esbuild server/_core/vercelHandler.ts --platform=node --packages=external --bundle --format=esm --outfile=api/index.js && esbuild server/_core/vercelScheduledTank01.ts --platform=node --packages=external --bundle --format=esm --outfile=api/scheduled/tank01-scoring-sync.js && esbuild server/_core/vercelScheduledNflTeams.ts --platform=node --packages=external --bundle --format=esm --outfile=api/scheduled/nfl-team-assignment-sync.js",
+    "bundle:api": "esbuild server/_core/vercelHandler.ts --platform=node --packages=external --bundle --format=esm --outfile=api/index.js && esbuild server/_core/vercelScheduledTank01.ts --platform=node --packages=external --bundle --format=esm --outfile=api/scheduled/tank01-scoring-sync.js && esbuild server/_core/vercelScheduledNflTeams.ts --platform=node --packages=external --bundle --format=esm --outfile=api/scheduled/nfl-team-assignment-sync.js && esbuild server/_core/vercelScheduledWaiverResolution.ts --platform=node --packages=external --bundle --format=esm --outfile=api/scheduled/waiver-resolution.js",
     "start": "NODE_ENV=production node dist/index.js",
     "check": "tsc --noEmit",
     "format": "prettier --write .",

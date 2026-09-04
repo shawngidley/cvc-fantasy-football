@@ -164,6 +164,15 @@ function SeasonStatsSyncModule() {
     },
     onError: error => toast.error(error.message),
   });
+  const [waiverResult, setWaiverResult] = useState<null | { resolved: boolean; message?: string; periodLabel?: string; playersContested?: number; awarded?: { playerName: string; franchiseName: string; amount: number; droppedPlayerName: string | null }[]; skipped?: { playerName: string; franchiseName: string; reason: string }[]; nextPeriodLabel?: string | null }>(null);
+  const runWaiverResolution = trpc.league.runWaiverResolution.useMutation({
+    onSuccess: async data => {
+      setWaiverResult(data);
+      await Promise.all([utils.league.freeAgents.invalidate(), utils.league.allPlayers.invalidate(), utils.league.waiverBidQueue.invalidate()]);
+      toast.success(data.resolved ? `Resolved ${data.periodLabel}: ${data.awarded?.length ?? 0} player(s) awarded.` : (data.message ?? "No period was due yet."));
+    },
+    onError: error => toast.error(error.message),
+  });
   const syncActive = trpc.league.syncTank01ActiveRoster.useMutation({
     onSuccess: async data => {
       setActiveResult(data);
@@ -212,6 +221,18 @@ function SeasonStatsSyncModule() {
       {nflTeamResult ? <div className="mt-3 rounded-md border border-slate-200 bg-white p-3 text-xs text-slate-600">
         <p><b className="text-cvc-deep">Roster rows fetched:</b> {nflTeamResult.rosterRowsFetched} · <b className="text-cvc-deep">Players matched:</b> {nflTeamResult.matchedPlayers} · <b className="text-cvc-deep">Corrected:</b> {nflTeamResult.updated}</p>
         {nflTeamResult.updatedPlayers.length ? <ul className="mt-2 space-y-0.5">{nflTeamResult.updatedPlayers.map(item => <li key={item.displayName}>{item.displayName}: {item.from ?? "—"} → {item.to}</li>)}</ul> : null}
+      </div> : null}
+    </div>
+    <div className="rounded-lg border border-dashed border-cvc-deep/20 bg-cvc-tint p-4">
+      <p className="text-sm font-semibold text-cvc-deep">Waiver resolution</p>
+      <p className="mt-1 text-xs leading-5 text-slate-500">Runs automatically every Thursday and Sunday at 9:00am ET (highest bid wins each player; ties go to the worse-record team; awarded players join the roster at their bid as salary and can't be cut until the following resolution). This button re-runs the exact same engine on demand — safe to click any time, including outside the scheduled window; it only does anything if a waiver period is currently past its close time.</p>
+      <button type="button" className="cvc-button-compact mt-3" disabled={runWaiverResolution.isPending} onClick={() => runWaiverResolution.mutate()}><Save size={14} /> {runWaiverResolution.isPending ? "Resolving…" : "Run waiver resolution now"}</button>
+      {waiverResult ? <div className="mt-3 rounded-md border border-slate-200 bg-white p-3 text-xs text-slate-600">
+        {waiverResult.resolved ? <>
+          <p><b className="text-cvc-deep">Resolved:</b> {waiverResult.periodLabel} · <b className="text-cvc-deep">Players contested:</b> {waiverResult.playersContested} · <b className="text-cvc-deep">Next period:</b> {waiverResult.nextPeriodLabel ?? "—"}</p>
+          {waiverResult.awarded?.length ? <div className="mt-2"><p className="font-semibold text-cvc-deep">Awarded</p><ul className="mt-1 space-y-0.5">{waiverResult.awarded.map((item, index) => <li key={index}>{item.franchiseName} won {item.playerName} for ${item.amount}{item.droppedPlayerName ? ` (dropped ${item.droppedPlayerName})` : ""}</li>)}</ul></div> : null}
+          {waiverResult.skipped?.length ? <div className="mt-2"><p className="font-semibold text-amber-700">Skipped</p><ul className="mt-1 space-y-0.5">{waiverResult.skipped.map((item, index) => <li key={index}>{item.franchiseName} on {item.playerName}: {item.reason}</li>)}</ul></div> : null}
+        </> : <p>{waiverResult.message}</p>}
       </div> : null}
     </div>
     <div className="rounded-lg border border-dashed border-red-300 bg-red-50 p-4">

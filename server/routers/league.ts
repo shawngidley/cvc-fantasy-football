@@ -5,6 +5,9 @@ import { getFantasyProsDataAdapter, getNFLDataAdapter } from "../nflDataAdapter"
 import { fantasyProsCacheStatus, getFantasyProsActivePlayerIds, getFantasyProsRookiePlayerIds } from "../fantasyProsCache";
 import { getFantasyProsInjuries, getFantasyProsNews } from "../fantasyProsNews";
 import { syncNflTeamAssignments } from "../nflTeamAssignmentSync";
+import { getFaabBalance, MAX_ROSTER_SIZE, STARTING_FAAB } from "../waiverRules";
+import { resolveOpenWaiverPeriod } from "../waiverResolution";
+import { computeNextResolutionTime } from "../waiverResolutionTiming";
 import { syncFantasyProsSnapshot, syncFantasyProsActiveFlags, syncFantasyProsRookieFlags } from "../fantasyProsSync";
 import { syncTank01SeasonStats } from "../tank01SeasonStatsSync";
 import { syncTank01ActiveRoster } from "../tank01ActiveRosterSync";
@@ -877,7 +880,7 @@ export const leagueRouter = router({
     return period;
   }),
 
-  submitFaabBid: protectedProcedure.input(z.object({ playerId: z.string().uuid(), amount: z.number().int().min(0).max(10000), priority: z.number().int().min(1).max(99).default(1), dropPlayerId: z.string().uuid().optional() })).mutation(async ({ ctx, input }) => {
+  submitFaabBid: protectedProcedure.input(z.object({ playerId: z.string().uuid(), amount: z.number().int().min(1).max(30), maxPlayersDesired: z.number().int().min(1).max(10).default(1), priority: z.number().int().min(1).max(99).default(1), dropPlayerId: z.string().uuid().optional() })).mutation(async ({ ctx, input }) => {
     const owner = await getOwnerAccess({ openId: ctx.user.openId });
     if (!owner) throw new TRPCError({ code: "FORBIDDEN", message: "A CVC owner session is required to submit a waiver claim." });
     const { league, season } = await getCurrentLeagueAndSeason();
@@ -886,6 +889,15 @@ export const leagueRouter = router({
     const now = new Date().toISOString();
     const period = unwrap(await supabase.from("waiver_period").select("id, label").eq("season_id", season.id).eq("status", "open").lte("opens_at", now).gte("closes_at", now).order("closes_at").limit(1).maybeSingle());
     if (!period) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "There is no open CVC waiver period." });
+    // $30 season cap: a bid can't itself exceed what's left, accounting for every other
+    // *pending* bid this franchise already has open this period too (not just already-won
+    // bids) -- otherwise an owner could submit several $30 bids simultaneously and only
+    // get caught at resolution time, when it's too late to bid smarter.
+    const balance = await getFaabBalance(franchise.id, season.id);
+    const otherPendingThisPeriod = (unwrap(await supabase.from("faab_bid").select("amount").eq("waiver_period_id", period.id).eq("franchise_id", franchise.id).eq("status", "pending").neq("player_id", input.playerId)) ?? []).reduce((total, bid) => total + bid.amount, 0);
+    if (input.amount > balance - otherPendingThisPeriod) {
+      throw new TRPCError({ code: "BAD_REQUEST", message: `This bid exceeds your remaining CVC FAAB budget. You have $${balance} left this season${otherPendingThisPeriod ? ` ($${otherPendingThisPeriod} already committed to other pending bids this period)` : ""}.` });
+    }
     const [player, activeAssignment] = await Promise.all([
       supabase.from("player").select("id, display_name").eq("id", input.playerId).maybeSingle(),
       supabase.from("roster_assignment").select("id").eq("season_id", season.id).eq("player_id", input.playerId).is("released_at", null).limit(1).maybeSingle(),
@@ -894,10 +906,13 @@ export const leagueRouter = router({
     if (!playerRow) throw new TRPCError({ code: "NOT_FOUND", message: "CVC player was not found." });
     if (unwrap(activeAssignment)) throw new TRPCError({ code: "BAD_REQUEST", message: "Rostered players cannot be claimed through waivers." });
     if (input.dropPlayerId) {
-      const drop = unwrap(await supabase.from("roster_assignment").select("id").eq("season_id", season.id).eq("franchise_id", franchise.id).eq("player_id", input.dropPlayerId).is("released_at", null).maybeSingle());
+      const drop = unwrap(await supabase.from("roster_assignment").select("id, locked_until").eq("season_id", season.id).eq("franchise_id", franchise.id).eq("player_id", input.dropPlayerId).is("released_at", null).maybeSingle());
       if (!drop) throw new TRPCError({ code: "BAD_REQUEST", message: "The selected drop player is not on your active CVC roster." });
+      if (drop.locked_until && new Date(drop.locked_until).getTime() > Date.now()) {
+        throw new TRPCError({ code: "BAD_REQUEST", message: `This player was just acquired via waivers and can't be cut until the next waiver resolution (${new Date(drop.locked_until).toLocaleString("en-US", { weekday: "short", hour: "numeric", minute: "2-digit", timeZoneName: "short" })}).` });
+      }
     }
-    const bid = unwrap(await supabase.from("faab_bid").upsert({ waiver_period_id: period.id, franchise_id: franchise.id, player_id: input.playerId, drop_player_id: input.dropPlayerId ?? null, amount: input.amount, priority: input.priority, status: "pending" }, { onConflict: "waiver_period_id,franchise_id,player_id" }).select("id, amount, priority, status").single());
+    const bid = unwrap(await supabase.from("faab_bid").upsert({ waiver_period_id: period.id, franchise_id: franchise.id, player_id: input.playerId, drop_player_id: input.dropPlayerId ?? null, amount: input.amount, priority: input.priority, max_players_desired: input.maxPlayersDesired, status: "pending" }, { onConflict: "waiver_period_id,franchise_id,player_id" }).select("id, amount, priority, status").single());
     if (!bid) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "CVC waiver claim could not be saved." });
     await createAuditEvent(league.id, season.id, owner.id, "faab_bid", bid.id, "submitted", `Submitted ${period.label} claim for ${playerRow.display_name}`);
     return bid;
@@ -911,22 +926,15 @@ export const leagueRouter = router({
     return unwrap(await supabase.from("faab_bid").select("id, amount, priority, status, submitted_at, player:player_id(id, display_name, position, nfl_team), period:waiver_period_id(label, closes_at, status)").eq("franchise_id", franchise.id).order("submitted_at", { ascending: false }).limit(100)) ?? [];
   }),
 
-  // CVC has no stored per-franchise FAAB budget column -- computed as an assumed
-  // $1000 starting budget (matching WRC's own displayed value) minus every 'won' bid
-  // this season. If CVC's actual starting FAAB budget differs, update STARTING_FAAB
-  // below to match.
+  // CVC's real season FAAB budget: $30 per franchise, spent in $1 increments across the
+  // whole season (not per-bid).
   myFaabBalance: protectedProcedure.query(async ({ ctx }) => {
-    const STARTING_FAAB = 1000;
     const owner = await getOwnerAccess({ openId: ctx.user.openId });
     if (!owner) throw new TRPCError({ code: "FORBIDDEN", message: "A CVC owner session is required." });
     const franchise = unwrap(await supabase.from("franchise").select("id").eq("current_owner_id", owner.id).eq("is_active", true).limit(1).maybeSingle());
     if (!franchise) return { balance: null };
     const { season } = await getCurrentLeagueAndSeason();
-    const periodIds = (unwrap(await supabase.from("waiver_period").select("id").eq("season_id", season.id)) ?? []).map(period => period.id);
-    const spent = periodIds.length
-      ? (unwrap(await supabase.from("faab_bid").select("amount").eq("franchise_id", franchise.id).eq("status", "won").in("waiver_period_id", periodIds)) ?? []).reduce((total, bid) => total + bid.amount, 0)
-      : 0;
-    return { balance: STARTING_FAAB - spent };
+    return { balance: await getFaabBalance(franchise.id, season.id) };
   }),
 
   watchlist: protectedProcedure.query(async ({ ctx }) => {
@@ -956,9 +964,26 @@ export const leagueRouter = router({
     const { season } = await getCurrentLeagueAndSeason();
     const periodIds = (unwrap(await supabase.from("waiver_period").select("id").eq("season_id", season.id)) ?? []).map(period => period.id);
     if (!periodIds.length) return [];
-    return unwrap(await supabase.from("faab_bid").select("id, amount, priority, status, submitted_at, player:player_id(id, display_name, position, nfl_team), franchise:franchise_id(id, name), period:waiver_period_id(id, label, closes_at, status)").in("waiver_period_id", periodIds).eq("status", "pending").order("amount", { ascending: false }).order("priority").limit(200)) ?? [];
+    return unwrap(await supabase.from("faab_bid").select("id, amount, priority, max_players_desired, status, submitted_at, player:player_id(id, display_name, position, nfl_team), franchise:franchise_id(id, name), period:waiver_period_id(id, label, closes_at, status)").in("waiver_period_id", periodIds).eq("status", "pending").order("amount", { ascending: false }).order("priority").limit(200)) ?? [];
   }),
 
+  // Automated resolution runs via the Thursday/Sunday 9am cron (see
+  // server/_core/vercelScheduledWaiverResolution.ts); this is a manual backup/testing
+  // trigger for the commissioner, using the exact same engine, so "run it early" or "the
+  // cron didn't fire, run it now" never requires a code change.
+  runWaiverResolution: protectedProcedure.mutation(async ({ ctx }) => {
+    await requireCommissioner({ openId: ctx.user.openId });
+    const result = await resolveOpenWaiverPeriod();
+    if (!result) return { resolved: false as const, message: "No CVC waiver period is currently past its close time." };
+    return { resolved: true as const, ...result };
+  }),
+
+  // Manual single-bid override for the commissioner (e.g. correcting a mistaken
+  // automated result, or awarding something outside the normal cycle). Performs the
+  // exact same award steps as the automated Thursday/Sunday engine
+  // (resolveOpenWaiverPeriod in waiverResolution.ts) -- contract at the bid salary,
+  // acquired_via/locked_until on the roster assignment -- rather than the old version of
+  // this endpoint, which only created a bare roster_assignment with no contract at all.
   resolveFaabBid: protectedProcedure.input(z.object({ bidId: z.string().uuid(), outcome: z.enum(["won", "lost"]) })).mutation(async ({ ctx, input }) => {
     const commissioner = await requireCommissioner({ openId: ctx.user.openId });
     const { league, season } = await getCurrentLeagueAndSeason();
@@ -968,9 +993,20 @@ export const leagueRouter = router({
     if (input.outcome === "won") {
       const active = unwrap(await supabase.from("roster_assignment").select("id").eq("season_id", season.id).eq("player_id", bid.player_id).is("released_at", null).limit(1).maybeSingle());
       if (active) throw new TRPCError({ code: "BAD_REQUEST", message: "This player is no longer available for a CVC waiver award." });
-      if (bid.drop_player_id) unwrap(await supabase.from("roster_assignment").update({ roster_state: "released", released_at: new Date().toISOString() }).eq("season_id", season.id).eq("franchise_id", bid.franchise_id).eq("player_id", bid.drop_player_id).is("released_at", null).select("id"));
-      unwrap(await supabase.from("roster_assignment").insert({ season_id: season.id, franchise_id: bid.franchise_id, player_id: bid.player_id, roster_state: "waivers" }).select("id").single());
-      unwrap(await supabase.from("faab_bid").update({ status: "lost", resolved_at: new Date().toISOString() }).eq("waiver_period_id", bid.waiver_period_id).eq("player_id", bid.player_id).eq("status", "pending").neq("id", bid.id).select("id"));
+      const rosterRows = unwrap(await supabase.from("roster_assignment").select("id").eq("season_id", season.id).eq("franchise_id", bid.franchise_id).is("released_at", null)) ?? [];
+      if (rosterRows.length - (bid.drop_player_id ? 1 : 0) + 1 > MAX_ROSTER_SIZE) {
+        throw new TRPCError({ code: "BAD_REQUEST", message: `Awarding this player would put ${bid.franchise?.[0]?.name ?? "this franchise"} over the ${MAX_ROSTER_SIZE}-player CVC roster limit.` });
+      }
+      const now = new Date().toISOString();
+      if (bid.drop_player_id) {
+        unwrap(await supabase.from("roster_assignment").update({ roster_state: "released", released_at: now }).eq("season_id", season.id).eq("franchise_id", bid.franchise_id).eq("player_id", bid.drop_player_id).is("released_at", null).select("id"));
+        unwrap(await supabase.from("player_contract").update({ contract_status: "released" }).eq("season_id", season.id).eq("franchise_id", bid.franchise_id).eq("player_id", bid.drop_player_id).select("id"));
+      }
+      const period = unwrap(await supabase.from("waiver_period").select("closes_at").eq("id", bid.waiver_period_id).maybeSingle());
+      const lockedUntil = computeNextResolutionTime(period?.closes_at ? new Date(period.closes_at) : new Date()).toISOString();
+      unwrap(await supabase.from("roster_assignment").insert({ season_id: season.id, franchise_id: bid.franchise_id, player_id: bid.player_id, roster_state: "bench", acquired_via: "waiver_bid", locked_until: lockedUntil }).select("id").single());
+      unwrap(await supabase.from("player_contract").upsert({ season_id: season.id, franchise_id: bid.franchise_id, player_id: bid.player_id, salary: bid.amount, expires_year: season.year, source_marker: "W", contract_status: "active" }, { onConflict: "season_id,franchise_id,player_id" }).select("id").single());
+      unwrap(await supabase.from("faab_bid").update({ status: "lost", resolved_at: now }).eq("waiver_period_id", bid.waiver_period_id).eq("player_id", bid.player_id).eq("status", "pending").neq("id", bid.id).select("id"));
       unwrap(await supabase.from("transaction").insert({ season_id: season.id, franchise_id: bid.franchise_id, actor_owner_id: commissioner.id, transaction_type: "waiver", status: "final", summary: `${bid.franchise?.[0]?.name ?? "CVC franchise"} won ${bid.player?.[0]?.display_name ?? "a player"} for $${bid.amount} FAAB`, details: { faab_bid_id: bid.id, player_id: bid.player_id, amount: bid.amount } }).select("id").single());
     }
     const resolved = unwrap(await supabase.from("faab_bid").update({ status: input.outcome, resolved_at: new Date().toISOString() }).eq("id", bid.id).select("id, status").single());
@@ -1166,8 +1202,11 @@ export const leagueRouter = router({
     if (franchise.current_owner_id !== actor.id && !["commissioner", "administrator"].includes(actor.role)) {
       throw new TRPCError({ code: "FORBIDDEN", message: "You may only release players from your own CVC franchise." });
     }
-    const assignment = unwrap(await supabase.from("roster_assignment").select("id").eq("season_id", season.id).eq("franchise_id", franchise.id).eq("player_id", input.playerId).is("released_at", null).maybeSingle());
+    const assignment = unwrap(await supabase.from("roster_assignment").select("id, locked_until").eq("season_id", season.id).eq("franchise_id", franchise.id).eq("player_id", input.playerId).is("released_at", null).maybeSingle());
     if (!assignment) throw new TRPCError({ code: "NOT_FOUND", message: "This player is not on the active CVC roster." });
+    if (assignment.locked_until && new Date(assignment.locked_until).getTime() > Date.now()) {
+      throw new TRPCError({ code: "BAD_REQUEST", message: `This player was just acquired via waivers and can't be cut until the next waiver resolution (${new Date(assignment.locked_until).toLocaleString("en-US", { weekday: "short", hour: "numeric", minute: "2-digit", timeZoneName: "short" })}).` });
+    }
     const contract = unwrap(await supabase.from("player_contract").select("id, contract_status").eq("season_id", season.id).eq("franchise_id", franchise.id).eq("player_id", input.playerId).maybeSingle());
     if (!contract || ["released", "expired"].includes(contract.contract_status)) {
       throw new TRPCError({ code: "BAD_REQUEST", message: "Only an active CVC contract can be released from Protections." });

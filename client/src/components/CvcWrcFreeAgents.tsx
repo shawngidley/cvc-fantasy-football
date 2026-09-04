@@ -77,7 +77,8 @@ export function CvcWrcFreeAgents() {
   const [sort, setSort] = useState<string>("fpts");
   const [direction, setDirection] = useState<"asc" | "desc">("desc");
   const [selectedPlayerId, setSelectedPlayerId] = useState("");
-  const [amount, setAmount] = useState("0");
+  const [amount, setAmount] = useState("1");
+  const [maxPlayersDesired, setMaxPlayersDesired] = useState("1");
   const [matchingRightsOnly, setMatchingRightsOnly] = useState(false);
   const [visibleColumns, setVisibleColumns] = useState<FreeAgentConfigurableColumn[]>(() => loadStoredColumns());
   const [columnsOpen, setColumnsOpen] = useState(false);
@@ -99,7 +100,7 @@ export function CvcWrcFreeAgents() {
   const myBids = trpc.league.myFaabBids.useQuery(undefined, { enabled: Boolean(owner?.franchise) });
   const commissioner = ["commissioner", "administrator"].includes(owner?.role ?? "");
   const queue = trpc.league.waiverBidQueue.useQuery(undefined, { enabled: commissioner });
-  const submit = trpc.league.submitFaabBid.useMutation({ onSuccess: async () => { setSelectedPlayerId(""); setAmount("0"); await Promise.all([utils.league.myFaabBids.invalidate(), utils.league.myFaabBalance.invalidate(), utils.league.activity.invalidate()]); } });
+  const submit = trpc.league.submitFaabBid.useMutation({ onSuccess: async () => { setSelectedPlayerId(""); setAmount("1"); setMaxPlayersDesired("1"); await Promise.all([utils.league.myFaabBids.invalidate(), utils.league.myFaabBalance.invalidate(), utils.league.activity.invalidate()]); } });
   const resolve = trpc.league.resolveFaabBid.useMutation({ onSuccess: () => { utils.league.waiverBidQueue.invalidate(); utils.league.freeAgents.invalidate(); utils.league.myFaabBalance.invalidate(); utils.league.activity.invalidate(); } });
 
   const activePool = tab === "all-players" ? allPlayersPool : tab === "watchlist" ? watchlistPool : freeAgentsPool;
@@ -181,6 +182,15 @@ export function CvcWrcFreeAgents() {
       </section>
     )}
 
-    {selectedPlayerId ? <section className="mt-6 rounded-xl border border-cvc-accent/40 bg-cvc-accent/10 p-5"><div className="flex flex-wrap items-center justify-between gap-3"><div><p className="font-display text-xl uppercase text-white">Submit FAAB claim</p><p className="mt-1 text-sm text-cvc-muted">Bid on the selected player. CVC records the claim for commissioner resolution.</p></div><button onClick={() => setSelectedPlayerId("")} className="text-xs font-bold uppercase tracking-[.08em] text-cvc-muted">Cancel</button></div><div className="mt-4 flex flex-wrap items-center gap-3"><input value={amount} onChange={event => setAmount(event.target.value.replace(/\D/g, ""))} className="w-36 rounded-md border border-white/20 bg-cvc-deep px-3 py-2 text-sm text-white" inputMode="numeric" placeholder="$0" />{faabBalance.data?.balance != null ? <span className="text-xs text-cvc-muted">${faabBalance.data.balance} available</span> : null}<button disabled={submit.isPending || Number(amount) < 0} onClick={() => submit.mutate({ playerId: selectedPlayerId, amount: Number(amount) })} className="cvc-button-compact disabled:opacity-50">{submit.isPending ? "Submitting…" : "Submit claim"}</button>{submit.error ? <p className="text-sm text-red-200">{submit.error.message}</p> : null}</div></section> : null}
+    {selectedPlayerId ? <section className="mt-6 rounded-xl border border-cvc-accent/40 bg-cvc-accent/10 p-5"><div className="flex flex-wrap items-center justify-between gap-3"><div><p className="font-display text-xl uppercase text-white">Submit FAAB claim</p><p className="mt-1 text-sm text-cvc-muted">Bids are resolved automatically Thursday and Sunday mornings at 9:00am ET. Winner is the highest bid; ties go to the worse-record team. The awarded player joins your roster at their winning bid as salary and can't be cut until the following resolution.</p></div><button onClick={() => setSelectedPlayerId("")} className="text-xs font-bold uppercase tracking-[.08em] text-cvc-muted">Cancel</button></div>
+      <div className="mt-4 flex flex-wrap items-end gap-3">
+        <label className="flex flex-col gap-1"><span className="text-[10px] font-black uppercase tracking-[.08em] text-cvc-muted">Bid ($1–$30)</span><input value={amount} onChange={event => setAmount(event.target.value.replace(/\D/g, ""))} className="w-28 rounded-md border border-white/20 bg-cvc-deep px-3 py-2 text-sm text-white" inputMode="numeric" placeholder="$0" /></label>
+        <label className="flex flex-col gap-1"><span className="text-[10px] font-black uppercase tracking-[.08em] text-cvc-muted">Max players to win this cycle</span><input value={maxPlayersDesired} onChange={event => setMaxPlayersDesired(event.target.value.replace(/\D/g, ""))} className="w-20 rounded-md border border-white/20 bg-cvc-deep px-3 py-2 text-sm text-white" inputMode="numeric" placeholder="1" /></label>
+        {faabBalance.data?.balance != null ? <span className="pb-2.5 text-xs text-cvc-muted">${faabBalance.data.balance} left this season</span> : null}
+        <button disabled={submit.isPending || Number(amount) < 1 || Number(amount) > 30} onClick={() => submit.mutate({ playerId: selectedPlayerId, amount: Number(amount), maxPlayersDesired: Number(maxPlayersDesired) || 1 })} className="cvc-button-compact disabled:opacity-50 pb-2.5">{submit.isPending ? "Submitting…" : "Submit claim"}</button>
+        {submit.error ? <p className="w-full text-sm text-red-200">{submit.error.message}</p> : null}
+      </div>
+      <p className="mt-2 text-[11px] text-cvc-muted">If you submit several bids this cycle, "max players to win" caps how many of them you're actually willing to win at once — leave it at 1 unless you specifically want to try for more than one player and are prepared to trim your roster down to 22 afterward.</p>
+    </section> : null}
   </div>;
 }

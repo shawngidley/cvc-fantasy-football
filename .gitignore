@@ -12,6 +12,8 @@ api/scheduled/tank01-scoring-sync.js
 api/scheduled/tank01-scoring-sync.js.map
 api/scheduled/nfl-team-assignment-sync.js
 api/scheduled/nfl-team-assignment-sync.js.map
+api/scheduled/waiver-resolution.js
+api/scheduled/waiver-resolution.js.map
 
 # Environment variables
 .env
