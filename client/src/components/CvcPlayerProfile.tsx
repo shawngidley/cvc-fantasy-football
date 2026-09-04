@@ -85,6 +85,7 @@ function usePlayerNews(displayName: string | undefined) {
 function useTeamSchedule(team: string | null | undefined, enabled: boolean) {
   const [games, setGames] = useState<TankRecord[] | null>(null);
   const [loading, setLoading] = useState(false);
+  const [rawResponse, setRawResponse] = useState<unknown>(null);
   useEffect(() => {
     if (!enabled || !team) return;
     const abv = normalizeTeam(team).toUpperCase();
@@ -94,6 +95,7 @@ function useTeamSchedule(team: string | null | undefined, enabled: boolean) {
     fetch(`/api/tank01/getNFLTeamSchedule?teamAbv=${encodeURIComponent(abv)}`)
       .then(response => (response.ok ? response.json() : null) as Promise<{ body?: TankRecord | TankRecord[] } | null>)
       .then(payload => {
+        if (!ignore) setRawResponse(payload);
         const raw = payload?.body;
         const list = Array.isArray(raw) ? raw : raw && typeof raw === "object" ? Object.values(raw as Record<string, unknown>).filter((entry): entry is TankRecord => Boolean(entry) && typeof entry === "object") : [];
         scheduleCache.set(abv, list.length ? list : null);
@@ -103,7 +105,7 @@ function useTeamSchedule(team: string | null | undefined, enabled: boolean) {
       .finally(() => { if (!ignore) setLoading(false); });
     return () => { ignore = true; };
   }, [team, enabled]);
-  return { games, loading };
+  return { games, loading, rawResponse };
 }
 
 function gameOpponent(game: TankRecord, team: string) {
@@ -118,6 +120,7 @@ function gameOpponent(game: TankRecord, team: string) {
  * gap in the sequence (Tank01's schedule response has no explicit bye-week entry). */
 function buildScheduleWithBye(schedule: TankRecord[], team: string) {
   const rows = schedule
+    .filter(game => { const seasonType = firstOf(game, ["seasonType", "season_type"]); return !seasonType || seasonType === "Regular Season"; })
     .map(game => ({ game, week: Number.parseInt(firstOf(game, ["gameWeek", "week"])?.replace(/\D/g, "") ?? "0", 10), opponent: gameOpponent(game, team) }))
     .filter(row => row.week > 0 && row.opponent)
     .sort((a, b) => a.week - b.week);
@@ -167,7 +170,7 @@ export function CvcPlayerProfile() {
   const expertImpactItem = fantasyProsPlayerNews.find(item => item.description);
 
   const outlook = trpc.league.fantasyProsPlayerOutlook.useQuery({ playerId: params?.playerId ?? "" }, { enabled: Boolean(params?.playerId), staleTime: 30 * 60_000 });
-  const { games: schedule } = useTeamSchedule(detail.data?.nfl_team, valid);
+  const { games: schedule, rawResponse: scheduleRawResponse } = useTeamSchedule(detail.data?.nfl_team, valid);
 
   const espnId = firstOf(tank ?? undefined, ["espnID", "espnId"]);
   const tank01PlayerId = firstOf(tank ?? undefined, ["playerID", "playerId"]);
@@ -301,7 +304,7 @@ export function CvcPlayerProfile() {
                 <td className="px-3 py-2.5 text-slate-500">{firstOf(row.game, ["gameTime", "time"]) ?? "—"}</td>
                 <td className="px-3 py-2.5 text-slate-400">—</td>
               </tr>)}</tbody>
-        </table> : <p className="p-5 text-sm text-slate-500">Schedule data is unavailable for this player right now.</p>}
+        </table> : <div className="p-5"><p className="text-sm text-slate-500">Schedule data is unavailable for this player right now.</p>{scheduleRawResponse ? <details className="mt-3 rounded-md border border-slate-200 bg-slate-50 p-3 text-xs text-slate-500"><summary className="cursor-pointer font-bold text-slate-600">Debug: raw Tank01 response (tap to view, then screenshot for Claude)</summary><pre className="mt-2 max-h-64 overflow-auto whitespace-pre-wrap break-all text-[10px]">{JSON.stringify(scheduleRawResponse, null, 2)}</pre></details> : null}</div>}
       </div> : null}
 
       {tab === "gamelog" ? <div>
