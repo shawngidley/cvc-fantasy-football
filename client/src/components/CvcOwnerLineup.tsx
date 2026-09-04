@@ -52,10 +52,21 @@ function sourceNumber(record: Record<string, unknown> | undefined, keys: string[
 
 function teamLogo(team: string | null | undefined) { return `https://a.espncdn.com/i/teamlogos/nfl/500/${normalizeTeam(team)}.png`; }
 
+/** "Joe Burrow" -> "J. Burrow", "D'Andre Swift" -> "D. Swift", "Marvin Harrison Jr." ->
+ * "M. Harrison Jr." -- matches WRC's mobile lineup display (first initial + last name,
+ * suffix kept), used here to keep names compact instead of running the full name at a
+ * large size, which wraps/crowds this table on mobile. */
+function abbreviateName(fullName: string): string {
+  const parts = fullName.trim().split(/\s+/);
+  if (parts.length < 2) return fullName;
+  const [first, ...rest] = parts;
+  return `${first[0]}. ${rest.join(" ")}`;
+}
+
 function PlayerIdentity({ player, profile }: { player: CvcLineupPlayer; profile: Tank01Profile | null | undefined }) {
   const [failed, setFailed] = useState(false);
   const source = isDst(player.position) ? teamLogo(player.nfl_team) : profile?.espnHeadshot;
-  return <div className="flex min-w-[180px] items-center gap-2.5"><span className="flex h-9 w-9 shrink-0 items-center justify-center overflow-hidden rounded-full bg-[#edf3ef] text-[10px] font-black text-cvc-deep">{source && !failed ? <img src={source} alt={isDst(player.position) ? `${player.nfl_team ?? "NFL"} team logo` : ""} className={isDst(player.position) ? "h-8 w-8 object-contain" : "h-full w-full object-cover object-top"} onError={() => setFailed(true)} /> : teamInitial(player.display_name)}</span><span className="min-w-0"><Link href={`/player/${player.id}`} className="block truncate font-display text-lg uppercase leading-5 text-cvc-deep hover:text-cvc-accent">{player.display_name}</Link><span className="block text-[11px] font-bold text-slate-500">{isDst(player.position) ? "D/ST" : player.position ?? "—"} · {player.nfl_team ?? "FA"}</span></span></div>;
+  return <div className="flex min-w-[180px] items-center gap-2.5"><span className="flex h-9 w-9 shrink-0 items-center justify-center overflow-hidden rounded-full bg-[#edf3ef] text-[10px] font-black text-cvc-deep">{source && !failed ? <img src={source} alt={isDst(player.position) ? `${player.nfl_team ?? "NFL"} team logo` : ""} className={isDst(player.position) ? "h-8 w-8 object-contain" : "h-full w-full object-cover object-top"} onError={() => setFailed(true)} /> : teamInitial(player.display_name)}</span><span className="min-w-0"><Link href={`/player/${player.id}`} className="block truncate text-sm font-bold leading-5 text-cvc-deep hover:text-cvc-accent">{abbreviateName(player.display_name)}</Link><span className="block text-[11px] font-bold text-slate-500">{isDst(player.position) ? "D/ST" : player.position ?? "—"} · {player.nfl_team ?? "FA"}</span></span></div>;
 }
 
 function matchupText(matchup: { opponent: string; isHome: boolean; gameTime: string } | undefined) {
