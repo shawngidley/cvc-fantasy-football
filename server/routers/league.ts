@@ -579,13 +579,19 @@ export const leagueRouter = router({
     };
   }),
 
+  // Scoped to exactly what's actually tradeable: this year's picks (only while that
+  // draft hasn't completed) and next year's -- matches the same rule proposeTrade
+  // enforces, so the trade builder UI never even offers an invalid pick as an option.
   franchisePicks: publicProcedure.input(z.object({ franchiseId: z.string().uuid() })).query(async ({ input }) => {
-    const picks = unwrap(await supabase.from("draft_pick").select("id, round_number, pick_number, pick_status, draft:draft_id(draft_type, season:season_id(year))").eq("current_franchise_id", input.franchiseId).eq("pick_status", "open").order("round_number").order("pick_number").limit(100)) ?? [];
-    return picks.map((pick: any) => {
-      const draft = Array.isArray(pick.draft) ? pick.draft[0] : pick.draft;
-      const season = draft ? (Array.isArray(draft.season) ? draft.season[0] : draft.season) : null;
-      return { id: pick.id, roundNumber: pick.round_number, pickNumber: pick.pick_number, draftType: draft?.draft_type ?? "rookie", year: season?.year ?? null };
-    });
+    const { season } = await getCurrentLeagueAndSeason();
+    const picks = unwrap(await supabase.from("draft_pick").select("id, round_number, pick_number, pick_status, draft:draft_id(draft_type, status, season:season_id(year))").eq("current_franchise_id", input.franchiseId).eq("pick_status", "open").order("round_number").order("pick_number").limit(100)) ?? [];
+    return picks
+      .map((pick: any) => {
+        const draft = Array.isArray(pick.draft) ? pick.draft[0] : pick.draft;
+        const draftSeason = draft ? (Array.isArray(draft.season) ? draft.season[0] : draft.season) : null;
+        return { id: pick.id, roundNumber: pick.round_number, pickNumber: pick.pick_number, draftType: draft?.draft_type ?? "rookie", year: draftSeason?.year ?? null, draftStatus: draft?.status ?? null };
+      })
+      .filter(pick => pick.year != null && (pick.year === season.year || pick.year === season.year + 1) && !(pick.year === season.year && pick.draftStatus === "complete"));
   }),
 
   // Unbounded (unlike playerDirectory's 150-row cap), because this exists purely so the
@@ -1084,10 +1090,24 @@ export const leagueRouter = router({
     const ownerByPlayer = new Map(assignments.map(assignment => [assignment.player_id, assignment.franchise_id]));
     if (input.offerPlayerIds.some(playerId => ownerByPlayer.get(playerId) !== proposer.id) || input.requestPlayerIds.some(playerId => ownerByPlayer.get(playerId) !== recipient.id)) throw new TRPCError({ code: "BAD_REQUEST", message: "Every CVC trade player must be on the franchise offering that player." });
     const pickIds = [...input.offerPickIds, ...input.requestPickIds];
-    const pickRows = pickIds.length ? unwrap(await supabase.from("draft_pick").select("id, current_franchise_id, pick_status").in("id", pickIds)) ?? [] : [];
+    const pickRows = pickIds.length ? unwrap(await supabase.from("draft_pick").select("id, current_franchise_id, pick_status, round_number, pick_number, draft:draft_id(status, season:season_id(year))").in("id", pickIds)) ?? [] : [];
     const pickById = new Map(pickRows.map(pick => [pick.id, pick]));
     if (pickIds.some(pickId => !pickById.has(pickId))) throw new TRPCError({ code: "NOT_FOUND", message: "One or more CVC draft picks were not found." });
     if (pickIds.some(pickId => pickById.get(pickId)!.pick_status !== "open")) throw new TRPCError({ code: "BAD_REQUEST", message: "Only an open, unselected CVC draft pick may be traded." });
+    // CVC trades only ever include: this year's picks (while that draft hasn't happened
+    // yet -- once complete, even a leftover 'open' pick from a data quirk shouldn't be
+    // tradeable) or next year's picks. Nothing further out.
+    for (const pickId of pickIds) {
+      const pick = pickById.get(pickId)!;
+      const draftRow = pick.draft?.[0];
+      const pickYear = draftRow?.season?.[0]?.year;
+      if (pickYear == null || (pickYear !== season.year && pickYear !== season.year + 1)) {
+        throw new TRPCError({ code: "BAD_REQUEST", message: `Only ${season.year} and ${season.year + 1} CVC draft picks may be traded.` });
+      }
+      if (pickYear === season.year && draftRow?.status === "complete") {
+        throw new TRPCError({ code: "BAD_REQUEST", message: `The ${season.year} CVC draft has already been completed, so its picks can no longer be traded.` });
+      }
+    }
     if (input.offerPickIds.some(pickId => pickById.get(pickId)!.current_franchise_id !== proposer.id) || input.requestPickIds.some(pickId => pickById.get(pickId)!.current_franchise_id !== recipient.id)) throw new TRPCError({ code: "BAD_REQUEST", message: "Every CVC trade pick must currently be owned by the franchise offering that pick." });
     const trade = unwrap(await supabase.from("trade_offer").insert({ season_id: season.id, proposer_franchise_id: proposer.id, recipient_franchise_id: recipient.id, note: input.note ?? null }).select("id").single());
     if (!trade) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "CVC trade proposal could not be saved." });
