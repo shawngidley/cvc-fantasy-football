@@ -137,6 +137,7 @@ export function CvcWrcPlayerProfile() {
   // FantasyPros first (real dates, richer detail) then Tank01, since Tank01 items have
   // no real timestamp to interleave by (see the synthetic `published` above).
   const combinedPlayerNews = [...fantasyProsPlayerNews, ...tank01PlayerNews];
+  const outlook = trpc.league.fantasyProsPlayerOutlook.useQuery({ playerId: params?.playerId ?? "" }, { enabled: Boolean(params?.playerId), staleTime: 30 * 60_000 });
   const { games: schedule } = useTeamSchedule(detail.data?.nfl_team, valid);
   const { games: gameLog, loading: loadingGameLog } = useTeamSchedule(detail.data?.nfl_team, tab === "gamelog"); // shares the schedule shape/cache; see note in Game Log tab below
   const metrics = useMemo(() => flattenStats(tank), [tank]);
@@ -187,13 +188,19 @@ export function CvcWrcPlayerProfile() {
       </div>
     </div></div></section>
 
-    {hasExpertConsensus ? <section className="cvc-card mt-5"><div className="cvc-card-title"><span>Expert Consensus</span><TrendingUp size={16} /></div><div className="cvc-card-body grid grid-cols-2 gap-4 sm:grid-cols-2">
-      {/* Only overall rank + ADP are captured by fantasyProsSync.normalizeFantasyProsPlayers today.
-          Position rank, tier, and weekly projections would need that sync extended to persist
-          FantasyPros' positional-rankings/projections endpoints before this panel could show them. */}
-      {rankEcr ? <div><p className="text-[10px] font-black uppercase tracking-[0.1em] text-slate-500">Overall rank</p><p className="mt-1 font-display text-3xl text-cvc-deep">#{rankEcr}</p></div> : null}
+    {hasExpertConsensus || outlook.data?.positionRank || outlook.data?.overallRank || outlook.data?.projection ? <section className="cvc-card mt-5"><div className="cvc-card-title"><span>Expert Consensus</span><TrendingUp size={16} /></div><div className="cvc-card-body grid grid-cols-2 gap-4 sm:grid-cols-4">
+      {outlook.data?.overallRank?.ecr ?? rankEcr ? <div><p className="text-[10px] font-black uppercase tracking-[0.1em] text-slate-500">Overall rank</p><p className="mt-1 font-display text-3xl text-cvc-deep">#{outlook.data?.overallRank?.ecr ?? rankEcr}</p></div> : null}
+      {outlook.data?.positionRank?.positionRank ? <div><p className="text-[10px] font-black uppercase tracking-[0.1em] text-slate-500">Position rank</p><p className="mt-1 font-display text-3xl text-cvc-deep">{outlook.data.positionRank.positionRank}</p>{outlook.data.positionRank.tier ? <p className="text-xs text-slate-500">Tier {outlook.data.positionRank.tier}</p> : null}</div> : null}
       {rankAdp ? <div><p className="text-[10px] font-black uppercase tracking-[0.1em] text-slate-500">ADP</p><p className="mt-1 font-display text-3xl text-cvc-deep">{rankAdp}</p></div> : null}
-    </div></section> : null}
+      {outlook.data?.projection?.pprPoints != null ? <div><p className="text-[10px] font-black uppercase tracking-[0.1em] text-slate-500">Proj. pts (PPR){outlook.data.weekNumber ? ` · Wk ${outlook.data.weekNumber}` : ""}</p><p className="mt-1 font-display text-3xl text-cvc-deep">{outlook.data.projection.pprPoints.toFixed(1)}</p></div> : null}
+    </div>
+    {outlook.data?.projection && (outlook.data.projection.passYards || outlook.data.projection.rushYards) ? <div className="cvc-card-body grid grid-cols-2 gap-4 border-t border-slate-100 pt-4 sm:grid-cols-4">
+      {outlook.data.projection.passYards ? <div><p className="text-[10px] font-black uppercase tracking-[0.1em] text-slate-500">Proj. pass yds</p><p className="mt-1 text-lg font-black text-cvc-deep">{outlook.data.projection.passYards.toFixed(0)}</p></div> : null}
+      {outlook.data.projection.passTouchdowns ? <div><p className="text-[10px] font-black uppercase tracking-[0.1em] text-slate-500">Proj. pass TD</p><p className="mt-1 text-lg font-black text-cvc-deep">{outlook.data.projection.passTouchdowns.toFixed(1)}</p></div> : null}
+      {outlook.data.projection.rushYards ? <div><p className="text-[10px] font-black uppercase tracking-[0.1em] text-slate-500">Proj. rush yds</p><p className="mt-1 text-lg font-black text-cvc-deep">{outlook.data.projection.rushYards.toFixed(0)}</p></div> : null}
+      {outlook.data.projection.rushTouchdowns ? <div><p className="text-[10px] font-black uppercase tracking-[0.1em] text-slate-500">Proj. rush TD</p><p className="mt-1 text-lg font-black text-cvc-deep">{outlook.data.projection.rushTouchdowns.toFixed(1)}</p></div> : null}
+    </div> : null}
+    </section> : null}
 
     {upcoming ? <section className="cvc-card mt-5"><div className="cvc-card-title"><span>Upcoming Matchup</span><CalendarDays size={16} /></div><div className="cvc-card-body flex items-center justify-between"><p className="font-display text-2xl text-cvc-deep">{upcoming.opponent!.atOrVs} {upcoming.opponent!.opponent}</p><p className="text-sm text-slate-500">{firstOf(upcoming.game, ["gameWeek", "week"]) ? `Week ${firstOf(upcoming.game, ["gameWeek", "week"])}` : ""} {firstOf(upcoming.game, ["gameDate", "date"]) ?? ""}</p></div></section> : null}
 

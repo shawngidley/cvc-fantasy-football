@@ -105,3 +105,70 @@ export async function getFantasyProsNews(limit = 50): Promise<FantasyProsNewsIte
     };
   }).filter(item => item.title);
 }
+
+export type FantasyProsRank = {
+  playerId: number;
+  name: string;
+  team: string;
+  position: string;
+  ecr: number | null;
+  positionRank: string;
+  tier: number | null;
+  byeWeek: number | null;
+};
+
+/** week=0 requests FantasyPros' preseason/draft-type rankings (ECR for the whole
+ * season, not a specific week); week>0 requests that week's rankings. */
+export async function getFantasyProsRanks(year: number, position: string, week: number): Promise<FantasyProsRank[]> {
+  const query = new URLSearchParams({ position, scoring: "PPR", type: week > 0 ? "WEEKLY" : "DRAFT", week: String(week) });
+  const data = asRecord(await request<unknown>(`/nfl/${year}/consensus-rankings?${query.toString()}`, 60 * 60_000));
+  return asArray(data.players).map(item => {
+    const row = asRecord(item);
+    return {
+      playerId: asNumber(row.player_id) ?? 0,
+      name: asString(row.player_name),
+      team: asString(row.player_team_id),
+      position: asString(row.player_position_id),
+      ecr: asNumber(row.rank_ecr),
+      positionRank: asString(row.pos_rank),
+      tier: asNumber(row.tier),
+      byeWeek: asNumber(row.player_bye_week),
+    };
+  }).filter(item => item.name);
+}
+
+export type FantasyProsProjection = {
+  playerId: number;
+  name: string;
+  team: string;
+  position: string;
+  points: number | null;
+  pprPoints: number | null;
+  passYards: number | null;
+  passTouchdowns: number | null;
+  interceptions: number | null;
+  rushYards: number | null;
+  rushTouchdowns: number | null;
+};
+
+export async function getFantasyProsProjections(year: number, position: string, week: number): Promise<FantasyProsProjection[]> {
+  const query = new URLSearchParams({ position, week: String(week) });
+  const data = asRecord(await request<unknown>(`/nfl/${year}/projections?${query.toString()}`, 60 * 60_000));
+  return asArray(data.players).map(item => {
+    const row = asRecord(item);
+    const stats = asRecord(asArray(row.stats)[0]);
+    return {
+      playerId: asNumber(row.fpid) ?? 0,
+      name: asString(row.name),
+      team: asString(row.team_id),
+      position: asString(row.position_id),
+      points: asNumber(stats.points),
+      pprPoints: asNumber(stats.points_ppr),
+      passYards: asNumber(stats.pass_yds),
+      passTouchdowns: asNumber(stats.pass_tds),
+      interceptions: asNumber(stats.pass_ints),
+      rushYards: asNumber(stats.rush_yds),
+      rushTouchdowns: asNumber(stats.rush_tds),
+    };
+  }).filter(item => item.name);
+}

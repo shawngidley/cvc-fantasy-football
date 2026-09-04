@@ -3,7 +3,8 @@ import { z } from "zod";
 import { protectedProcedure, publicProcedure, router } from "../_core/trpc";
 import { getFantasyProsDataAdapter, getNFLDataAdapter } from "../nflDataAdapter";
 import { fantasyProsCacheStatus, getFantasyProsActivePlayerIds, getFantasyProsRookiePlayerIds } from "../fantasyProsCache";
-import { getFantasyProsInjuries, getFantasyProsNews } from "../fantasyProsNews";
+import { getFantasyProsInjuries, getFantasyProsNews, getFantasyProsProjections, getFantasyProsRanks } from "../fantasyProsNews";
+import { normalizePlayerName } from "@shared/playerNameMatch";
 import { syncNflTeamAssignments } from "../nflTeamAssignmentSync";
 import { getFaabBalance, MAX_ROSTER_SIZE, STARTING_FAAB } from "../waiverRules";
 import { resolveOpenWaiverPeriod } from "../waiverResolution";
@@ -808,6 +809,32 @@ export const leagueRouter = router({
       })
       .filter(item => item.position && eligible.has(item.position));
     return { items, weekNumber: currentWeek.week_number };
+  }),
+
+  // Powers the "Expert Consensus" panel on the individual player profile page.
+  // Position rank + overall rank ("OP" = FantasyPros' cross-position overall/superflex
+  // code) come from their consensus-rankings endpoint; the weekly point projection from
+  // their separate projections endpoint. Filtered server-side to just this one player
+  // (via the shared canonical name normalizer) rather than shipping WRC's approach of
+  // fetching the whole ranked list to the client and filtering there.
+  fantasyProsPlayerOutlook: publicProcedure.input(z.object({ playerId: z.string().uuid() })).query(async ({ input }) => {
+    const player = unwrap(await supabase.from("player").select("display_name, position").eq("id", input.playerId).maybeSingle());
+    if (!player || !player.position || !["QB", "RB", "WR", "TE", "K"].includes(player.position)) {
+      return { positionRank: null, overallRank: null, projection: null, weekNumber: null };
+    }
+    const { season } = await getCurrentLeagueAndSeason();
+    const weeks = unwrap(await supabase.from("schedule_week").select("week_number, status").eq("season_id", season.id).order("week_number")) ?? [];
+    const currentWeek = (weeks.find(item => item.status === "live") ?? weeks.find(item => item.status === "upcoming") ?? weeks[0])?.week_number ?? 0;
+    const [positionRanks, overallRanks, projections] = await Promise.all([
+      getFantasyProsRanks(season.year, player.position, currentWeek),
+      getFantasyProsRanks(season.year, "OP", currentWeek),
+      getFantasyProsProjections(season.year, player.position, currentWeek),
+    ]);
+    const targetName = normalizePlayerName(player.display_name);
+    const positionRank = positionRanks.find(row => normalizePlayerName(row.name) === targetName) ?? null;
+    const overallRank = overallRanks.find(row => normalizePlayerName(row.name) === targetName) ?? null;
+    const projection = projections.find(row => normalizePlayerName(row.name) === targetName) ?? null;
+    return { positionRank, overallRank, projection, weekNumber: currentWeek || null };
   }),
 
   refreshFantasyProsPlayers: protectedProcedure.mutation(async ({ ctx }) => {
