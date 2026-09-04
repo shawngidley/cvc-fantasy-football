@@ -25,7 +25,7 @@ import { CvcWrcDraftRecap } from "@/components/CvcWrcDraftRecap";
 import { TeamLogo } from "@/components/TeamLogo";
 import { selectCvcStandingsMatchup } from "@/lib/cvcStandingsMatchup";
 import { CvcInjuryReport, CvcMyTeamNews } from "@/components/CvcInjuryAndNewsPanels";
-import { Activity, ArrowLeftRight, ArrowRight, BadgeDollarSign, BookOpen, CalendarDays, Check, ChevronRight, ClipboardList, Crown, FileText, Gavel, LayoutDashboard, ListFilter, Newspaper, Plus, Radio, ReceiptText, Scale, Settings2, ShieldCheck, Sparkles, Trophy, Upload, UsersRound, WalletCards, X } from "lucide-react";
+import { Activity, ArrowRight, BadgeDollarSign, BookOpen, CalendarDays, Check, ChevronRight, ClipboardList, Crown, FileText, Gavel, LayoutDashboard, ListFilter, Newspaper, Plus, Radio, ReceiptText, Scale, Settings2, ShieldCheck, Sparkles, Trophy, Upload, UsersRound, WalletCards } from "lucide-react";
 import { useMemo, useState } from "react";
 import { Link, useRoute } from "wouter";
 
@@ -121,103 +121,6 @@ function Draft({ mode }: { mode: "hub" | "lottery" | "recap" }) { const board = 
 function WaiverCommissionerQueue() { const utils = trpc.useUtils(); const queue = trpc.league.waiverBidQueue.useQuery(); const resolve = trpc.league.resolveFaabBid.useMutation({ onSuccess: async () => { await Promise.all([utils.league.waiverBidQueue.invalidate(), utils.league.freeAgents.invalidate(), utils.league.activity.invalidate(), utils.league.myFaabBids.invalidate()]); } }); return <div className="mb-5 rounded-lg border border-cvc-deep/10 bg-cvc-tint p-4"><p className="font-semibold text-cvc-deep">Commissioner waiver queue</p><p className="mt-1 text-xs text-slate-500">Resolve a submitted claim only after confirming the winning order and FAAB amount.</p>{queue.isLoading ? <p className="mt-3 text-sm text-slate-500">Loading pending claims…</p> : queue.data?.length ? <div className="mt-3 space-y-2">{queue.data.map((bid: any) => <div key={bid.id} className="flex flex-wrap items-center justify-between gap-2 rounded-md bg-white p-3 text-sm"><span><b className="text-cvc-deep">{bid.player?.[0]?.id ? <Link href={`/player/${bid.player[0].id}`} className="text-cvc-deep hover:text-cvc-accent">{bid.player[0].display_name}</Link> : bid.player?.[0]?.display_name}</b> · {bid.franchise?.[0]?.name} · ${bid.amount}</span><span className="flex gap-2"><button type="button" onClick={() => resolve.mutate({ bidId: bid.id, outcome: "won" })} disabled={resolve.isPending} className="cvc-mini-button">Award</button><button type="button" onClick={() => resolve.mutate({ bidId: bid.id, outcome: "lost" })} disabled={resolve.isPending} className="cvc-mini-button">Mark lost</button></span></div>)}</div> : <p className="mt-3 text-sm text-slate-500">No pending CVC waiver claims.</p>}{resolve.error ? <p className="mt-3 text-sm font-medium text-red-700">{resolve.error.message}</p> : null}</div>; }
 
 function CommissionerAuditTimeline() { const audit = trpc.league.auditHistory.useQuery(); return <Card title="Commissioner audit timeline">{audit.isLoading ? <ModuleState label="Loading protected CVC audit history…" /> : audit.error ? <ModuleState label={audit.error.message} /> : audit.data?.length ? <div className="space-y-3">{audit.data.map((event: any) => <div key={event.id} className="border-l-2 border-cvc-accent pl-4"><p className="text-sm font-semibold text-cvc-deep">{event.summary}</p><p className="mt-1 text-xs text-slate-500">{event.actor?.[0]?.display_name ?? "CVC commissioner"} · {new Date(event.created_at).toLocaleString()} · {event.action.replaceAll("_", " ")}</p></div>)}</div> : <ModuleState label="No commissioner audit events have been recorded for this season." />}</Card>; }
-
-function TradeAssetChip({ label, onRemove }: { label: string; onRemove: () => void }) {
-  return <span className="inline-flex items-center gap-1.5 rounded-md bg-cvc-tint px-2.5 py-1 text-xs font-semibold text-cvc-deep">{label}<button type="button" onClick={onRemove} className="text-cvc-deep/50 hover:text-cvc-deep"><X size={12} /></button></span>;
-}
-
-function TradeSidePicker({ title, players, picks, selectedPlayerIds, selectedPickIds, onTogglePlayer, onTogglePick, disabled }: {
-  title: string;
-  players: { id: string; player: { id: string; display_name: string; position: string | null } | null }[] | undefined;
-  picks: { id: string; roundNumber: number; pickNumber: number; year: number | null }[] | undefined;
-  selectedPlayerIds: string[]; selectedPickIds: string[];
-  onTogglePlayer: (id: string) => void; onTogglePick: (id: string) => void;
-  disabled?: boolean;
-}) {
-  return <div className={disabled ? "opacity-40" : ""}>
-    <p className="text-xs font-black uppercase tracking-[0.08em] text-slate-500">{title}</p>
-    <div className="mt-2 max-h-48 space-y-1 overflow-y-auto rounded-lg border border-slate-200 p-2">
-      {players?.filter(item => item.player).map(item => <label key={item.id} className="flex items-center gap-2 rounded px-2 py-1.5 text-sm hover:bg-slate-50"><input type="checkbox" disabled={disabled} checked={selectedPlayerIds.includes(item.player!.id)} onChange={() => onTogglePlayer(item.player!.id)} />{item.player!.display_name} <span className="text-xs text-slate-400">{item.player!.position ?? "—"}</span></label>)}
-      {picks?.map(pick => <label key={pick.id} className="flex items-center gap-2 rounded px-2 py-1.5 text-sm hover:bg-slate-50"><input type="checkbox" disabled={disabled} checked={selectedPickIds.includes(pick.id)} onChange={() => onTogglePick(pick.id)} />{pick.year} Round {pick.roundNumber} pick</label>)}
-      {!players?.length && !picks?.length ? <p className="px-2 py-1.5 text-xs text-slate-400">Nothing tradeable here right now.</p> : null}
-    </div>
-  </div>;
-}
-
-// CVC trades: rostered players and current/next-year draft picks only -- no FAAB, unlike
-// WRC's model, which trades FAAB budget too. Otherwise modeled on WRC's Trades.tsx
-// builder: pick a recipient, check assets on each side, review as chips, submit.
-function TradesDesk() {
-  const { owner } = useCvcOwnerAuth();
-  const utils = trpc.useUtils();
-  const mine = trpc.league.myFranchise.useQuery();
-  const overview = trpc.league.overview.useQuery();
-  const [recipientId, setRecipientId] = useState("");
-  const [offerPlayerIds, setOfferPlayerIds] = useState<string[]>([]);
-  const [requestPlayerIds, setRequestPlayerIds] = useState<string[]>([]);
-  const [offerPickIds, setOfferPickIds] = useState<string[]>([]);
-  const [requestPickIds, setRequestPickIds] = useState<string[]>([]);
-  const [note, setNote] = useState("");
-  const myRoster = trpc.league.franchiseRoster.useQuery({ franchiseId: mine.data?.id ?? "00000000-0000-0000-0000-000000000000" }, { enabled: Boolean(mine.data?.id) });
-  const recipientRoster = trpc.league.franchiseRoster.useQuery({ franchiseId: recipientId || "00000000-0000-0000-0000-000000000000" }, { enabled: Boolean(recipientId) });
-  const myPicks = trpc.league.franchisePicks.useQuery({ franchiseId: mine.data?.id ?? "00000000-0000-0000-0000-000000000000" }, { enabled: Boolean(mine.data?.id) });
-  const recipientPicks = trpc.league.franchisePicks.useQuery({ franchiseId: recipientId || "00000000-0000-0000-0000-000000000000" }, { enabled: Boolean(recipientId) });
-  const trades = trpc.league.myTrades.useQuery(undefined, { enabled: Boolean(owner) });
-  const refresh = async () => { await Promise.all([utils.league.myTrades.invalidate(), utils.league.franchiseRoster.invalidate(), utils.league.franchisePicks.invalidate(), utils.league.activity.invalidate()]); };
-  const resetBuilder = () => { setRecipientId(""); setOfferPlayerIds([]); setRequestPlayerIds([]); setOfferPickIds([]); setRequestPickIds([]); setNote(""); };
-  const propose = trpc.league.proposeTrade.useMutation({ onSuccess: async () => { resetBuilder(); await refresh(); } });
-  const respond = trpc.league.respondToTrade.useMutation({ onSuccess: refresh });
-  const toggle = (list: string[], setList: (value: string[]) => void, id: string) => setList(list.includes(id) ? list.filter(item => item !== id) : [...list, id]);
-  const canSubmit = Boolean(recipientId) && (offerPlayerIds.length + offerPickIds.length > 0) && (requestPlayerIds.length + requestPickIds.length > 0);
-  const playerLabel = (id: string, roster: typeof myRoster.data) => roster?.players.find(item => item.player?.id === id)?.player?.display_name ?? "Player";
-  const pickLabel = (id: string, picks: typeof myPicks.data) => { const pick = picks?.find(item => item.id === id); return pick ? `${pick.year} Round ${pick.roundNumber} pick` : "Pick"; };
-
-  if (!owner) return <div className="grid gap-6 lg:grid-cols-[1fr_0.7fr]"><Card title="CVC Trade Desk"><ModuleState label="Sign in with your CVC owner PIN to propose, accept, or review trades." /></Card><Card title="Trade policy"><p className="text-sm leading-6 text-slate-600">Trade actions are limited to authenticated CVC owners. Trades may include rostered players and this year's (pre-draft) or next year's draft picks — no FAAB budget. A trade processes immediately once the recipient accepts, with a full audit record.</p></Card></div>;
-
-  return <div className="grid gap-6 xl:grid-cols-[1.25fr_0.75fr]">
-    <Card title="Propose a trade">
-      {mine.isLoading || overview.isLoading ? <ModuleState label="Loading CVC franchises and rosters…" /> : mine.error ? <ModuleState label={mine.error.message} /> : <div className="grid gap-4">
-        <div className="rounded-lg bg-cvc-tint p-4 text-sm text-slate-600">Proposing as <b className="text-cvc-deep">{mine.data?.name}</b>. Include any mix of players and current/next-year draft picks on each side; the recipient must accept before a commissioner executes the trade.</div>
-        <label className="cvc-field"><span>Recipient franchise</span><select value={recipientId} onChange={event => { setRecipientId(event.target.value); setRequestPlayerIds([]); setRequestPickIds([]); }}><option value="">Choose franchise</option>{overview.data?.franchises.filter(team => team.id !== mine.data?.id).map(team => <option key={team.id} value={team.id}>{team.name}</option>)}</select></label>
-        <div className="grid gap-4 sm:grid-cols-2">
-          <TradeSidePicker title="You send" players={myRoster.data?.players} picks={myPicks.data} selectedPlayerIds={offerPlayerIds} selectedPickIds={offerPickIds} onTogglePlayer={id => toggle(offerPlayerIds, setOfferPlayerIds, id)} onTogglePick={id => toggle(offerPickIds, setOfferPickIds, id)} />
-          <TradeSidePicker title="You receive" players={recipientRoster.data?.players} picks={recipientPicks.data} selectedPlayerIds={requestPlayerIds} selectedPickIds={requestPickIds} onTogglePlayer={id => toggle(requestPlayerIds, setRequestPlayerIds, id)} onTogglePick={id => toggle(requestPickIds, setRequestPickIds, id)} disabled={!recipientId} />
-        </div>
-        {offerPlayerIds.length || offerPickIds.length || requestPlayerIds.length || requestPickIds.length ? <div className="rounded-lg border border-slate-200 p-3">
-          <p className="text-xs font-black uppercase tracking-[0.08em] text-slate-500">Trade summary</p>
-          <div className="mt-2 flex flex-wrap gap-1.5">
-            {offerPlayerIds.map(id => <TradeAssetChip key={id} label={playerLabel(id, myRoster.data)} onRemove={() => toggle(offerPlayerIds, setOfferPlayerIds, id)} />)}
-            {offerPickIds.map(id => <TradeAssetChip key={id} label={pickLabel(id, myPicks.data)} onRemove={() => toggle(offerPickIds, setOfferPickIds, id)} />)}
-            <ArrowLeftRight size={14} className="mx-1 self-center text-slate-400" />
-            {requestPlayerIds.map(id => <TradeAssetChip key={id} label={playerLabel(id, recipientRoster.data)} onRemove={() => toggle(requestPlayerIds, setRequestPlayerIds, id)} />)}
-            {requestPickIds.map(id => <TradeAssetChip key={id} label={pickLabel(id, recipientPicks.data)} onRemove={() => toggle(requestPickIds, setRequestPickIds, id)} />)}
-          </div>
-        </div> : null}
-        <label className="cvc-field"><span>Optional note</span><textarea value={note} onChange={event => setNote(event.target.value)} placeholder="Add a commissioner-facing note if needed." /></label>
-        <button type="button" disabled={!canSubmit || propose.isPending} onClick={() => propose.mutate({ recipientFranchiseId: recipientId, offerPlayerIds, requestPlayerIds, offerPickIds, requestPickIds, note: note.trim() || undefined })} className="cvc-button w-fit disabled:cursor-not-allowed disabled:opacity-50">{propose.isPending ? "Submitting…" : "Submit trade proposal"}</button>
-        {propose.error ? <p className="text-sm font-medium text-red-700">{propose.error.message}</p> : null}
-      </div>}
-    </Card>
-    <div className="space-y-6">
-      <Card title="Trade status">{trades.isLoading ? <ModuleState label="Loading CVC trades…" /> : trades.data?.length ? <div className="space-y-3">{trades.data.map((trade: any) => {
-        const proposer = trade.proposer?.[0]; const recipient = trade.recipient?.[0];
-        const isRecipient = recipient?.id === mine.data?.id; const isProposer = proposer?.id === mine.data?.id;
-        const assetLabel = (asset: any) => asset.player?.[0] ? `${asset.player[0].display_name} (${asset.player[0].position ?? "—"})` : asset.pick?.[0] ? `${asset.pick[0].draft?.[0]?.season?.[0]?.year ?? "—"} Round ${asset.pick[0].round_number} pick` : "Asset";
-        const proposerAssets = (trade.assets ?? []).filter((asset: any) => asset.from_franchise_id === proposer?.id);
-        const recipientAssets = (trade.assets ?? []).filter((asset: any) => asset.from_franchise_id === recipient?.id);
-        return <div key={trade.id} className="rounded-lg border border-slate-100 p-4">
-          <div className="flex items-start justify-between gap-3"><p className="text-sm font-semibold text-cvc-deep">{proposer?.name} ↔ {recipient?.name}</p><StatusPill state={trade.status} /></div>
-          <p className="mt-2 text-xs text-slate-500"><b className="text-slate-600">{proposer?.name} sends:</b> {proposerAssets.map(assetLabel).join(", ") || "—"}</p>
-          <p className="mt-1 text-xs text-slate-500"><b className="text-slate-600">{recipient?.name} sends:</b> {recipientAssets.map(assetLabel).join(", ") || "—"}</p>
-          {trade.note ? <p className="mt-2 text-xs italic text-slate-500">{trade.note}</p> : null}
-          {trade.status === "proposed" ? <div className="mt-3 flex flex-wrap gap-2">{isRecipient ? <><button onClick={() => respond.mutate({ tradeId: trade.id, response: "accepted" })} className="cvc-mini-button">Accept</button><button onClick={() => respond.mutate({ tradeId: trade.id, response: "rejected" })} className="cvc-mini-button">Reject</button></> : null}{isProposer ? <button onClick={() => respond.mutate({ tradeId: trade.id, response: "cancelled" })} className="cvc-mini-button">Cancel</button> : null}</div> : null}
-          {/* No manual "Execute trade" button: acceptance processes the trade immediately now. */}
-        </div>;
-      })}</div> : <ModuleState label="No CVC trade proposals are currently open." />}</Card>
-      <Card title="Trade governance"><p className="text-sm leading-6 text-slate-600">CVC validates player and pick ownership at proposal and again at the moment of acceptance. Only this year's picks (before that draft happens) and next year's picks are tradeable — nothing further out. A trade processes immediately once the recipient accepts, creating both transaction and audit records — no separate commissioner approval step.</p></Card>
-    </div>
-  </div>;
-}
 
 function Transactions({ kind }: { kind: "transactions" | "trades" | "free-agents" }) {
   if (kind === "free-agents") return <CvcWrcFreeAgents />;
