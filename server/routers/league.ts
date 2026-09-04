@@ -66,6 +66,44 @@ async function createAuditEvent(leagueId: string, seasonId: string, actorOwnerId
   unwrap(await supabase.from("audit_event").insert({ league_id: leagueId, season_id: seasonId, actor_owner_id: actorOwnerId, entity_type: entityType, entity_id: entityId, action, summary }).select("id").single());
 }
 
+/** Moves every player/pick asset in an accepted trade to its new owner and marks the
+ * trade 'processed'. Extracted so respondToTrade can execute a trade the instant the
+ * recipient accepts (no separate commissioner-approval step), while executeTrade stays
+ * available as a manual backup/re-run tool for edge cases using the exact same logic. */
+async function executeAcceptedTrade(tradeId: string, season: { id: string; year: number }, actorOwnerId: string, auditSummary: string) {
+  const { league } = await getCurrentLeagueAndSeason();
+  const trade = unwrap(await supabase.from("trade_offer").select("id, proposer_franchise_id, recipient_franchise_id, status, proposer:proposer_franchise_id(name), recipient:recipient_franchise_id(name), assets:trade_asset(id, from_franchise_id, player_id, draft_pick_id)").eq("id", tradeId).eq("season_id", season.id).maybeSingle());
+  if (!trade || trade.status !== "accepted") throw new TRPCError({ code: "BAD_REQUEST", message: "Only an accepted CVC trade may be executed." });
+  const assets = trade.assets ?? [];
+  const playerAssets = assets.filter((asset: any) => asset.player_id);
+  const pickAssets = assets.filter((asset: any) => asset.draft_pick_id);
+  const [assignments, picks] = await Promise.all([
+    playerAssets.length ? supabase.from("roster_assignment").select("id, player_id, franchise_id").eq("season_id", season.id).in("player_id", playerAssets.map((asset: any) => asset.player_id)).is("released_at", null) : Promise.resolve({ data: [] }),
+    pickAssets.length ? supabase.from("draft_pick").select("id, current_franchise_id, pick_status").in("id", pickAssets.map((asset: any) => asset.draft_pick_id)) : Promise.resolve({ data: [] }),
+  ]);
+  const assignmentByPlayer = new Map((assignments.data ?? []).map((assignment: any) => [assignment.player_id, assignment]));
+  const pickById = new Map((picks.data ?? []).map((pick: any) => [pick.id, pick]));
+  if (playerAssets.some((asset: any) => assignmentByPlayer.get(asset.player_id)?.franchise_id !== asset.from_franchise_id)) throw new TRPCError({ code: "CONFLICT", message: "A CVC trade player is no longer on its offering franchise roster." });
+  if (pickAssets.some((asset: any) => pickById.get(asset.draft_pick_id)?.current_franchise_id !== asset.from_franchise_id || pickById.get(asset.draft_pick_id)?.pick_status !== "open")) throw new TRPCError({ code: "CONFLICT", message: "A CVC trade draft pick is no longer owned by its offering franchise, or has already been selected." });
+  await Promise.all([
+    ...playerAssets.map(async (asset: any) => {
+      const destination = asset.from_franchise_id === trade.proposer_franchise_id ? trade.recipient_franchise_id : trade.proposer_franchise_id;
+      await Promise.all([
+        supabase.from("roster_assignment").update({ franchise_id: destination, roster_state: "active", updated_at: new Date().toISOString() }).eq("id", assignmentByPlayer.get(asset.player_id)!.id).select("id"),
+        supabase.from("player_contract").update({ franchise_id: destination }).eq("season_id", season.id).eq("franchise_id", asset.from_franchise_id).eq("player_id", asset.player_id).select("id"),
+        supabase.from("player_right").update({ status: "expired" }).eq("season_id", season.id).eq("franchise_id", asset.from_franchise_id).eq("player_id", asset.player_id).in("right_type", ["franchise", "transition"]).eq("status", "active").select("id"),
+      ]);
+    }),
+    ...pickAssets.map(async (asset: any) => {
+      const destination = asset.from_franchise_id === trade.proposer_franchise_id ? trade.recipient_franchise_id : trade.proposer_franchise_id;
+      await supabase.from("draft_pick").update({ current_franchise_id: destination }).eq("id", asset.draft_pick_id).select("id");
+    }),
+  ]);
+  unwrap(await supabase.from("trade_offer").update({ status: "processed", reviewed_at: new Date().toISOString(), reviewed_by_owner_id: actorOwnerId }).eq("id", trade.id).select("id").single());
+  unwrap(await supabase.from("transaction").insert({ season_id: season.id, franchise_id: trade.proposer_franchise_id, actor_owner_id: actorOwnerId, transaction_type: "trade", status: "final", summary: `${trade.proposer?.[0]?.name ?? "CVC franchise"} completed a trade with ${trade.recipient?.[0]?.name ?? "CVC franchise"}.`, details: { trade_offer_id: trade.id, asset_count: assets.length } }).select("id").single());
+  await createAuditEvent(league.id, season.id, actorOwnerId, "trade_offer", trade.id, "processed", auditSummary);
+}
+
 // Applies a completed lottery's drawn franchise order onto the round's actual
 // draft_pick rows: franchiseOrder[0] (revealed first, draft_position N) goes to the
 // LAST pick of the round; franchiseOrder[N-1] (revealed last, draft_position 1) goes
@@ -1131,44 +1169,27 @@ export const leagueRouter = router({
     if (!franchise || !trade) throw new TRPCError({ code: "NOT_FOUND", message: "CVC trade proposal was not found for this owner." });
     const isRecipient = trade.recipient_franchise_id === franchise.id; const isProposer = trade.proposer_franchise_id === franchise.id;
     if (trade.status !== "proposed" || (input.response === "accepted" || input.response === "rejected" ? !isRecipient : !isProposer)) throw new TRPCError({ code: "FORBIDDEN", message: "This CVC trade response is not available." });
-    const updated = unwrap(await supabase.from("trade_offer").update({ status: input.response, responded_at: new Date().toISOString() }).eq("id", trade.id).select("id, status").single());
-    await createAuditEvent(league.id, season.id, owner.id, "trade_offer", trade.id, input.response, `CVC trade proposal was ${input.response}.`);
-    return updated;
+    if (input.response !== "accepted") {
+      const updated = unwrap(await supabase.from("trade_offer").update({ status: input.response, responded_at: new Date().toISOString() }).eq("id", trade.id).select("id, status").single());
+      await createAuditEvent(league.id, season.id, owner.id, "trade_offer", trade.id, input.response, `CVC trade proposal was ${input.response}.`);
+      return updated;
+    }
+    // No commissioner approval step: once the recipient accepts, the trade executes
+    // immediately -- both sides already agreed, so there's nothing left to approve.
+    unwrap(await supabase.from("trade_offer").update({ status: "accepted", responded_at: new Date().toISOString() }).eq("id", trade.id).select("id").single());
+    await executeAcceptedTrade(trade.id, season, owner.id, "Both franchises agreed to this CVC trade; it processed automatically.");
+    const finalTrade = unwrap(await supabase.from("trade_offer").select("id, status").eq("id", trade.id).single());
+    return finalTrade;
   }),
 
   executeTrade: protectedProcedure.input(z.object({ tradeId: z.string().uuid() })).mutation(async ({ ctx, input }) => {
+    // Manual backup/re-run tool only -- trades no longer require this step normally
+    // (respondToTrade executes automatically on acceptance). Kept for edge cases, e.g.
+    // a trade stuck at 'accepted' from before this change, or retrying after a
+    // transient failure.
     const commissioner = await requireCommissioner({ openId: ctx.user.openId });
-    const { league, season } = await getCurrentLeagueAndSeason();
-    const trade = unwrap(await supabase.from("trade_offer").select("id, proposer_franchise_id, recipient_franchise_id, status, proposer:proposer_franchise_id(name), recipient:recipient_franchise_id(name), assets:trade_asset(id, from_franchise_id, player_id, draft_pick_id)").eq("id", input.tradeId).eq("season_id", season.id).maybeSingle());
-    if (!trade || trade.status !== "accepted") throw new TRPCError({ code: "BAD_REQUEST", message: "Only an accepted CVC trade may be executed." });
-    const assets = trade.assets ?? [];
-    const playerAssets = assets.filter((asset: any) => asset.player_id);
-    const pickAssets = assets.filter((asset: any) => asset.draft_pick_id);
-    const [assignments, picks] = await Promise.all([
-      playerAssets.length ? supabase.from("roster_assignment").select("id, player_id, franchise_id").eq("season_id", season.id).in("player_id", playerAssets.map((asset: any) => asset.player_id)).is("released_at", null) : Promise.resolve({ data: [] }),
-      pickAssets.length ? supabase.from("draft_pick").select("id, current_franchise_id, pick_status").in("id", pickAssets.map((asset: any) => asset.draft_pick_id)) : Promise.resolve({ data: [] }),
-    ]);
-    const assignmentByPlayer = new Map((assignments.data ?? []).map((assignment: any) => [assignment.player_id, assignment]));
-    const pickById = new Map((picks.data ?? []).map((pick: any) => [pick.id, pick]));
-    if (playerAssets.some((asset: any) => assignmentByPlayer.get(asset.player_id)?.franchise_id !== asset.from_franchise_id)) throw new TRPCError({ code: "CONFLICT", message: "A CVC trade player is no longer on its offering franchise roster." });
-    if (pickAssets.some((asset: any) => pickById.get(asset.draft_pick_id)?.current_franchise_id !== asset.from_franchise_id || pickById.get(asset.draft_pick_id)?.pick_status !== "open")) throw new TRPCError({ code: "CONFLICT", message: "A CVC trade draft pick is no longer owned by its offering franchise, or has already been selected." });
-    await Promise.all([
-      ...playerAssets.map(async (asset: any) => {
-        const destination = asset.from_franchise_id === trade.proposer_franchise_id ? trade.recipient_franchise_id : trade.proposer_franchise_id;
-        await Promise.all([
-          supabase.from("roster_assignment").update({ franchise_id: destination, roster_state: "active", updated_at: new Date().toISOString() }).eq("id", assignmentByPlayer.get(asset.player_id)!.id).select("id"),
-          supabase.from("player_contract").update({ franchise_id: destination }).eq("season_id", season.id).eq("franchise_id", asset.from_franchise_id).eq("player_id", asset.player_id).select("id"),
-          supabase.from("player_right").update({ status: "expired" }).eq("season_id", season.id).eq("franchise_id", asset.from_franchise_id).eq("player_id", asset.player_id).in("right_type", ["franchise", "transition"]).eq("status", "active").select("id"),
-        ]);
-      }),
-      ...pickAssets.map(async (asset: any) => {
-        const destination = asset.from_franchise_id === trade.proposer_franchise_id ? trade.recipient_franchise_id : trade.proposer_franchise_id;
-        await supabase.from("draft_pick").update({ current_franchise_id: destination }).eq("id", asset.draft_pick_id).select("id");
-      }),
-    ]);
-    unwrap(await supabase.from("trade_offer").update({ status: "processed", reviewed_at: new Date().toISOString(), reviewed_by_owner_id: commissioner.id }).eq("id", trade.id).select("id").single());
-    unwrap(await supabase.from("transaction").insert({ season_id: season.id, franchise_id: trade.proposer_franchise_id, actor_owner_id: commissioner.id, transaction_type: "trade", status: "final", summary: `${trade.proposer?.[0]?.name ?? "CVC franchise"} completed a trade with ${trade.recipient?.[0]?.name ?? "CVC franchise"}.`, details: { trade_offer_id: trade.id, asset_count: assets.length } }).select("id").single());
-    await createAuditEvent(league.id, season.id, commissioner.id, "trade_offer", trade.id, "processed", "Commissioner executed an accepted CVC trade.");
+    const { season } = await getCurrentLeagueAndSeason();
+    await executeAcceptedTrade(input.tradeId, season, commissioner.id, "Commissioner manually re-ran CVC trade execution.");
     return { processed: true };
   }),
 

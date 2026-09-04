@@ -167,14 +167,12 @@ function TradesDesk() {
   const resetBuilder = () => { setRecipientId(""); setOfferPlayerIds([]); setRequestPlayerIds([]); setOfferPickIds([]); setRequestPickIds([]); setNote(""); };
   const propose = trpc.league.proposeTrade.useMutation({ onSuccess: async () => { resetBuilder(); await refresh(); } });
   const respond = trpc.league.respondToTrade.useMutation({ onSuccess: refresh });
-  const execute = trpc.league.executeTrade.useMutation({ onSuccess: refresh });
-  const isCommissioner = ["commissioner", "administrator"].includes(owner?.role ?? "");
   const toggle = (list: string[], setList: (value: string[]) => void, id: string) => setList(list.includes(id) ? list.filter(item => item !== id) : [...list, id]);
   const canSubmit = Boolean(recipientId) && (offerPlayerIds.length + offerPickIds.length > 0) && (requestPlayerIds.length + requestPickIds.length > 0);
   const playerLabel = (id: string, roster: typeof myRoster.data) => roster?.players.find(item => item.player?.id === id)?.player?.display_name ?? "Player";
   const pickLabel = (id: string, picks: typeof myPicks.data) => { const pick = picks?.find(item => item.id === id); return pick ? `${pick.year} Round ${pick.roundNumber} pick` : "Pick"; };
 
-  if (!owner) return <div className="grid gap-6 lg:grid-cols-[1fr_0.7fr]"><Card title="CVC Trade Desk"><ModuleState label="Sign in with your CVC owner PIN to propose, accept, or review trades." /></Card><Card title="Trade policy"><p className="text-sm leading-6 text-slate-600">Trade actions are limited to authenticated CVC owners. Trades may include rostered players and this year's (pre-draft) or next year's draft picks — no FAAB budget. Accepted proposals require commissioner execution and an audit record.</p></Card></div>;
+  if (!owner) return <div className="grid gap-6 lg:grid-cols-[1fr_0.7fr]"><Card title="CVC Trade Desk"><ModuleState label="Sign in with your CVC owner PIN to propose, accept, or review trades." /></Card><Card title="Trade policy"><p className="text-sm leading-6 text-slate-600">Trade actions are limited to authenticated CVC owners. Trades may include rostered players and this year's (pre-draft) or next year's draft picks — no FAAB budget. A trade processes immediately once the recipient accepts, with a full audit record.</p></Card></div>;
 
   return <div className="grid gap-6 xl:grid-cols-[1.25fr_0.75fr]">
     <Card title="Propose a trade">
@@ -213,10 +211,10 @@ function TradesDesk() {
           <p className="mt-1 text-xs text-slate-500"><b className="text-slate-600">{recipient?.name} sends:</b> {recipientAssets.map(assetLabel).join(", ") || "—"}</p>
           {trade.note ? <p className="mt-2 text-xs italic text-slate-500">{trade.note}</p> : null}
           {trade.status === "proposed" ? <div className="mt-3 flex flex-wrap gap-2">{isRecipient ? <><button onClick={() => respond.mutate({ tradeId: trade.id, response: "accepted" })} className="cvc-mini-button">Accept</button><button onClick={() => respond.mutate({ tradeId: trade.id, response: "rejected" })} className="cvc-mini-button">Reject</button></> : null}{isProposer ? <button onClick={() => respond.mutate({ tradeId: trade.id, response: "cancelled" })} className="cvc-mini-button">Cancel</button> : null}</div> : null}
-          {trade.status === "accepted" && isCommissioner ? <button onClick={() => execute.mutate({ tradeId: trade.id })} className="cvc-mini-button mt-3">Execute trade</button> : null}
+          {/* No manual "Execute trade" button: acceptance processes the trade immediately now. */}
         </div>;
       })}</div> : <ModuleState label="No CVC trade proposals are currently open." />}</Card>
-      <Card title="Trade governance"><p className="text-sm leading-6 text-slate-600">CVC validates player and pick ownership at proposal and execution. Only this year's picks (before that draft happens) and next year's picks are tradeable — nothing further out. An accepted trade is not final until a commissioner executes it, creating both transaction and audit records.</p></Card>
+      <Card title="Trade governance"><p className="text-sm leading-6 text-slate-600">CVC validates player and pick ownership at proposal and again at the moment of acceptance. Only this year's picks (before that draft happens) and next year's picks are tradeable — nothing further out. A trade processes immediately once the recipient accepts, creating both transaction and audit records — no separate commissioner approval step.</p></Card>
     </div>
   </div>;
 }
