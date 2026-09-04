@@ -256,14 +256,14 @@ export function CvcPlayerProfile() {
       {expertImpactItem.url ? <a href={expertImpactItem.url} target="_blank" rel="noreferrer" className="mt-3 inline-block text-xs font-bold text-[var(--cvc-primary)] hover:underline">Read the full Expert Note on FantasyPros →</a> : null}
     </section> : null}
 
-    {loadingNews || fantasyProsNews.isLoading || combinedPlayerNews.length ? <section className="cvc-card mt-5">
+    <section className="cvc-card mt-5">
       <div className="cvc-card-title"><span>Latest News</span><Newspaper size={16} /></div>
       {(loadingNews || fantasyProsNews.isLoading) && !combinedPlayerNews.length ? <div className="cvc-card-body text-sm text-slate-500">Loading player news…</div>
         : combinedPlayerNews.length ? <>
           <div>{(showAllNews ? combinedPlayerNews : combinedPlayerNews.slice(0, 3)).map((item, index) => <CvcNewsRow key={`${item.source}-${item.headline}-${index}`} item={item} isFirst={index === 0} />)}</div>
           {combinedPlayerNews.length > 3 ? <button type="button" onClick={() => setShowAllNews(current => !current)} className="flex w-full items-center justify-center gap-1.5 border-t border-slate-100 py-3 text-xs font-bold uppercase tracking-[0.08em] text-slate-500 hover:bg-slate-50">{showAllNews ? "Show less" : `Show all ${combinedPlayerNews.length} updates`} <ChevronDown size={13} className={showAllNews ? "rotate-180" : ""} /></button> : null}
         </> : <div className="cvc-card-body text-sm text-slate-500">No recent news found for this player.</div>}
-    </section> : null}
+    </section>
 
     <section className="cvc-card mt-5">
       <div className="flex items-center gap-1 border-b border-slate-200 bg-white px-3 pt-2">

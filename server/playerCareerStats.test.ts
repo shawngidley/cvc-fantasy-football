@@ -21,8 +21,10 @@ function mockFetch(eventsByYear: Record<number, { stats: string[] }[]>, labels: 
     const year = match ? Number(match[1]) : 0;
     const events = eventsByYear[year];
     if (!events) return { ok: false } as Response;
-    const eventsObj = Object.fromEntries(events.map((event, index) => [`event${index}`, event]));
-    return { ok: true, json: async () => ({ events: eventsObj, labels }) } as Response;
+    // Real ESPN shape: game events live nested under seasonTypes[].categories[].events[],
+    // not a flat top-level `events` map (that field exists separately as eventId-keyed
+    // metadata with no .stats array -- the bug this test suite exists to catch).
+    return { ok: true, json: async () => ({ seasonTypes: [{ categories: [{ events }] }], labels }) } as Response;
   });
 }
 
@@ -66,6 +68,23 @@ describe("getCvcPlayerCareerStats", () => {
     expect(row.rushTD).toBe(1);
     expect(row.recYds).toBe(25); // second YDS occurrence, not conflated with rushing's 80
     expect(row.rec).toBe(3);
+  });
+
+  it("does not confuse the flat top-level events metadata map (no .stats field) with the real nested seasonTypes events -- the exact bug found in production (GP counted correctly, every stat came back zero)", async () => {
+    const realEvents = [{ stats: ["25", "35", "300", "71.4", "8.6", "2", "0", "45", "1", "105.0", "60.0", "5", "20", "4.0", "0", "8"] }];
+    global.fetch = vi.fn(async () => ({
+      ok: true,
+      json: async () => ({
+        // Flat metadata map: real shape ESPN returns, keyed by eventId, no .stats field.
+        events: { event123: { id: "123", opponent: { abbreviation: "HOU" } }, event456: { id: "456", opponent: { abbreviation: "BUF" } } },
+        seasonTypes: [{ categories: [{ events: realEvents }] }],
+        labels: QB_LABELS,
+      }),
+    } as Response));
+    const rows = await getCvcPlayerCareerStats("12345", "QB", passRules, 2026, 1);
+    expect(rows).toHaveLength(1);
+    expect(rows[0].gp).toBe(1); // from the real nested events, not the 2-entry flat metadata map
+    expect(rows[0].passYds).toBe(300); // must not be 0
   });
 
   it("omits years with no data instead of returning a zeroed row", async () => {

@@ -112,10 +112,21 @@ function toCvcStatsShape(row: Partial<CvcSeasonStatRow>): Tank01LiveStats {
 async function fetchOneSeason(espnId: string, year: number, position: string, rules: CvcScoringRule[]): Promise<CvcSeasonStatRow | null> {
   const response = await fetch(`${ESPN_GAMELOG}/${espnId}/gamelog?season=${year}`, { signal: AbortSignal.timeout(15_000) });
   if (!response.ok) return null;
-  const data = await response.json() as { events?: Record<string, { stats?: string[] }>; labels?: string[]; names?: string[]; season?: { year?: number } };
-  const events = Object.values(data.events ?? {});
-  const labels = data.labels ?? data.names ?? [];
-  if (!events.length || !labels.length) return null;
+  const data = await response.json() as { seasonTypes?: { categories?: { events?: { stats?: string[] }[] }[] }[]; labels?: string[] };
+  const labels = data.labels ?? [];
+  if (!labels.length) return null;
+  // The regular-season game events live nested under seasonTypes[].categories[].events[]
+  // -- NOT the top-level `events` field, which is a separate eventId-keyed metadata map
+  // (used only for team lookups) with no .stats array on its entries at all. Picking the
+  // category with the most events matches WRC's exact "find regular season" heuristic.
+  let events: { stats?: string[] }[] = [];
+  for (const seasonType of data.seasonTypes ?? []) {
+    for (const category of seasonType.categories ?? []) {
+      const candidateEvents = category.events ?? [];
+      if (candidateEvents.length > events.length) events = candidateEvents;
+    }
+  }
+  if (!events.length) return null;
   const totals = sumGameStats(events, buildLabelMap(labels));
   const extracted = extractFromGamelog(totals, events.length, labels);
   const cvcPts = calculateCvcFantasyPoints(toCvcStatsShape(extracted), position, rules);
