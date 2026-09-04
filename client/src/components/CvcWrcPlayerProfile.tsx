@@ -2,6 +2,8 @@ import { useEffect, useMemo, useState } from "react";
 import { Link, useRoute } from "wouter";
 import { ArrowLeft, BarChart3, CalendarDays, ClipboardList, Newspaper, ShieldCheck, TrendingUp } from "lucide-react";
 import { trpc } from "@/lib/trpc";
+import { normalizePlayerName } from "@shared/playerNameMatch";
+import { CvcNewsRow, type CvcNewsItem } from "@/components/CvcNewsRow";
 
 type TankRecord = Record<string, unknown>;
 type TankPlayerInfo = { body?: TankRecord | TankRecord[] };
@@ -111,6 +113,30 @@ export function CvcWrcPlayerProfile() {
   const [tab, setTab] = useState<"stats" | "schedule" | "gamelog">("stats");
   const { row: tank, loading: loadingInfo } = useTank01PlayerInfo(detail.data?.display_name);
   const { items: news, loading: loadingNews } = usePlayerNews(detail.data?.display_name);
+  // Same source and matching approach as the main News page (CvcWrcPlayerNews.tsx) --
+  // fetches the general FantasyPros feed and filters client-side to this one player via
+  // the shared canonical name normalizer, rather than a separate per-player API call.
+  const fantasyProsNews = trpc.league.fantasyProsNews.useQuery({ limit: 100 }, { staleTime: 15 * 60_000 });
+  const normalizedPlayerName = detail.data?.display_name ? normalizePlayerName(detail.data.display_name) : "";
+  const fantasyProsPlayerNews = useMemo<CvcNewsItem[]>(() => {
+    if (!normalizedPlayerName) return [];
+    return (fantasyProsNews.data?.items ?? [])
+      .filter(item => normalizePlayerName(item.playerName) === normalizedPlayerName)
+      .map(item => ({
+        playerName: item.playerName, pos: item.position ?? "", nflTeam: item.team ?? "",
+        headline: item.title, description: item.impact || item.description || undefined,
+        published: item.published, url: item.link, isInjury: item.isInjury,
+        source: "FantasyPros" as const, playerId: item.playerId,
+      }));
+  }, [fantasyProsNews.data, normalizedPlayerName]);
+  const tank01PlayerNews = useMemo<CvcNewsItem[]>(() => news.map((item, index) => ({
+    playerName: detail.data?.display_name ?? "", pos: detail.data?.position ?? "", nflTeam: detail.data?.nfl_team ?? "",
+    headline: item.title ?? "", published: new Date(Date.now() - index).toISOString(), url: item.link,
+    isInjury: looksLikeInjury(item.title ?? ""), source: "Tank01" as const, playerId: detail.data?.id ?? null,
+  })), [news, detail.data]);
+  // FantasyPros first (real dates, richer detail) then Tank01, since Tank01 items have
+  // no real timestamp to interleave by (see the synthetic `published` above).
+  const combinedPlayerNews = [...fantasyProsPlayerNews, ...tank01PlayerNews];
   const { games: schedule } = useTeamSchedule(detail.data?.nfl_team, valid);
   const { games: gameLog, loading: loadingGameLog } = useTeamSchedule(detail.data?.nfl_team, tab === "gamelog"); // shares the schedule shape/cache; see note in Game Log tab below
   const metrics = useMemo(() => flattenStats(tank), [tank]);
@@ -171,7 +197,7 @@ export function CvcWrcPlayerProfile() {
 
     {upcoming ? <section className="cvc-card mt-5"><div className="cvc-card-title"><span>Upcoming Matchup</span><CalendarDays size={16} /></div><div className="cvc-card-body flex items-center justify-between"><p className="font-display text-2xl text-cvc-deep">{upcoming.opponent!.atOrVs} {upcoming.opponent!.opponent}</p><p className="text-sm text-slate-500">{firstOf(upcoming.game, ["gameWeek", "week"]) ? `Week ${firstOf(upcoming.game, ["gameWeek", "week"])}` : ""} {firstOf(upcoming.game, ["gameDate", "date"]) ?? ""}</p></div></section> : null}
 
-    {loadingNews || news.length ? <section className="cvc-card mt-5"><div className="cvc-card-title"><span>Player News</span><Newspaper size={16} /></div>{loadingNews ? <div className="cvc-card-body text-sm text-slate-500">Loading Tank01 news…</div> : <div>{news.map((item, index) => <article key={`${item.title}-${index}`} className="border-t border-slate-200 px-5 py-4 first:border-t-0"><div className="flex flex-wrap items-center gap-2">{looksLikeInjury(item.title ?? "") ? <span className="rounded bg-rose-100 px-2 py-1 text-[10px] font-black uppercase text-rose-800">Injury watch</span> : <span className="rounded bg-slate-100 px-2 py-1 text-[10px] font-black uppercase text-slate-600">Tank01</span>}</div><h3 className="mt-2 text-base font-black leading-snug text-cvc-deep">{item.title}</h3>{item.link ? <a href={item.link} target="_blank" rel="noreferrer" className="mt-2 inline-block text-xs font-black uppercase tracking-[0.08em] text-[var(--cvc-primary)] underline">Read source</a> : null}</article>)}</div>}</section> : null}
+    {loadingNews || fantasyProsNews.isLoading || combinedPlayerNews.length ? <section className="cvc-card mt-5"><div className="cvc-card-title"><span>Player News</span><Newspaper size={16} /></div>{(loadingNews || fantasyProsNews.isLoading) && !combinedPlayerNews.length ? <div className="cvc-card-body text-sm text-slate-500">Loading player news…</div> : combinedPlayerNews.length ? <div>{combinedPlayerNews.map((item, index) => <CvcNewsRow key={`${item.source}-${item.headline}-${index}`} item={item} isFirst={index === 0} />)}</div> : <div className="cvc-card-body text-sm text-slate-500">No recent news found for this player.</div>}</section> : null}
 
     <section className="cvc-card mt-5">
       <div className="flex items-center gap-1 border-b border-slate-200 bg-white px-3 pt-2">
