@@ -1,4 +1,5 @@
 import { calculateCvcFantasyPoints, type CvcScoringRule, type Tank01LiveStats } from "@shared/cvcScoring";
+import { normalizeNFLTeamCode } from "@shared/nflTeamCodes";
 import { getNFLDataAdapter, Tank01NFLDataAdapter } from "./nflDataAdapter";
 import { supabase, unwrap } from "./supabase";
 
@@ -35,7 +36,7 @@ function asRecord(value: unknown): Record<string, string | number | undefined> {
 export function extractCurrentTeam(row: Record<string, unknown>): string | null {
   const raw = row.team ?? row.teamAbv ?? row.currentTeam ?? row.team_abv ?? row.nflTeam;
   if (raw === undefined || raw === null) return null;
-  const value = String(raw).trim().toUpperCase();
+  const value = normalizeNFLTeamCode(String(raw));
   return value && value !== "FA" ? value : null;
 }
 

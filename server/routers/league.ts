@@ -4,6 +4,7 @@ import { protectedProcedure, publicProcedure, router } from "../_core/trpc";
 import { getFantasyProsDataAdapter, getNFLDataAdapter } from "../nflDataAdapter";
 import { fantasyProsCacheStatus, getFantasyProsActivePlayerIds, getFantasyProsRookiePlayerIds } from "../fantasyProsCache";
 import { getFantasyProsInjuries, getFantasyProsNews } from "../fantasyProsNews";
+import { syncNflTeamAssignments } from "../nflTeamAssignmentSync";
 import { syncFantasyProsSnapshot, syncFantasyProsActiveFlags, syncFantasyProsRookieFlags } from "../fantasyProsSync";
 import { syncTank01SeasonStats } from "../tank01SeasonStatsSync";
 import { syncTank01ActiveRoster } from "../tank01ActiveRosterSync";
@@ -813,6 +814,16 @@ export const leagueRouter = router({
     const snapshot = await adapter.listPlayerSnapshot();
     const payloadCount = Array.isArray(snapshot.payload) ? snapshot.payload.length : Array.isArray((snapshot.payload as { players?: unknown[] })?.players) ? ((snapshot.payload as { players: unknown[] }).players.length) : null;
     return { provider: snapshot.provider, source: snapshot.source, fetchedAt: snapshot.fetchedAt, expiresAt: snapshot.expiresAt, playerCount: payloadCount, lastError: snapshot.lastError };
+  }),
+
+  // Commissioner-triggered (matches the established preference for manual sync buttons
+  // over cron jobs, given prior cron reliability issues in this codebase). Pulls the
+  // current nflverse roster CSV and corrects any stale player.nfl_team values directly --
+  // same root fix as the recent Travis Etienne / JAC-JAX / WAS-WSH cleanup, now automated
+  // going forward instead of needing another one-off manual SQL pass.
+  syncNflTeamAssignments: protectedProcedure.mutation(async ({ ctx }) => {
+    await requireCommissioner({ openId: ctx.user.openId });
+    return syncNflTeamAssignments();
   }),
 
   syncFantasyProsPlayers: protectedProcedure.mutation(async ({ ctx }) => {

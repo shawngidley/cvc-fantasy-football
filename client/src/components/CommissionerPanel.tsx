@@ -155,6 +155,15 @@ function SeasonStatsSyncModule() {
     onSuccess: data => toast.success(`Synced ${data.totalReceived} players from FantasyPros (${data.inserted} new, ${data.enriched} updated).`),
     onError: error => toast.error(error.message),
   });
+  const [nflTeamResult, setNflTeamResult] = useState<null | { rosterRowsFetched: number; matchedPlayers: number; updated: number; updatedPlayers: { displayName: string; from: string | null; to: string }[] }>(null);
+  const syncNflTeams = trpc.league.syncNflTeamAssignments.useMutation({
+    onSuccess: async data => {
+      setNflTeamResult(data);
+      await Promise.all([utils.league.freeAgents.invalidate(), utils.league.allPlayers.invalidate()]);
+      toast.success(`Corrected ${data.updated} player NFL team assignment${data.updated === 1 ? "" : "s"} from nflverse's current roster data (${data.matchedPlayers} players matched).`);
+    },
+    onError: error => toast.error(error.message),
+  });
   const syncActive = trpc.league.syncTank01ActiveRoster.useMutation({
     onSuccess: async data => {
       setActiveResult(data);
@@ -194,6 +203,15 @@ function SeasonStatsSyncModule() {
         <p className="mt-1"><b className="text-cvc-deep">Matched by stored Tank01 ID:</b> {activeResult.matchedByStoredId} · <b className="text-cvc-deep">Newly matched by name and permanently linked:</b> {activeResult.matchedByNameNewlyLinked} · <b className="text-cvc-deep">Defenses confirmed:</b> {activeResult.matchedDst}</p>
         {Object.keys(activeResult.errors).length ? <p className="mt-1 text-red-700"><b>Team fetch errors:</b> {Object.entries(activeResult.errors).map(([team, message]) => `${team}: ${message}`).join("; ")}</p> : null}
         {activeResult.sampleRosterPlayer ? <details className="mt-2"><summary className="cursor-pointer text-cvc-deep">Raw sample roster player (for checking the name field)</summary><pre className="mt-1 max-h-64 overflow-auto rounded bg-slate-50 p-2 text-[10px]">{JSON.stringify(activeResult.sampleRosterPlayer, null, 2)}</pre></details> : null}
+      </div> : null}
+    </div>
+    <div className="rounded-lg border border-dashed border-cvc-deep/20 bg-cvc-tint p-4">
+      <p className="text-sm font-semibold text-cvc-deep">NFL team assignments</p>
+      <p className="mt-1 text-xs leading-5 text-slate-500">Pulls nflverse's current roster CSV and corrects any player whose CVC record shows a stale or wrong NFL team (trades, signings, or code-format mismatches like JAX vs. JAC). Matches by name + position, not name alone, so two different real players who happen to share a name are never confused. Safe to run any time; only writes when a player's actual team has changed.</p>
+      <button type="button" className="cvc-button-compact mt-3" disabled={syncNflTeams.isPending} onClick={() => syncNflTeams.mutate()}><Save size={14} /> {syncNflTeams.isPending ? "Syncing…" : "Sync NFL team assignments"}</button>
+      {nflTeamResult ? <div className="mt-3 rounded-md border border-slate-200 bg-white p-3 text-xs text-slate-600">
+        <p><b className="text-cvc-deep">Roster rows fetched:</b> {nflTeamResult.rosterRowsFetched} · <b className="text-cvc-deep">Players matched:</b> {nflTeamResult.matchedPlayers} · <b className="text-cvc-deep">Corrected:</b> {nflTeamResult.updated}</p>
+        {nflTeamResult.updatedPlayers.length ? <ul className="mt-2 space-y-0.5">{nflTeamResult.updatedPlayers.map(item => <li key={item.displayName}>{item.displayName}: {item.from ?? "—"} → {item.to}</li>)}</ul> : null}
       </div> : null}
     </div>
     <div className="rounded-lg border border-dashed border-red-300 bg-red-50 p-4">
