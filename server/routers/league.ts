@@ -867,14 +867,14 @@ export const leagueRouter = router({
   waiverStatus: publicProcedure.query(async () => {
     const { season } = await getCurrentLeagueAndSeason();
     const now = new Date().toISOString();
-    const period = unwrap(await supabase.from("waiver_period").select("id, label, opens_at, closes_at, status").eq("season_id", season.id).eq("status", "open").lte("opens_at", now).gte("closes_at", now).order("closes_at").limit(1).maybeSingle());
+    const period = unwrap(await supabase.from("waiver_period").select("id, label, opens_at, closes_at, status, period_type").eq("season_id", season.id).eq("status", "open").lte("opens_at", now).gte("closes_at", now).order("closes_at").limit(1).maybeSingle());
     return { period };
   }),
 
-  createWaiverPeriod: protectedProcedure.input(z.object({ label: z.string().min(2).max(100), opensAt: z.string().datetime(), closesAt: z.string().datetime() }).refine(value => new Date(value.closesAt) > new Date(value.opensAt), { message: "A waiver period must close after it opens." })).mutation(async ({ ctx, input }) => {
+  createWaiverPeriod: protectedProcedure.input(z.object({ label: z.string().min(2).max(100), opensAt: z.string().datetime(), closesAt: z.string().datetime(), periodType: z.enum(["bid", "free"]).default("bid") }).refine(value => new Date(value.closesAt) > new Date(value.opensAt), { message: "A waiver period must close after it opens." })).mutation(async ({ ctx, input }) => {
     const commissioner = await requireCommissioner({ openId: ctx.user.openId });
     const { league, season } = await getCurrentLeagueAndSeason();
-    const period = unwrap(await supabase.from("waiver_period").insert({ season_id: season.id, label: input.label, opens_at: input.opensAt, closes_at: input.closesAt, status: "open" }).select("id, label, opens_at, closes_at, status").single());
+    const period = unwrap(await supabase.from("waiver_period").insert({ season_id: season.id, label: input.label, opens_at: input.opensAt, closes_at: input.closesAt, status: "open", period_type: input.periodType }).select("id, label, opens_at, closes_at, status, period_type").single());
     if (!period) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "CVC waiver period could not be created." });
     await createAuditEvent(league.id, season.id, commissioner.id, "waiver_period", period.id, "created", `Opened waiver period ${period.label}`);
     return period;
@@ -887,16 +887,22 @@ export const leagueRouter = router({
     const franchise = unwrap(await supabase.from("franchise").select("id, name").eq("current_owner_id", owner.id).eq("is_active", true).limit(1).maybeSingle());
     if (!franchise) throw new TRPCError({ code: "FORBIDDEN", message: "Only an owner with an active CVC franchise may submit a waiver claim." });
     const now = new Date().toISOString();
-    const period = unwrap(await supabase.from("waiver_period").select("id, label").eq("season_id", season.id).eq("status", "open").lte("opens_at", now).gte("closes_at", now).order("closes_at").limit(1).maybeSingle());
+    const period = unwrap(await supabase.from("waiver_period").select("id, label, period_type").eq("season_id", season.id).eq("status", "open").lte("opens_at", now).gte("closes_at", now).order("closes_at").limit(1).maybeSingle());
     if (!period) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "There is no open CVC waiver period." });
+    // The free agent period (post-Sunday, bid-exempt) is always a flat $1 claim awarded
+    // by waiver priority, regardless of whatever amount was submitted -- ignore the
+    // client's amount entirely rather than trusting it, matching how a real waiver claim
+    // (not a bid) works.
+    const isFreePeriod = period.period_type === "free";
+    const amount = isFreePeriod ? 1 : input.amount;
     // $30 season cap: a bid can't itself exceed what's left, accounting for every other
     // *pending* bid this franchise already has open this period too (not just already-won
     // bids) -- otherwise an owner could submit several $30 bids simultaneously and only
     // get caught at resolution time, when it's too late to bid smarter.
     const balance = await getFaabBalance(franchise.id, season.id);
     const otherPendingThisPeriod = (unwrap(await supabase.from("faab_bid").select("amount").eq("waiver_period_id", period.id).eq("franchise_id", franchise.id).eq("status", "pending").neq("player_id", input.playerId)) ?? []).reduce((total, bid) => total + bid.amount, 0);
-    if (input.amount > balance - otherPendingThisPeriod) {
-      throw new TRPCError({ code: "BAD_REQUEST", message: `This bid exceeds your remaining CVC FAAB budget. You have $${balance} left this season${otherPendingThisPeriod ? ` ($${otherPendingThisPeriod} already committed to other pending bids this period)` : ""}.` });
+    if (amount > balance - otherPendingThisPeriod) {
+      throw new TRPCError({ code: "BAD_REQUEST", message: `This ${isFreePeriod ? "claim" : "bid"} exceeds your remaining CVC FAAB budget. You have $${balance} left this season${otherPendingThisPeriod ? ` ($${otherPendingThisPeriod} already committed to other pending claims this period)` : ""}.` });
     }
     const [player, activeAssignment] = await Promise.all([
       supabase.from("player").select("id, display_name").eq("id", input.playerId).maybeSingle(),
@@ -912,7 +918,7 @@ export const leagueRouter = router({
         throw new TRPCError({ code: "BAD_REQUEST", message: `This player was just acquired via waivers and can't be cut until the next waiver resolution (${new Date(drop.locked_until).toLocaleString("en-US", { weekday: "short", hour: "numeric", minute: "2-digit", timeZoneName: "short" })}).` });
       }
     }
-    const bid = unwrap(await supabase.from("faab_bid").upsert({ waiver_period_id: period.id, franchise_id: franchise.id, player_id: input.playerId, drop_player_id: input.dropPlayerId ?? null, amount: input.amount, priority: input.priority, max_players_desired: input.maxPlayersDesired, status: "pending" }, { onConflict: "waiver_period_id,franchise_id,player_id" }).select("id, amount, priority, status").single());
+    const bid = unwrap(await supabase.from("faab_bid").upsert({ waiver_period_id: period.id, franchise_id: franchise.id, player_id: input.playerId, drop_player_id: input.dropPlayerId ?? null, amount, priority: input.priority, max_players_desired: input.maxPlayersDesired, status: "pending" }, { onConflict: "waiver_period_id,franchise_id,player_id" }).select("id, amount, priority, status").single());
     if (!bid) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "CVC waiver claim could not be saved." });
     await createAuditEvent(league.id, season.id, owner.id, "faab_bid", bid.id, "submitted", `Submitted ${period.label} claim for ${playerRow.display_name}`);
     return bid;
@@ -1356,6 +1362,48 @@ export const leagueRouter = router({
     unwrap(await supabase.from("transaction").insert({ season_id: season.id, franchise_id: franchise.id, actor_owner_id: actor.id, transaction_type: "note", status: "final", summary: `${franchise.name} designated ${playerRow?.display_name ?? "a player"} for ${input.rightType === "rookie_match" ? "rookie" : "waiver"} matching rights.`, details: { player_id: input.playerId, right_type: input.rightType } }).select("id").single());
     await createAuditEvent(league.id, season.id, actor.id, "player_right", right.id, "restricted_right_assigned", `${franchise.name} assigned ${input.rightType} to ${playerRow?.display_name ?? "a player"} and released them to the CVC restricted-rights free-agent pool.`);
     return { rightId: right.id, rightType: input.rightType };
+  }),
+
+  // Shows which of the calling owner's current roster players are eligible for the
+  // one-per-season restricted-rights designation (assignRestrictedRight, above): a
+  // waiver-acquired ('W' marked) contract whose expires_year has reached this season.
+  // Pure convenience query -- assignRestrictedRight already enforces the real
+  // eligibility rules itself; this just saves an owner from hunting through their roster.
+  myWaiverEligiblePlayers: protectedProcedure.query(async ({ ctx }) => {
+    const owner = await getOwnerAccess({ openId: ctx.user.openId });
+    if (!owner) throw new TRPCError({ code: "FORBIDDEN", message: "A CVC owner session is required." });
+    const franchise = unwrap(await supabase.from("franchise").select("id").eq("current_owner_id", owner.id).eq("is_active", true).limit(1).maybeSingle());
+    if (!franchise) return [];
+    const { season } = await getCurrentLeagueAndSeason();
+    const contracts = unwrap(await supabase.from("player_contract").select("player_id, salary, expires_year, source_marker, player:player_id(id, display_name, position, nfl_team)").eq("season_id", season.id).eq("franchise_id", franchise.id).eq("contract_status", "active").eq("source_marker", "W").lte("expires_year", season.year)) ?? [];
+    const activeRoster = new Set((unwrap(await supabase.from("roster_assignment").select("player_id").eq("season_id", season.id).eq("franchise_id", franchise.id).is("released_at", null)) ?? []).map(row => row.player_id));
+    return contracts.filter(row => activeRoster.has(row.player_id));
+  }),
+
+  // The default outcome of rule #2 (every waiver-acquired contract terminates at
+  // season's end): releases every remaining active 'W'-marked, expired-this-season
+  // contract that ISN'T already covered by an active waiver_match player_right (i.e.
+  // wasn't the one player each owner chose to protect via assignRestrictedRight -- run
+  // that first, per franchise, before running this sweep). No rights are created here;
+  // this is purely the "terminate" half of the rule.
+  terminateExpiredWaiverContracts: protectedProcedure.mutation(async ({ ctx }) => {
+    const commissioner = await requireCommissioner({ openId: ctx.user.openId });
+    const { league, season } = await getCurrentLeagueAndSeason();
+    const contracts = unwrap(await supabase.from("player_contract").select("id, franchise_id, player_id, player:player_id(display_name), franchise:franchise_id(name)").eq("season_id", season.id).eq("contract_status", "active").eq("source_marker", "W").lte("expires_year", season.year)) ?? [];
+    const protectedPairs = new Set((unwrap(await supabase.from("player_right").select("franchise_id, player_id").eq("season_id", season.id).eq("right_type", "waiver_match").eq("status", "active")) ?? []).map(row => `${row.franchise_id}:${row.player_id}`));
+    const now = new Date().toISOString();
+    const terminated: { playerName: string; franchiseName: string }[] = [];
+    for (const contract of contracts) {
+      if (protectedPairs.has(`${contract.franchise_id}:${contract.player_id}`)) continue;
+      unwrap(await supabase.from("roster_assignment").update({ roster_state: "released", released_at: now }).eq("season_id", season.id).eq("franchise_id", contract.franchise_id).eq("player_id", contract.player_id).is("released_at", null).select("id"));
+      unwrap(await supabase.from("player_contract").update({ contract_status: "expired" }).eq("id", contract.id).select("id").single());
+      const playerName = contract.player?.[0]?.display_name ?? "Unknown player";
+      const franchiseName = contract.franchise?.[0]?.name ?? "Unknown franchise";
+      unwrap(await supabase.from("transaction").insert({ season_id: season.id, franchise_id: contract.franchise_id, actor_owner_id: commissioner.id, transaction_type: "note", status: "final", summary: `${franchiseName}'s waiver-acquired contract for ${playerName} terminated at season's end.`, details: { player_id: contract.player_id } }).select("id").single());
+      terminated.push({ playerName, franchiseName });
+    }
+    await createAuditEvent(league.id, season.id, commissioner.id, "player_contract", null, "waiver_contracts_terminated", `Terminated ${terminated.length} expired waiver contract(s) at season's end.`);
+    return { terminated };
   }),
 
   undoProtection: protectedProcedure.input(z.object({ franchiseId: z.string().uuid(), rightId: z.string().uuid() })).mutation(async ({ ctx, input }) => {

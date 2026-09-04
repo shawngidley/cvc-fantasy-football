@@ -173,6 +173,15 @@ function SeasonStatsSyncModule() {
     },
     onError: error => toast.error(error.message),
   });
+  const [waiverTerminationResult, setWaiverTerminationResult] = useState<null | { terminated: { playerName: string; franchiseName: string }[] }>(null);
+  const terminateWaiverContracts = trpc.league.terminateExpiredWaiverContracts.useMutation({
+    onSuccess: async data => {
+      setWaiverTerminationResult(data);
+      await Promise.all([utils.league.freeAgents.invalidate(), utils.league.allPlayers.invalidate()]);
+      toast.success(`Terminated ${data.terminated.length} waiver-acquired contract(s) at season's end.`);
+    },
+    onError: error => toast.error(error.message),
+  });
   const syncActive = trpc.league.syncTank01ActiveRoster.useMutation({
     onSuccess: async data => {
       setActiveResult(data);
@@ -233,6 +242,15 @@ function SeasonStatsSyncModule() {
           {waiverResult.awarded?.length ? <div className="mt-2"><p className="font-semibold text-cvc-deep">Awarded</p><ul className="mt-1 space-y-0.5">{waiverResult.awarded.map((item, index) => <li key={index}>{item.franchiseName} won {item.playerName} for ${item.amount}{item.droppedPlayerName ? ` (dropped ${item.droppedPlayerName})` : ""}</li>)}</ul></div> : null}
           {waiverResult.skipped?.length ? <div className="mt-2"><p className="font-semibold text-amber-700">Skipped</p><ul className="mt-1 space-y-0.5">{waiverResult.skipped.map((item, index) => <li key={index}>{item.franchiseName} on {item.playerName}: {item.reason}</li>)}</ul></div> : null}
         </> : <p>{waiverResult.message}</p>}
+      </div> : null}
+    </div>
+    <div className="rounded-lg border border-dashed border-red-300 bg-red-50 p-4">
+      <p className="text-sm font-semibold text-cvc-deep">End of season: terminate waiver contracts</p>
+      <p className="mt-1 text-xs leading-5 text-slate-500">Releases every remaining waiver-acquired ('W') contract that's reached its expiration this season, except for each franchise's one protected player (assigned via the "waiver right" option on the Protections page — run that per franchise first). This is the automatic "terminate the rest" half of the season-end waiver rule; run it once, after every owner has had a chance to make their one restricted-rights designation.</p>
+      <button type="button" className="cvc-button-compact mt-3 bg-red-600 hover:bg-red-700" disabled={terminateWaiverContracts.isPending} onClick={() => { if (window.confirm("This releases every remaining waiver-acquired contract league-wide, except each franchise's one protected player. Are you sure everyone has made their designation?")) terminateWaiverContracts.mutate(); }}><Save size={14} /> {terminateWaiverContracts.isPending ? "Terminating…" : "Terminate expired waiver contracts"}</button>
+      {waiverTerminationResult ? <div className="mt-3 rounded-md border border-slate-200 bg-white p-3 text-xs text-slate-600">
+        <p><b className="text-cvc-deep">Terminated:</b> {waiverTerminationResult.terminated.length}</p>
+        {waiverTerminationResult.terminated.length ? <ul className="mt-2 space-y-0.5">{waiverTerminationResult.terminated.map((item, index) => <li key={index}>{item.franchiseName}: {item.playerName}</li>)}</ul> : null}
       </div> : null}
     </div>
     <div className="rounded-lg border border-dashed border-red-300 bg-red-50 p-4">
