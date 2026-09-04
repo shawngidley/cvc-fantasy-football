@@ -1,7 +1,8 @@
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
 import { protectedProcedure, publicProcedure, router } from "../_core/trpc";
-import { getFantasyProsDataAdapter, getNFLDataAdapter } from "../nflDataAdapter";
+import { getFantasyProsDataAdapter, getNFLDataAdapter, Tank01NFLDataAdapter } from "../nflDataAdapter";
+import { getCvcPlayerCareerStats, parseCvcGameLog } from "../playerCareerStats";
 import { fantasyProsCacheStatus, getFantasyProsActivePlayerIds, getFantasyProsRookiePlayerIds } from "../fantasyProsCache";
 import { getFantasyProsInjuries, getFantasyProsNews, getFantasyProsProjections, getFantasyProsRanks } from "../fantasyProsNews";
 import { normalizePlayerName } from "@shared/playerNameMatch";
@@ -774,14 +775,17 @@ export const leagueRouter = router({
     const player = unwrap(await supabase.from("player").select("id, provider, external_id, display_name, position, nfl_team, status, metadata, created_at, updated_at").eq("id", input.playerId).maybeSingle());
     if (!player) throw new TRPCError({ code: "NOT_FOUND", message: "CVC player was not found." });
     const { season } = await getCurrentLeagueAndSeason();
-    const assignment = unwrap(await supabase.from("roster_assignment").select("franchise_id, acquired_at, assigned_slot_code").eq("season_id", season.id).eq("player_id", player.id).eq("roster_state", "active").is("released_at", null).maybeSingle());
+    // Not filtered to roster_state='active' -- a benched player (including every
+    // waiver-acquired player, which always starts on the bench) is still owned by that
+    // franchise and should still show ownership here.
+    const assignment = unwrap(await supabase.from("roster_assignment").select("franchise_id, acquired_at, assigned_slot_code").eq("season_id", season.id).eq("player_id", player.id).is("released_at", null).maybeSingle());
     const contract = assignment ? unwrap(await supabase.from("player_contract").select("salary, expires_year, source_marker, contract_status").eq("season_id", season.id).eq("franchise_id", assignment.franchise_id).eq("player_id", player.id).maybeSingle()) : null;
-    const franchise = assignment ? unwrap(await supabase.from("franchise").select("id, name, current_owner_id").eq("id", assignment.franchise_id).maybeSingle()) : null;
+    const franchise = assignment ? unwrap(await supabase.from("franchise").select("id, name, logo_url, current_owner_id").eq("id", assignment.franchise_id).maybeSingle()) : null;
     const owner = franchise ? unwrap(await supabase.from("owner").select("display_name").eq("id", franchise.current_owner_id).maybeSingle()) : null;
     return {
       ...player,
       season: { id: season.id, year: season.year },
-      ownership: franchise ? { franchiseId: franchise.id, franchiseName: franchise.name, ownerName: owner?.display_name ?? null, acquiredAt: assignment?.acquired_at ?? null, assignedSlotCode: assignment?.assigned_slot_code ?? null } : null,
+      ownership: franchise ? { franchiseId: franchise.id, franchiseName: franchise.name, franchiseLogoUrl: franchise.logo_url, ownerName: owner?.display_name ?? null, acquiredAt: assignment?.acquired_at ?? null, assignedSlotCode: assignment?.assigned_slot_code ?? null } : null,
       contract,
     };
   }),
@@ -858,7 +862,34 @@ export const leagueRouter = router({
     return { items, weekNumber: currentWeek.week_number };
   }),
 
-  // Powers the "Expert Consensus" panel on the individual player profile page.
+  // Multi-year season-by-season stats, powering the player profile's Stats tab. Uses
+  // ESPN's public gamelog API (no key required) but computes CVC's own fantasy points
+  // from this season's actual scoring_rule rows, not a hardcoded formula.
+  playerCareerSeasonStats: publicProcedure.input(z.object({ playerId: z.string().uuid(), espnId: z.string().min(1) })).query(async ({ input }) => {
+    const player = unwrap(await supabase.from("player").select("position").eq("id", input.playerId).maybeSingle());
+    if (!player?.position) return { seasons: [] };
+    const { season } = await getCurrentLeagueAndSeason();
+    const rules = unwrap(await supabase.from("scoring_rule").select("stat_key, value, applies_to_positions").eq("season_id", season.id)) ?? [];
+    const seasons = await getCvcPlayerCareerStats(input.espnId, player.position, rules, season.year);
+    return { seasons };
+  }),
+
+  // Per-game log for one season, powering the player profile's Game Log tab. Needs the
+  // player's confirmed Tank01 playerID (from the client's already-fetched Tank01 info
+  // response) rather than searching by name again.
+  playerGameLog: publicProcedure.input(z.object({ playerId: z.string().uuid(), tank01PlayerId: z.string().min(1), year: z.number().int() })).query(async ({ input }) => {
+    const player = unwrap(await supabase.from("player").select("position, nfl_team").eq("id", input.playerId).maybeSingle());
+    if (!player?.position) return { games: [] };
+    const adapter = getNFLDataAdapter();
+    if (!(adapter instanceof Tank01NFLDataAdapter)) return { games: [] };
+    const { season } = await getCurrentLeagueAndSeason();
+    const rules = unwrap(await supabase.from("scoring_rule").select("stat_key, value, applies_to_positions").eq("season_id", season.id)) ?? [];
+    const body = await adapter.getGamesForPlayer(input.tank01PlayerId, input.year).catch(() => ({}));
+    const games = parseCvcGameLog(body, player.nfl_team ?? "", player.position, rules);
+    return { games };
+  }),
+
+
   // Position rank + overall rank ("OP" = FantasyPros' cross-position overall/superflex
   // code) come from their consensus-rankings endpoint; the weekly point projection from
   // their separate projections endpoint. Filtered server-side to just this one player

@@ -141,6 +141,25 @@ export class Tank01NFLDataAdapter implements NFLDataAdapter {
     if (payload.error) throw new Error(`Tank01 getNFLPlayerInfo (by ID) returned ${payload.error}`);
     return Array.isArray(payload.body) ? payload.body[0] ?? null : payload.body ?? null;
   }
+
+  /** Per-game box scores for one player in one season, keyed by gameID
+   * ("20260913_BUF@HOU" -- away@home). Powers the player profile's Game Log tab. */
+  async getGamesForPlayer(playerId: string, season: number) {
+    const response = await fetch(`https://${this.host}/getNFLGamesForPlayer?playerID=${encodeURIComponent(playerId)}&season=${season}`, { headers: this.headers(), signal: AbortSignal.timeout(15_000) });
+    if (!response.ok) throw new Error(`Tank01 getNFLGamesForPlayer failed with status ${response.status}`);
+    const payload = await response.json() as { body?: Record<string, unknown>; error?: string };
+    if (payload.error) throw new Error(`Tank01 getNFLGamesForPlayer returned ${payload.error}`);
+    return payload.body ?? {};
+  }
+
+  /** Full-season schedule for one NFL team. Powers the player profile's Schedule tab. */
+  async getTeamSchedule(teamAbv: string, season: number) {
+    const response = await fetch(`https://${this.host}/getNFLTeamSchedule?teamAbv=${encodeURIComponent(teamAbv)}&season=${season}`, { headers: this.headers(), signal: AbortSignal.timeout(15_000) });
+    if (!response.ok) throw new Error(`Tank01 getNFLTeamSchedule failed with status ${response.status}`);
+    const payload = await response.json() as { body?: { schedule?: Record<string, unknown>[] }; error?: string };
+    if (payload.error) throw new Error(`Tank01 getNFLTeamSchedule returned ${payload.error}`);
+    return payload.body?.schedule ?? [];
+  }
 }
 
 export class FantasyProsNFLDataAdapter implements NFLDataAdapter {
