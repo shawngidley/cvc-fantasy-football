@@ -77,7 +77,7 @@ export function CvcTrades() {
 
   return <section className="min-h-screen bg-[#06121b] px-3 pb-14 pt-5 text-white sm:px-6"><div className="mx-auto max-w-6xl">
     <div className="mb-6 flex flex-wrap items-end justify-between gap-4">
-      <div><p className="mb-2 text-xs font-black uppercase tracking-[0.2em] text-cvc-accent">League Office</p><h1 className="font-display text-5xl uppercase leading-none sm:text-6xl">Trade Desk</h1><p className="mt-3 text-sm text-slate-300">{mine.data?.name ?? "Your franchise"} · players and this year's (pre-draft) or next year's picks are validated at proposal and again at acceptance.</p></div>
+      <div><p className="mb-2 text-xs font-black uppercase tracking-[0.2em] text-cvc-accent">League Office</p><h1 className="font-display text-5xl uppercase leading-none sm:text-6xl">Trade Desk</h1></div>
       <div className="rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-right"><p className="text-[10px] font-black uppercase tracking-[0.14em] text-slate-400">Open trade items</p><p className="mt-1 font-display text-3xl text-cvc-accent">{trades.data?.filter((trade: any) => trade.status === "proposed").length ?? 0}</p></div>
     </div>
     <div className="mb-6 flex gap-2 border-b border-white/10">
