@@ -6,7 +6,9 @@
     { "source": "/(.*)", "destination": "/index.html" }
   ],
   "functions": {
-    "api/index.js": { "maxDuration": 120 }
+    "api/index.js": { "maxDuration": 120 },
+    "api/scheduled/tank01-scoring-sync.js": { "maxDuration": 60 },
+    "api/scheduled/nfl-team-assignment-sync.js": { "maxDuration": 60 }
   },
   "crons": [
     { "path": "/api/scheduled/tank01-scoring-sync", "schedule": "*/5 * * * *" },
