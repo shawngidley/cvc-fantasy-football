@@ -57,7 +57,12 @@ async function requireCommissioner(user: CurrentUser) {
 async function getCurrentLeagueAndSeason() {
   const league = unwrap(await supabase.from("league").select("id").eq("slug", "cvc-auction-football").single());
   if (!league) throw new TRPCError({ code: "NOT_FOUND", message: "CVC league configuration was not found." });
-  const season = unwrap(await supabase.from("season").select("id, year").eq("league_id", league.id).order("year", { ascending: false }).limit(1).maybeSingle());
+  // Prefer the explicitly-flagged current season (see is_current migration) -- neither
+  // `year` nor `status` can safely identify it once a future season row exists (e.g. to
+  // hold next year's tradeable rookie picks) or if status drifts out of sync, which it
+  // has. Falls back to the old highest-year behavior only if no season is flagged yet.
+  const flagged = unwrap(await supabase.from("season").select("id, year").eq("league_id", league.id).eq("is_current", true).limit(1).maybeSingle());
+  const season = flagged ?? unwrap(await supabase.from("season").select("id, year").eq("league_id", league.id).order("year", { ascending: false }).limit(1).maybeSingle());
   if (!season) throw new TRPCError({ code: "NOT_FOUND", message: "CVC season configuration was not found." });
   return { league, season };
 }
@@ -145,9 +150,9 @@ async function attachSeasonStats<T extends { id: string }>(players: T[], seasonI
 
 export const leagueRouter = router({
   overview: publicProcedure.query(async () => {
-    const [league, season, franchises, owners, weeks, matchups, financialEntries] = await Promise.all([
+    const [league, seasonFlagged, franchises, owners, weeks, matchups, financialEntries] = await Promise.all([
       supabase.from("league").select("id, slug, name, short_name, timezone, primary_color, accent_color").eq("slug", "cvc-auction-football").single(),
-      supabase.from("season").select("id, year, label, status, regular_season_weeks, playoff_teams").order("year", { ascending: false }).limit(1).single(),
+      supabase.from("season").select("id, year, label, status, regular_season_weeks, playoff_teams").eq("is_current", true).limit(1).maybeSingle(),
       supabase.from("franchise").select("id, name, abbreviation, division_name, current_owner_id, brand_color, logo_url, display_order").eq("is_active", true).order("display_order"),
       supabase.from("owner").select("id, display_name, role").eq("is_active", true),
       supabase.from("schedule_week").select("id, week_number, label, status").order("week_number"),
@@ -156,7 +161,7 @@ export const leagueRouter = router({
     ]);
 
     const leagueData = unwrap(league);
-    const seasonData = unwrap(season);
+    const seasonData = unwrap(seasonFlagged) ?? unwrap(await supabase.from("season").select("id, year, label, status, regular_season_weeks, playoff_teams").order("year", { ascending: false }).limit(1).maybeSingle());
     const franchiseRows = unwrap(franchises) ?? [];
     const ownerRows = unwrap(owners) ?? [];
     const weekRows = unwrap(weeks) ?? [];
@@ -241,8 +246,7 @@ export const leagueRouter = router({
   }),
 
   activity: publicProcedure.query(async () => {
-    const { data: season, error: seasonError } = await supabase.from("season").select("id").order("year", { ascending: false }).limit(1).single();
-    if (seasonError || !season) throw new TRPCError({ code: "NOT_FOUND", message: "CVC season configuration was not found." });
+    const { season } = await getCurrentLeagueAndSeason();
     // Only trade/add/drop/waiver rows are ever eligible for the public board (see filter
     // below), so restrict the raw fetch to those types before limiting — otherwise a
     // burst of same-day admin activity (protection notes, commissioner adjustments,
@@ -562,8 +566,7 @@ export const leagueRouter = router({
   franchiseRoster: publicProcedure.input(z.object({ franchiseId: z.string().uuid() })).query(async ({ input }) => {
     const { data: franchise, error: franchiseError } = await supabase.from("franchise").select("id, name, abbreviation, division_name, brand_color, logo_url, current_owner_id").eq("id", input.franchiseId).single();
     if (franchiseError || !franchise) throw new TRPCError({ code: "NOT_FOUND", message: "CVC franchise was not found." });
-    const { data: season, error: seasonError } = await supabase.from("season").select("id, year").order("year", { ascending: false }).limit(1).single();
-    if (seasonError || !season) throw new TRPCError({ code: "NOT_FOUND", message: "CVC season was not found." });
+    const { season } = await getCurrentLeagueAndSeason();
     const assignments = unwrap(await supabase.from("roster_assignment").select("id, player_id, roster_state, assigned_slot_code, acquired_at").eq("season_id", season.id).eq("franchise_id", franchise.id).is("released_at", null).order("acquired_at")) ?? [];
     const releasedAssignments = unwrap(await supabase.from("roster_assignment").select("id, player_id, released_at").eq("season_id", season.id).eq("franchise_id", franchise.id).not("released_at", "is", null).order("released_at", { ascending: false })) ?? [];
     const playerIds = assignments.map(item => item.player_id);

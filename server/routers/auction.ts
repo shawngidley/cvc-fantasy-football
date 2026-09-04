@@ -13,7 +13,8 @@ export const CVC_AUCTION_POSITIONS = ["QB", "RB", "WR", "TE", "K", "DST", "D/ST"
 const isCvcAuctionPosition = (position: string | null | undefined) => CVC_AUCTION_POSITIONS.includes((position ?? "").toUpperCase() as typeof CVC_AUCTION_POSITIONS[number]);
 
 async function context() {
-  const season = unwrap(await supabase.from("season").select("id, league_id, year").order("year", { ascending: false }).limit(1).single());
+  const flagged = unwrap(await supabase.from("season").select("id, league_id, year").eq("is_current", true).limit(1).maybeSingle());
+  const season = flagged ?? unwrap(await supabase.from("season").select("id, league_id, year").order("year", { ascending: false }).limit(1).maybeSingle());
   if (!season) throw new TRPCError({ code: "NOT_FOUND", message: "CVC season was not found." });
   const draft = unwrap(await supabase.from("draft").select("id, status, label").eq("season_id", season.id).eq("draft_type", "auction").limit(1).maybeSingle());
   if (!draft) throw new TRPCError({ code: "NOT_FOUND", message: "CVC auction draft has not been configured." });

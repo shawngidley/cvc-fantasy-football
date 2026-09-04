@@ -16,7 +16,12 @@ export type Tank01SyncSummary = {
 type SnapshotRow = { franchise_id: string; slot_code: string; player: { display_name: string; position: string | null; nfl_team: string | null }[] | null };
 
 async function currentContext() {
-  const season = unwrap(await supabase.from("season").select("id, league_id, year").order("year", { ascending: false }).limit(1).single());
+  // Prefer the explicitly-flagged current season (see season.is_current migration) --
+  // neither `year` nor `status` can safely identify it once a future season row exists
+  // (e.g. to hold next year's tradeable rookie picks). Falls back to the old highest-
+  // year behavior only if no season is flagged yet.
+  const flagged = unwrap(await supabase.from("season").select("id, league_id, year").eq("is_current", true).limit(1).maybeSingle());
+  const season = flagged ?? unwrap(await supabase.from("season").select("id, league_id, year").order("year", { ascending: false }).limit(1).maybeSingle());
   if (!season) throw new Error("No CVC season is available for Tank01 scoring synchronization.");
   const weeks = unwrap(await supabase.from("schedule_week").select("id, week_number, label, status").eq("season_id", season.id).order("week_number")) ?? [];
   const week = weeks.find(item => item.status === "live") ?? weeks.find(item => item.status === "upcoming") ?? null;
