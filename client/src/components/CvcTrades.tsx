@@ -109,7 +109,7 @@ export function CvcTrades() {
         <label className="text-xs font-black uppercase tracking-[0.15em] text-cvc-accent">Optional note</label>
         <textarea value={note} onChange={event => setNote(event.target.value)} className="mt-3 min-h-24 w-full rounded-lg border border-white/10 bg-black/20 px-3 py-3 text-sm text-white outline-none" placeholder="Optional trade note" />
         <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
-          <p className="text-xs leading-5 text-slate-300">The trade processes immediately once {recipient?.name ?? "the recipient"} accepts — no separate commissioner approval step.</p>
+          <p className="text-xs leading-5 text-slate-300">The trade processes immediately once {recipient?.name ?? "the recipient"} accepts.</p>
           <button disabled={!canSubmit || propose.isPending} onClick={() => propose.mutate({ recipientFranchiseId: recipientId, offerPlayerIds, requestPlayerIds, offerPickIds, requestPickIds, note: note.trim() || undefined })} className="inline-flex items-center gap-2 rounded-lg bg-cvc-accent px-4 py-3 text-xs font-black uppercase tracking-[0.13em] text-cvc-deep disabled:opacity-40"><Send size={14} /> {propose.isPending ? "Submitting" : "Submit trade proposal"}</button>
         </div>
         {propose.error ? <p className="mt-3 text-sm text-rose-300">{propose.error.message}</p> : null}
