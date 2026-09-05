@@ -139,18 +139,26 @@ export function useCvcNFLProjections(week: number | undefined, season: number, r
       .finally(() => { if (!cancelled) setLoading(false); });
   };
 
+  const fetchedForKey = useRef<string | null>(null);
   useEffect(() => {
     if (!week || !rules.length) return;
-    const cacheKey = `${CACHE_PREFIX}${season}_w${week}`;
+    const cacheKey = `${season}_w${week}`;
+    if (fetchedForKey.current === cacheKey) return; // already fetched (or already in flight) for this exact week/season
+    fetchedForKey.current = cacheKey;
     try {
-      const cached = sessionStorage.getItem(cacheKey);
+      const cached = sessionStorage.getItem(`${CACHE_PREFIX}${cacheKey}`);
       if (cached) {
         const parsed = JSON.parse(cached) as CvcProjectionMap;
         if (Object.keys(parsed).length > 0) { setProjections(parsed); return; }
       }
     } catch { /* ignore */ }
-    runFetch("effect");
-  }, [week, season, rules.length]);
+    runFetch("auto");
+  }); // Intentionally no dependency array: re-checks readiness on every render (guarded
+  // by fetchedForKey, so it's still a no-op once fetched) instead of relying on React's
+  // dependency-array change detection for week/rules, which appeared to only ever fire
+  // once on initial mount and never again despite week/rules later becoming ready --
+  // confirmed via the debug panel's frozen "run #1, week=undefined" state persisting
+  // long after the same render's board.data clearly showed a resolved week.
 
   return { projections, loading, debug, retryNow: () => runFetch("manual retry") };
 }
