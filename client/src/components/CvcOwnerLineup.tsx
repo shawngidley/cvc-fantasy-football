@@ -23,7 +23,7 @@ function useCvcTank01LineupProfiles(players: CvcLineupPlayer[]) {
 
   useEffect(() => {
     let active = true;
-    const names = Array.from(new Set(players.filter(player => !isDst(player.position)).map(player => player.display_name.trim()).filter(Boolean))).slice(0, 22);
+    const names = Array.from(new Set(players.map(player => player.display_name.trim()).filter(Boolean))).slice(0, 22);
     const load = async () => {
       const next: Record<string, Tank01Profile | null> = {};
       for (const name of names) {
@@ -77,7 +77,13 @@ function matchupText(matchup: { opponent: string; isHome: boolean; gameTime: str
 
 function seasonFantasy(profile: Tank01Profile | null | undefined, player: CvcLineupPlayer, rules: CvcScoringRule[]) {
   if (!profile?.stats) return { fpts: "—", fpg: "—", gp: "—" };
-  const points = calculateCvcFantasyPoints(profile.stats, isDst(player.position) ? "DST" : player.position ?? "", rules);
+  // Same adjustment as tank01SeasonStatsSync.ts's extractSeasonStats: a *season total*
+  // points-allowed figure would otherwise get bucketed into CVC's per-game
+  // points-allowed tier bonus as if it were one game's worth, wildly inflating (or
+  // deflating) DST season points. Excluded here until a real weekly aggregation exists.
+  const isDstPosition = isDst(player.position);
+  const stats = isDstPosition ? { ...profile.stats, Defense: { ...(profile.stats.Defense ?? {}), ptsAgainst: undefined } } : profile.stats;
+  const points = calculateCvcFantasyPoints(stats, isDstPosition ? "DST" : player.position ?? "", rules);
   const gamesPlayed = sourceNumber(profile.stats as unknown as Record<string, unknown>, ["gamesPlayed"]);
   return { fpts: points.toFixed(1), fpg: gamesPlayed ? (points / gamesPlayed).toFixed(1) : "—", gp: gamesPlayed ? String(gamesPlayed) : "—" };
 }
