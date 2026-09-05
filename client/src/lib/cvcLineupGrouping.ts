@@ -1,4 +1,4 @@
-export type CvcLineupPlayer = { id: string; display_name: string; position: string | null; nfl_team: string | null; status?: string | null; metadata?: Record<string, unknown> | null };
+export type CvcLineupPlayer = { id: string; display_name: string; position: string | null; nfl_team: string | null; status?: string | null; metadata?: Record<string, unknown> | null; seasonStats?: Record<string, number | null> };
 export type CvcLineupAssignment = { id: string; assigned_slot_code: string | null; player: CvcLineupPlayer | null };
 export type CvcLineupGroup = { key: "OFFENSE" | "K" | "DST"; title: string; profile: "offense" | "kicker" | "defense"; starters: CvcLineupAssignment[]; bench: CvcLineupAssignment[] };
 

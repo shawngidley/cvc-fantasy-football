@@ -572,7 +572,8 @@ export const leagueRouter = router({
     const releasedAssignments = unwrap(await supabase.from("roster_assignment").select("id, player_id, released_at").eq("season_id", season.id).eq("franchise_id", franchise.id).not("released_at", "is", null).order("released_at", { ascending: false })) ?? [];
     const playerIds = assignments.map(item => item.player_id);
     const releasedPlayerIds = releasedAssignments.map(item => item.player_id);
-    const players = playerIds.length ? unwrap(await supabase.from("player").select("id, display_name, position, nfl_team, status, metadata").in("id", playerIds)) ?? [] : [];
+    const rawPlayers = playerIds.length ? unwrap(await supabase.from("player").select("id, display_name, position, nfl_team, status, metadata").in("id", playerIds)) ?? [] : [];
+    const players = await attachSeasonStats(rawPlayers, season.id);
     const contracts = playerIds.length ? unwrap(await supabase.from("player_contract").select("player_id, salary, expires_year, source_marker, contract_status").eq("season_id", season.id).eq("franchise_id", franchise.id).in("player_id", playerIds)) ?? [] : [];
     const releasedPlayers = releasedPlayerIds.length ? unwrap(await supabase.from("player").select("id, display_name, position, nfl_team").in("id", releasedPlayerIds)) ?? [] : [];
     const releasedContracts = releasedPlayerIds.length ? unwrap(await supabase.from("player_contract").select("player_id, salary, expires_year, source_marker, contract_status").eq("season_id", season.id).eq("franchise_id", franchise.id).in("player_id", releasedPlayerIds)) ?? [] : [];
