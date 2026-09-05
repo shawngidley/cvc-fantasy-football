@@ -23,17 +23,30 @@ function useCvcTank01LineupProfiles(players: CvcLineupPlayer[]) {
 
   useEffect(() => {
     let active = true;
-    const names = Array.from(new Set(players.map(player => player.display_name.trim()).filter(Boolean))).slice(0, 22);
+    const targets = Array.from(new Map<string, CvcLineupPlayer>(players.filter(player => player.display_name.trim()).map(player => [profileKey(player.display_name), player])).values()).slice(0, 22);
     const load = async () => {
       const next: Record<string, Tank01Profile | null> = {};
-      for (const name of names) {
-        const key = profileKey(name);
+      for (const player of targets) {
+        const key = profileKey(player.display_name);
         const cached = profileCache.get(key);
         if (cached && cached.expiresAt > Date.now()) { next[key] = cached.value; continue; }
         try {
-          const response = await fetch(`/api/tank01/getNFLPlayerInfo?playerName=${encodeURIComponent(name)}&getStats=true`);
-          const payload = await response.json() as { body?: Tank01Profile[] };
-          const value = payload.body?.[0] ?? null;
+          // Same preference order as tank01SeasonStatsSync.ts's server-side sync: an
+          // exact ID lookup first when a Tank01 ID is already confirmed, falling back to
+          // a name search. Confirmed there that the name search fails systematically for
+          // some real players/team defenses even when the ID lookup succeeds.
+          const tank01Id = player.metadata?.tank01_id ? String(player.metadata.tank01_id) : null;
+          let value: Tank01Profile | null = null;
+          if (tank01Id) {
+            const byIdResponse = await fetch(`/api/tank01/getNFLPlayerInfo?playerID=${encodeURIComponent(tank01Id)}&getStats=true`);
+            const byIdPayload = await byIdResponse.json() as { body?: Tank01Profile | Tank01Profile[] };
+            value = (Array.isArray(byIdPayload.body) ? byIdPayload.body[0] : byIdPayload.body) ?? null;
+          }
+          if (!value) {
+            const response = await fetch(`/api/tank01/getNFLPlayerInfo?playerName=${encodeURIComponent(player.display_name)}&getStats=true`);
+            const payload = await response.json() as { body?: Tank01Profile[] };
+            value = payload.body?.[0] ?? null;
+          }
           profileCache.set(key, { value, expiresAt: Date.now() + PROFILE_TTL_MS });
           next[key] = value;
         } catch { profileCache.set(key, { value: null, expiresAt: Date.now() + 10 * 60 * 1000 }); next[key] = null; }
@@ -41,7 +54,7 @@ function useCvcTank01LineupProfiles(players: CvcLineupPlayer[]) {
       }
       if (active) setProfiles(current => ({ ...current, ...next }));
     };
-    if (names.length) void load(); else setProfiles({});
+    if (targets.length) void load(); else setProfiles({});
     return () => { active = false; };
   }, [signature]);
 
