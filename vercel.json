@@ -9,11 +9,13 @@
     "api/index.js": { "maxDuration": 120 },
     "api/scheduled/tank01-scoring-sync.js": { "maxDuration": 60 },
     "api/scheduled/nfl-team-assignment-sync.js": { "maxDuration": 60 },
-    "api/scheduled/waiver-resolution.js": { "maxDuration": 60 }
+    "api/scheduled/waiver-resolution.js": { "maxDuration": 60 },
+    "api/scheduled/dst-season-stats-sync.js": { "maxDuration": 60 }
   },
   "crons": [
     { "path": "/api/scheduled/tank01-scoring-sync", "schedule": "*/5 * * * *" },
     { "path": "/api/scheduled/nfl-team-assignment-sync", "schedule": "0 9 * * *" },
-    { "path": "/api/scheduled/waiver-resolution", "schedule": "*/15 * * * *" }
+    { "path": "/api/scheduled/waiver-resolution", "schedule": "*/15 * * * *" },
+    { "path": "/api/scheduled/dst-season-stats-sync", "schedule": "0 10 * * *" }
   ]
 }

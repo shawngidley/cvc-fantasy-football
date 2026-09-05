@@ -3,7 +3,7 @@ import { createExpressMiddleware } from "@trpc/server/adapters/express";
 import { appRouter } from "../routers";
 import { createContext } from "./context";
 import { proxyTank01Request } from "../tank01Proxy";
-import { runNflTeamAssignmentSync, runTank01ScoringSync, runWaiverResolution } from "./scheduledHandlers";
+import { runDstSeasonStatsSync, runNflTeamAssignmentSync, runTank01ScoringSync, runWaiverResolution } from "./scheduledHandlers";
 
 /** Builds the CVC Express app: body parsing, REST endpoints, and the tRPC API. No static serving and no `.listen()` — those are the caller's concern (local dev server vs. the Vercel serverless entry). */
 export function createApp(): Express {
@@ -26,6 +26,8 @@ export function createApp(): Express {
   app.post("/api/scheduled/tank01-scoring-sync", runTank01ScoringSync);
   app.get("/api/scheduled/nfl-team-assignment-sync", runNflTeamAssignmentSync);
   app.post("/api/scheduled/nfl-team-assignment-sync", runNflTeamAssignmentSync);
+  app.get("/api/scheduled/dst-season-stats-sync", runDstSeasonStatsSync);
+  app.post("/api/scheduled/dst-season-stats-sync", runDstSeasonStatsSync);
   app.get("/api/scheduled/waiver-resolution", runWaiverResolution);
   app.post("/api/scheduled/waiver-resolution", runWaiverResolution);
   // Defense-in-depth alongside forcing POST client-side (main.tsx): explicitly tell any
