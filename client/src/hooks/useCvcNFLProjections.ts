@@ -56,27 +56,37 @@ export type CvcProjectionMap = Record<string, CvcProjectionEntry>;
  * every NFL player and team defense, and scores them with CVC's own rules -- so
  * "Projected" reflects this league's actual scoring, not Tank01's own generic point
  * estimate or WRC's formula. Cached in sessionStorage per week/season, matching WRC. */
-export function useCvcNFLProjections(week: number | undefined, season: number, rules: CvcScoringRule[]): { projections: CvcProjectionMap; loading: boolean } {
+export function useCvcNFLProjections(week: number | undefined, season: number, rules: CvcScoringRule[]): { projections: CvcProjectionMap; loading: boolean; debug: { url: string | null; status: number | null; error: string | null; rawBody: unknown; playerCount: number; dstCount: number } } {
   const [projections, setProjections] = useState<CvcProjectionMap>({});
   const [loading, setLoading] = useState(false);
+  const [debug, setDebug] = useState<{ url: string | null; status: number | null; error: string | null; rawBody: unknown; playerCount: number; dstCount: number }>({ url: null, status: null, error: null, rawBody: null, playerCount: 0, dstCount: 0 });
 
   useEffect(() => {
-    if (!week || !rules.length) return;
+    if (!week || !rules.length) { setDebug(current => ({ ...current, error: !week ? "No current week resolved yet (board.week.weekNumber is falsy)." : "No scoring rules loaded yet." })); return; }
     const cacheKey = `${CACHE_PREFIX}${season}_w${week}`;
     try {
       const cached = sessionStorage.getItem(cacheKey);
-      if (cached) { setProjections(JSON.parse(cached) as CvcProjectionMap); return; }
+      if (cached) {
+        const parsed = JSON.parse(cached) as CvcProjectionMap;
+        if (Object.keys(parsed).length > 0) { setProjections(parsed); return; }
+      }
     } catch { /* ignore */ }
 
     let cancelled = false;
     setLoading(true);
-    fetch(`/api/tank01/getNFLProjections?week=${week}&season=${season}&seasonType=Regular%20Season`)
-      .then(response => (response.ok ? response.json() : null) as Promise<{ body?: Record<string, unknown> } | null>)
+    const url = `/api/tank01/getNFLProjections?week=${week}&season=${season}&seasonType=Regular%20Season`;
+    fetch(url)
+      .then(response => {
+        if (!cancelled) setDebug(current => ({ ...current, url, status: response.status }));
+        return (response.ok ? response.json() : response.json().catch(() => null)) as Promise<{ body?: Record<string, unknown>; error?: string } | null>;
+      })
       .then(data => {
+        if (!cancelled) setDebug(current => ({ ...current, rawBody: data, error: data?.error ?? null }));
         const body = data?.body ?? {};
         const map: CvcProjectionMap = {};
         const playerProjections = (body.playerProjections as Record<string, unknown>) ?? {};
-        for (const row of Object.values(playerProjections) as Record<string, unknown>[]) {
+        const playerRows = Object.values(playerProjections) as Record<string, unknown>[];
+        for (const row of playerRows) {
           const name = String(row.longName ?? "");
           if (!name) continue;
           const pos = String(row.pos ?? "");
@@ -87,7 +97,8 @@ export function useCvcNFLProjections(week: number | undefined, season: number, r
           map[normalizeProjectionName(name)] = entry;
         }
         const dstProjections = (body.teamDefenseProjections as Record<string, unknown>) ?? {};
-        for (const row of Object.values(dstProjections) as Record<string, unknown>[]) {
+        const dstRows = Object.values(dstProjections) as Record<string, unknown>[];
+        for (const row of dstRows) {
           const rawAbv = String(row.teamAbv ?? "");
           if (!rawAbv) continue;
           const abv = normalizeAbv(rawAbv);
@@ -96,15 +107,16 @@ export function useCvcNFLProjections(week: number | undefined, season: number, r
         }
         if (!cancelled) {
           setProjections(map);
+          setDebug(current => ({ ...current, playerCount: playerRows.length, dstCount: dstRows.length }));
           try { sessionStorage.setItem(cacheKey, JSON.stringify(map)); } catch { /* ignore */ }
         }
       })
-      .catch(() => { if (!cancelled) setProjections({}); })
+      .catch(error => { if (!cancelled) { setProjections({}); setDebug(current => ({ ...current, error: error instanceof Error ? error.message : String(error) })); } })
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
   }, [week, season, rules.length]);
 
-  return { projections, loading };
+  return { projections, loading, debug };
 }
 
 export function getCvcProjectedPoints(projections: CvcProjectionMap, playerName: string, position: string | null | undefined, nflTeam: string | null | undefined): number | null {
