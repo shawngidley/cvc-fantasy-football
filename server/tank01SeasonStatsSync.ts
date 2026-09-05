@@ -44,13 +44,22 @@ export function extractCurrentTeam(row: Record<string, unknown>): string | null 
  * (falling back to the row itself if the shape differs). This is the SAME endpoint the
  * player profile page already calls client-side per player — reused here server-side
  * so results can be cached instead of re-fetched on every page view. */
-function extractSeasonStats(row: Record<string, unknown>, position: string, rules: CvcScoringRule[]) {
+export function extractSeasonStats(row: Record<string, unknown>, position: string, rules: CvcScoringRule[]) {
   const statsBlob = asRecord(row.stats);
   const flat = Object.keys(statsBlob).length ? statsBlob : row;
   const passing = asRecord(flat.Passing);
   const rushing = asRecord(flat.Rushing);
   const receiving = asRecord(flat.Receiving);
-  const kicking = asRecord(flat.Kicking);
+  const kickingRaw = asRecord(flat.Kicking);
+  // Confirmed live: fantasy_points for a kicker with fg_made=36, xp_made=47 came back as
+  // exactly 47.00 -- i.e. only the XP points, meaning field goals contributed nothing.
+  // Tank01's season-stats Kicking object doesn't include real cumulative FG yardage any
+  // more than its weekly projections endpoint does (same root issue fixed client-side in
+  // useCvcNFLProjections.ts and playerCareerStats.ts) -- CVC's field_goal_yard rule needs
+  // *some* yardage figure, so estimate it from the made count when the real field is
+  // absent (present-but-zero is trusted as-is, not overridden).
+  const realFgYds = kickingRaw.fgYds ?? kickingRaw.kickYards;
+  const kicking: Record<string, string | number | undefined> = { ...kickingRaw, fgYds: realFgYds !== undefined ? (numeric(realFgYds) ?? 0) : (numeric(kickingRaw.fgMade) ?? 0) * 38 };
   const defense = asRecord(flat.Defense);
   const gamesPlayed = numeric(flat.gamesPlayed ?? flat.gamesPlayedTotal ?? flat.gp);
 
