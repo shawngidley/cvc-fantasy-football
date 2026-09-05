@@ -12,6 +12,7 @@ import { resolveOpenWaiverPeriod } from "../waiverResolution";
 import { computeNextResolutionTime } from "../waiverResolutionTiming";
 import { syncFantasyProsSnapshot, syncFantasyProsActiveFlags, syncFantasyProsRookieFlags } from "../fantasyProsSync";
 import { syncTank01SeasonStats } from "../tank01SeasonStatsSync";
+import { aggregateDstSeasonStats } from "../dstSeasonAggregation";
 import { syncTank01ActiveRoster } from "../tank01ActiveRosterSync";
 import { LOTTERY_REVEAL_INTERVAL_SECONDS, lotteryCommitment, revealedLotteryCount, reverseLotteryPositions, secureShuffle } from "../rookieDraftLottery";
 import { activeLiveLineup } from "../liveScoringLineup";
@@ -968,6 +969,16 @@ export const leagueRouter = router({
     await requireCommissioner({ openId: ctx.user.openId });
     const { season } = await getCurrentLeagueAndSeason();
     return syncTank01SeasonStats(season.id, input?.limit ?? 40);
+  }),
+
+  // Real game-by-game D/ST aggregation (see dstSeasonAggregation.ts) -- correctly
+  // tiers points-allowed per game rather than trying to bucket a season-total average.
+  // year/throughWeek let this both backfill a fully completed season (e.g. 2025,
+  // throughWeek=18) and be re-run with an increasing throughWeek as 2026 progresses.
+  syncDstSeasonStats: protectedProcedure.input(z.object({ year: z.number().int().min(2000).max(2100), throughWeek: z.number().int().min(1).max(22) })).mutation(async ({ ctx, input }) => {
+    await requireCommissioner({ openId: ctx.user.openId });
+    const { season } = await getCurrentLeagueAndSeason();
+    return aggregateDstSeasonStats(season.id, input.year, input.throughWeek);
   }),
 
   waiverStatus: publicProcedure.query(async () => {

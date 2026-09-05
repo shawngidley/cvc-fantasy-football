@@ -201,7 +201,25 @@ function SeasonStatsSyncModule() {
     },
     onError: error => toast.error(error.message),
   });
+  const [dstYear, setDstYear] = useState(new Date().getFullYear());
+  const [dstThroughWeek, setDstThroughWeek] = useState(18);
+  const syncDst = trpc.league.syncDstSeasonStats.useMutation({
+    onSuccess: data => {
+      if (data.status === "skipped") { toast.error(data.reason ?? "D/ST season stats sync is unavailable."); return; }
+      toast.success(`Processed ${data.weeksProcessed} week(s), updated ${data.teamsUpdated} team defense(s).`);
+    },
+    onError: error => toast.error(error.message),
+  });
   return <div className="grid gap-4">
+    <div className="rounded-lg border border-dashed border-cvc-deep/20 bg-cvc-tint p-4">
+      <p className="text-sm font-semibold text-cvc-deep">D/ST season stats (game-by-game)</p>
+      <p className="mt-1 text-xs leading-5 text-slate-500">Team defenses can't be looked up the same way individual players are (Tank01 has no player-info match for a team name), so this walks through each completed week's box scores directly and sums sacks/interceptions/defensive TDs, correctly tiering the points-allowed bonus per game rather than averaging a season total (which would be wrong). Use year 2025 / through week 18 once to backfill last season as a placeholder, then re-run with the current year and an increasing week number as 2026 progresses.</p>
+      <div className="mt-3 flex flex-wrap items-end gap-3">
+        <label className="text-xs font-bold uppercase tracking-[0.06em] text-slate-600">Year<input type="number" value={dstYear} onChange={event => setDstYear(Number(event.target.value))} className="ml-2 w-20 rounded-md border border-slate-300 px-2 py-1.5 text-sm"/></label>
+        <label className="text-xs font-bold uppercase tracking-[0.06em] text-slate-600">Through week<input type="number" min={1} max={22} value={dstThroughWeek} onChange={event => setDstThroughWeek(Number(event.target.value))} className="ml-2 w-16 rounded-md border border-slate-300 px-2 py-1.5 text-sm"/></label>
+        <button type="button" className="cvc-button-compact" disabled={syncDst.isPending} onClick={() => syncDst.mutate({ year: dstYear, throughWeek: dstThroughWeek })}><Save size={14} /> {syncDst.isPending ? "Syncing…" : "Sync D/ST season stats"}</button>
+      </div>
+    </div>
     <div className="rounded-lg border border-dashed border-cvc-deep/20 bg-cvc-tint p-4">
       <p className="text-sm font-semibold text-cvc-deep">Season stats sync</p>
       <p className="mt-1 text-xs leading-5 text-slate-500">Pulls season-total stats from Tank01 for every rostered and free-agent CVC player (QB/RB/WR/TE/K/DST), caches them for display on Free Agents, and updates each player's current NFL team on their CVC record (skipped for D/ST, since that record is the team itself). Each click processes up to 40 players who haven't been synced in the last 12 hours — click repeatedly until "All players are up to date" if the pool is large.</p>
