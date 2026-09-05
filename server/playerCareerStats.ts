@@ -197,7 +197,7 @@ export function parseCvcGameLog(body: Record<string, unknown>, teamAbv: string, 
         Passing: { passYds: num(passing.passYds), passTD: num(passing.passTD), int: num(passing.int) },
         Rushing: { rushYds: num(rushing.rushYds), rushTD: num(rushing.rushTD) },
         Receiving: { recYds: num(receiving.recYds), recTD: num(receiving.recTD), receptions: num(receiving.receptions) },
-        Kicking: { xpMade: num(kicking.xpMade) },
+        Kicking: { xpMade: num(kicking.xpMade), fgYds: num(kicking.fgYds ?? kicking.kickYards) },
         Defense: { sacks: num(defense.sacks), defensiveInterceptions: num(defense.defensiveInterceptions), defTD: num(defense.defTD), fumblesRecovered: num(defense.fumblesRecovered) },
       };
 

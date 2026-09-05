@@ -30,7 +30,7 @@ function toPlayerStatsShape(row: Record<string, unknown>): Tank01LiveStats {
     Passing: { passYds: n(passing.passYds), passTD: n(passing.passTD), int: n(passing.int) },
     Rushing: { rushYds: n(rushing.rushYds), rushTD: n(rushing.rushTD) },
     Receiving: { recYds: n(receiving.recYds), recTD: n(receiving.recTD), receptions: n(receiving.receptions) },
-    Kicking: { xpMade: n(kicking.xpMade) },
+    Kicking: { xpMade: n(kicking.xpMade), fgYds: n(kicking.fgYds ?? kicking.kickYards) },
     Defense: { sacks: 0, defensiveInterceptions: 0, defTD: 0, fumblesRecovered: 0 },
   };
 }
