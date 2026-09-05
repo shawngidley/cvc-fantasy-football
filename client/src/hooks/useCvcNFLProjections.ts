@@ -64,10 +64,10 @@ export type CvcProjectionMap = Record<string, CvcProjectionEntry>;
  * every NFL player and team defense, and scores them with CVC's own rules -- so
  * "Projected" reflects this league's actual scoring, not Tank01's own generic point
  * estimate or WRC's formula. Cached in sessionStorage per week/season, matching WRC. */
-export function useCvcNFLProjections(week: number | undefined, season: number, rules: CvcScoringRule[]): { projections: CvcProjectionMap; loading: boolean; debug: { url: string | null; status: number | null; error: string | null; rawBody: unknown; playerCount: number; dstCount: number } } {
+export function useCvcNFLProjections(week: number | undefined, season: number, rules: CvcScoringRule[]): { projections: CvcProjectionMap; loading: boolean; debug: { url: string | null; status: number | null; error: string | null; rawBody: unknown; playerCount: number; dstCount: number; sampleKickerRow: unknown; kickerProjections: { name: string; pos: string; proj: number }[]; bodyKeys: string[] } } {
   const [projections, setProjections] = useState<CvcProjectionMap>({});
   const [loading, setLoading] = useState(false);
-  const [debug, setDebug] = useState<{ url: string | null; status: number | null; error: string | null; rawBody: unknown; playerCount: number; dstCount: number }>({ url: null, status: null, error: null, rawBody: null, playerCount: 0, dstCount: 0 });
+  const [debug, setDebug] = useState<{ url: string | null; status: number | null; error: string | null; rawBody: unknown; playerCount: number; dstCount: number; sampleKickerRow: unknown; kickerProjections: { name: string; pos: string; proj: number }[]; bodyKeys: string[] }>({ url: null, status: null, error: null, rawBody: null, playerCount: 0, dstCount: 0, sampleKickerRow: null, kickerProjections: [], bodyKeys: [] });
 
   useEffect(() => {
     if (!week || !rules.length) { setDebug(current => ({ ...current, error: !week ? "No current week resolved yet (board.week.weekNumber is falsy)." : "No scoring rules loaded yet." })); return; }
@@ -89,11 +89,13 @@ export function useCvcNFLProjections(week: number | undefined, season: number, r
         return (response.ok ? response.json() : response.json().catch(() => null)) as Promise<{ body?: Record<string, unknown>; error?: string } | null>;
       })
       .then(data => {
-        if (!cancelled) setDebug(current => ({ ...current, rawBody: data, error: data?.error ?? null }));
+        if (!cancelled) setDebug(current => ({ ...current, rawBody: data, error: data?.error ?? null, bodyKeys: data?.body ? Object.keys(data.body) : [] }));
         const body = data?.body ?? {};
         const map: CvcProjectionMap = {};
         const playerProjections = (body.playerProjections as Record<string, unknown>) ?? {};
         const playerRows = Object.values(playerProjections) as Record<string, unknown>[];
+        let sampleKickerRow: unknown = null;
+        const kickerProjections: { name: string; pos: string; proj: number }[] = [];
         for (const row of playerRows) {
           const name = String(row.longName ?? "");
           if (!name) continue;
@@ -104,7 +106,12 @@ export function useCvcNFLProjections(week: number | undefined, season: number, r
           const entry: CvcProjectionEntry = { proj: Math.max(0, Math.round(proj * 10) / 10), pos, team };
           map[name.toLowerCase()] = entry;
           map[normalizeProjectionName(name)] = entry;
+          if (pos === "K") {
+            if (!sampleKickerRow) sampleKickerRow = row;
+            kickerProjections.push({ name, pos: rawPos, proj: entry.proj });
+          }
         }
+        if (!cancelled) setDebug(current => ({ ...current, sampleKickerRow, kickerProjections }));
         const dstProjections = (body.teamDefenseProjections as Record<string, unknown>) ?? {};
         const dstRows = Object.values(dstProjections) as Record<string, unknown>[];
         for (const row of dstRows) {
