@@ -123,7 +123,7 @@ export function CvcOwnerLineup() {
   const [saveError, setSaveError] = useState<string | null>(null);
   useEffect(() => { setPendingSlots({}); setSaveError(null); }, [viewedFranchiseId]);
   const stageSlot = (assignmentId: string, slotCode: string) => setPendingSlots(current => ({ ...current, [assignmentId]: slotCode }));
-  const totalPoints = groups.flatMap(group => group.starters).reduce((total, assignment) => total + (assignment.player ? getCvcLivePoints(live.scores, assignment.player.display_name, isDst(assignment.player.position) ? "DST" : assignment.player.position ?? "", assignment.player.nfl_team) ?? 0 : 0), 0);
+
 
   const saveLineup = async () => {
     setSaveError(null);
@@ -162,7 +162,7 @@ export function CvcOwnerLineup() {
       </div>
       {saveError ? <p className="mt-2 text-sm font-medium text-red-300">{saveError}</p> : null}
     </div>
-    <section className="rounded-2xl border border-cvc-accent/30 bg-[#062412] px-5 py-5 text-white shadow-xl"><div className="grid grid-cols-2 gap-4"><div><p className="text-[10px] font-bold uppercase tracking-[0.14em] text-white/60">Total points</p><p className="mt-1 font-display text-4xl text-cvc-accent">{totalPoints.toFixed(1)}</p></div><div><p className="text-[10px] font-bold uppercase tracking-[0.14em] text-white/60">Starters</p><p className="mt-1 font-display text-4xl">{starterCount}</p></div></div><p className="mt-5 text-center text-sm text-white/70">Players lock at NFL kickoff.</p></section>
+    
     {groups.length ? groups.map(group => <SectionTable key={group.key} group={group} profiles={profiles} live={live} rules={rules.data ?? []} slots={slots.data ?? []} pendingSlots={pendingSlots} onStageSlot={stageSlot} canEdit={canEdit}/>) : <section className="rounded-2xl bg-white p-8 text-center text-sm text-slate-600">No active CVC roster assignments are available for this franchise.</section>}
     {canEdit && starterCount === 0 && players.length ? <p className="rounded-xl border border-amber-300/30 bg-amber-50 px-4 py-3 text-sm text-amber-950">No starter slots are assigned yet. Choose a position in each player’s slot control, then Save Lineup, to move them from the bench into the submitted CVC lineup.</p> : null}
   </div>;
