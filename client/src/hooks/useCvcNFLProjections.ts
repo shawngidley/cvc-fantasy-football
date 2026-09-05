@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { calculateCvcFantasyPoints, type CvcScoringRule, type Tank01LiveStats } from "@shared/cvcScoring";
 
 const CACHE_PREFIX = "cvc_nfl_proj_v1_";
@@ -69,8 +69,11 @@ export function useCvcNFLProjections(week: number | undefined, season: number, r
   const [loading, setLoading] = useState(false);
   const [debug, setDebug] = useState<{ url: string | null; status: number | null; error: string | null; rawBody: unknown; playerCount: number; dstCount: number; sampleKickerRow: unknown; kickerProjections: { name: string; pos: string; proj: number }[]; bodyKeys: string[] }>({ url: null, status: null, error: null, rawBody: null, playerCount: 0, dstCount: 0, sampleKickerRow: null, kickerProjections: [], bodyKeys: [] });
 
+  const runCount = useRef(0);
+
   useEffect(() => {
-    if (!week || !rules.length) { setDebug(current => ({ ...current, error: !week ? "No current week resolved yet (board.week.weekNumber is falsy)." : "No scoring rules loaded yet." })); return; }
+    runCount.current += 1;
+    if (!week || !rules.length) { setDebug(current => ({ ...current, error: `Effect bailed (run #${runCount.current}): week=${JSON.stringify(week)}, rulesLength=${rules.length}, season=${season}` })); return; }
     const cacheKey = `${CACHE_PREFIX}${season}_w${week}`;
     try {
       const cached = sessionStorage.getItem(cacheKey);
@@ -82,6 +85,7 @@ export function useCvcNFLProjections(week: number | undefined, season: number, r
 
     let cancelled = false;
     setLoading(true);
+    setDebug(current => ({ ...current, error: `Fetching (run #${runCount.current}): week=${week}, rulesLength=${rules.length}` }));
     const url = `/api/tank01/getNFLProjections?week=${week}&season=${season}&seasonType=Regular%20Season`;
     fetch(url)
       .then(response => {
