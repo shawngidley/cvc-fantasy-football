@@ -2,7 +2,7 @@ import { Toaster } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import NotFound from "@/pages/NotFound";
 import { ProtectedPage } from "@/components/ProtectedPage";
-import LeaguePage, { PublicFranchiseLineup } from "@/pages/LeaguePages";
+import LeaguePage from "@/pages/LeaguePages";
 import Login from "@/pages/Login";
 import Auction from "@/pages/Auction";
 import Protections from "@/pages/Protections";
@@ -27,7 +27,7 @@ function Router() {
       <Route path="/live" component={() => <LeaguePage kind="live" />} />
       <Route path="/rosters" component={() => <LeaguePage kind="rosters" />} />
       <Route path="/lineup"><ProtectedPage><LeaguePage kind="lineup" /></ProtectedPage></Route>
-      <Route path="/lineup/:franchiseId" component={PublicFranchiseLineup} />
+      <Route path="/lineup/:franchiseId"><ProtectedPage><LeaguePage kind="lineup" /></ProtectedPage></Route>
       <Route path="/protections"><ProtectedPage><Protections /></ProtectedPage></Route>
       <Route path="/owner-settings"><ProtectedPage><OwnerSettings /></ProtectedPage></Route>
       <Route path="/draft"><Redirect to="/auction" /></Route>
