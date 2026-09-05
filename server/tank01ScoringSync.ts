@@ -45,7 +45,8 @@ async function tankScoresForWeek(adapter: Tank01NFLDataAdapter, nflWeek: number,
     for (const raw of Object.values(box.playerStats ?? {})) {
       const player = raw as Record<string, unknown>;
       const name = String(player.longName ?? "");
-      const position = String(player.pos ?? "");
+      const rawPosition = String(player.pos ?? "");
+      const position = rawPosition.toUpperCase() === "PK" ? "K" : rawPosition;
       if (name && position) scoreMap.set(normalize(name), calculateCvcFantasyPoints(player as Tank01LiveStats, position, rules));
     }
     for (const [team, stats] of Object.entries(box.teamStats ?? {})) {

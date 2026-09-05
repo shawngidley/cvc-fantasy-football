@@ -26,11 +26,19 @@ function toPlayerStatsShape(row: Record<string, unknown>): Tank01LiveStats {
   const rushing = (row.Rushing as Record<string, unknown>) ?? {};
   const receiving = (row.Receiving as Record<string, unknown>) ?? {};
   const kicking = (row.Kicking as Record<string, unknown>) ?? {};
+  // Tank01's projections endpoint doesn't project a field goal's actual distance, only
+  // a projected made-count -- unlike completed games, which do report real yardage.
+  // Confirmed by WRC's own identical workaround (same 38-yard average assumption) in
+  // its useNFLProjections.ts. CVC's field_goal_yard rule needs *some* yardage figure to
+  // produce a non-zero kicker projection, so estimate it the same way when the real
+  // field is absent (present-but-zero is trusted as-is, not overridden).
+  const realFgYds = kicking.fgYds ?? kicking.kickYards;
+  const estimatedFgYds = realFgYds !== undefined ? n(realFgYds) : n(kicking.fgMade) * 38;
   return {
     Passing: { passYds: n(passing.passYds), passTD: n(passing.passTD), int: n(passing.int) },
     Rushing: { rushYds: n(rushing.rushYds), rushTD: n(rushing.rushTD) },
     Receiving: { recYds: n(receiving.recYds), recTD: n(receiving.recTD), receptions: n(receiving.receptions) },
-    Kicking: { xpMade: n(kicking.xpMade), fgYds: n(kicking.fgYds ?? kicking.kickYards) },
+    Kicking: { xpMade: n(kicking.xpMade), fgYds: estimatedFgYds },
     Defense: { sacks: 0, defensiveInterceptions: 0, defTD: 0, fumblesRecovered: 0 },
   };
 }
@@ -89,7 +97,8 @@ export function useCvcNFLProjections(week: number | undefined, season: number, r
         for (const row of playerRows) {
           const name = String(row.longName ?? "");
           if (!name) continue;
-          const pos = String(row.pos ?? "");
+          const rawPos = String(row.pos ?? "");
+          const pos = rawPos.toUpperCase() === "PK" ? "K" : rawPos;
           const team = String(row.team ?? "");
           const proj = calculateCvcFantasyPoints(toPlayerStatsShape(row), pos, rules);
           const entry: CvcProjectionEntry = { proj: Math.max(0, Math.round(proj * 10) / 10), pos, team };
