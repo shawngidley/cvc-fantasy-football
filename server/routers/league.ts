@@ -1286,9 +1286,18 @@ export const leagueRouter = router({
     if (!assignment) throw new TRPCError({ code: "NOT_FOUND", message: "CVC roster assignment was not found." });
     const franchise = unwrap(await supabase.from("franchise").select("id, name, current_owner_id").eq("id", assignment.franchise_id).maybeSingle());
     if (!franchise || (franchise.current_owner_id !== owner.id && !["commissioner", "administrator"].includes(owner.role))) throw new TRPCError({ code: "FORBIDDEN", message: "You may only update your own CVC franchise lineup." });
+    const player = assignment.player?.[0];
+    // "BN" isn't a real configured roster_slot row -- it means releasing the player to
+    // the bench, i.e. clearing assigned_slot_code entirely. There's no capacity limit or
+    // eligibility check for the bench itself.
+    if (input.slotCode.toUpperCase() === "BN") {
+      unwrap(await supabase.from("roster_assignment").update({ assigned_slot_code: null, updated_at: new Date().toISOString() }).eq("id", assignment.id).select("id").single());
+      unwrap(await supabase.from("transaction").insert({ season_id: season.id, franchise_id: franchise.id, actor_owner_id: owner.id, transaction_type: "lineup_move", status: "final", summary: `${franchise.name} moved ${player?.display_name ?? "a player"} to the bench.`, details: { roster_assignment_id: assignment.id, previous_slot: assignment.assigned_slot_code, slot_code: null } }).select("id").single());
+      await createAuditEvent(league.id, season.id, owner.id, "roster_assignment", assignment.id, "lineup_slot_updated", `${franchise.name} moved ${player?.display_name ?? "a player"} to the bench.`);
+      return { assignmentId: assignment.id, slotCode: "BN" };
+    }
     const slot = unwrap(await supabase.from("roster_slot").select("code, label, eligible_positions, maximum_count").eq("season_id", season.id).eq("code", input.slotCode).maybeSingle());
     if (!slot) throw new TRPCError({ code: "BAD_REQUEST", message: "That CVC roster slot is not configured for this season." });
-    const player = assignment.player?.[0];
     if (slot.eligible_positions?.length && player?.position && !slot.eligible_positions.includes(player.position)) throw new TRPCError({ code: "BAD_REQUEST", message: `${player.position} is not eligible for the ${slot.label} CVC roster slot.` });
     const occupied = unwrap(await supabase.from("roster_assignment").select("id").eq("season_id", season.id).eq("franchise_id", assignment.franchise_id).eq("assigned_slot_code", slot.code).is("released_at", null).neq("id", assignment.id)) ?? [];
     if (occupied.length >= slot.maximum_count) throw new TRPCError({ code: "BAD_REQUEST", message: `The ${slot.label} CVC roster slot is already at capacity.` });
