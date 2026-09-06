@@ -3,6 +3,19 @@ import { useEffect, useRef, useState } from "react";
 export type TankRecord = Record<string, unknown>;
 
 const TEAM_CODE_ALIASES: Record<string, string> = { kan: "kc", tam: "tb", arz: "ari", jax: "jac", was: "wsh" };
+
+export function extractScheduleGames(body: unknown): TankRecord[] {
+  if (Array.isArray(body)) return body;
+  if (!body || typeof body !== "object") return [];
+  const record = body as Record<string, unknown>;
+  // Confirmed live shape: { team: "KC", schedule: [...] } -- the array of games is
+  // nested under "schedule", not the body itself. The previous fallback,
+  // Object.values(body), silently broke this: since arrays are objects in JS, it
+  // picked up the *entire* schedule array as a single wrapped element instead of the
+  // individual game objects, so every downstream week/opponent lookup found nothing.
+  if (Array.isArray(record.schedule)) return record.schedule as TankRecord[];
+  return Object.values(record).filter((entry): entry is TankRecord => Boolean(entry) && typeof entry === "object" && !Array.isArray(entry));
+}
 const scheduleCache = new Map<string, TankRecord[] | null>();
 
 export function normalizeTeam(team: string | null | undefined): string {
@@ -40,8 +53,7 @@ export function useTeamSchedule(team: string | null | undefined, enabled: boolea
       .then(response => (response.ok ? response.json() : null) as Promise<{ body?: TankRecord | TankRecord[] } | null>)
       .then(payload => {
         if (!ignore) setRawResponse(payload);
-        const raw = payload?.body;
-        const list = Array.isArray(raw) ? raw : raw && typeof raw === "object" ? Object.values(raw as Record<string, unknown>).filter((entry): entry is TankRecord => Boolean(entry) && typeof entry === "object") : [];
+        const list = extractScheduleGames(payload?.body);
         if (list.length) scheduleCache.set(abv, list);
         if (!ignore) setGames(list.length ? list : null);
       })
@@ -105,8 +117,7 @@ async function fetchTeamSchedule(abv: string): Promise<TankRecord[] | null> {
     const response = await fetch(url);
     const payload = await (response.ok ? response.json() : response.json().catch(() => null)) as { body?: TankRecord | TankRecord[]; error?: string } | null;
     lastFetchDebug = { teamsRequested: [...lastFetchDebug.teamsRequested, abv], url, status: response.status, rawBody: payload, error: payload?.error ?? null };
-    const raw = payload?.body;
-    const list = Array.isArray(raw) ? raw : raw && typeof raw === "object" ? Object.values(raw as Record<string, unknown>).filter((entry): entry is TankRecord => Boolean(entry) && typeof entry === "object") : [];
+    const list = extractScheduleGames(payload?.body);
     if (list.length) scheduleCache.set(abv, list);
     return list.length ? list : null;
   } catch (error) {
