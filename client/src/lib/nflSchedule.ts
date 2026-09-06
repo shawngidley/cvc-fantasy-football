@@ -1,0 +1,132 @@
+import { useEffect, useState } from "react";
+
+export type TankRecord = Record<string, unknown>;
+
+const TEAM_CODE_ALIASES: Record<string, string> = { kan: "kc", tam: "tb", arz: "ari", jax: "jac", was: "wsh" };
+const scheduleCache = new Map<string, TankRecord[] | null>();
+
+export function normalizeTeam(team: string | null | undefined): string {
+  return TEAM_CODE_ALIASES[(team ?? "").toLowerCase()] ?? (team ?? "").toLowerCase();
+}
+export function teamLogoUrl(team: string | null | undefined): string {
+  return `https://a.espncdn.com/i/teamlogos/nfl/500/${normalizeTeam(team)}.png`;
+}
+
+export function firstOf(source: TankRecord | undefined, keys: string[]): string | null {
+  for (const key of keys) { const candidate = source?.[key]; if (candidate !== undefined && candidate !== null && candidate !== "") return String(candidate); }
+  return null;
+}
+
+export function fmtDate(dateStr: string | null | undefined): string {
+  if (!dateStr || dateStr.length < 8) return "—";
+  const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+  const month = Number.parseInt(dateStr.slice(4, 6), 10);
+  const day = Number.parseInt(dateStr.slice(6, 8), 10);
+  return `${months[month - 1] ?? ""} ${day}`;
+}
+
+export function useTeamSchedule(team: string | null | undefined, enabled: boolean) {
+  const [games, setGames] = useState<TankRecord[] | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [rawResponse, setRawResponse] = useState<unknown>(null);
+  useEffect(() => {
+    if (!enabled || !team) return;
+    const abv = normalizeTeam(team).toUpperCase();
+    if (scheduleCache.has(abv)) { setGames(scheduleCache.get(abv) ?? null); return; }
+    let ignore = false;
+    setLoading(true);
+    fetch(`/api/tank01/getNFLTeamSchedule?teamAbv=${encodeURIComponent(abv)}`)
+      .then(response => (response.ok ? response.json() : null) as Promise<{ body?: TankRecord | TankRecord[] } | null>)
+      .then(payload => {
+        if (!ignore) setRawResponse(payload);
+        const raw = payload?.body;
+        const list = Array.isArray(raw) ? raw : raw && typeof raw === "object" ? Object.values(raw as Record<string, unknown>).filter((entry): entry is TankRecord => Boolean(entry) && typeof entry === "object") : [];
+        scheduleCache.set(abv, list.length ? list : null);
+        if (!ignore) setGames(list.length ? list : null);
+      })
+      .catch(() => { scheduleCache.set(abv, null); if (!ignore) setGames(null); })
+      .finally(() => { if (!ignore) setLoading(false); });
+    return () => { ignore = true; };
+  }, [team, enabled]);
+  return { games, loading, rawResponse };
+}
+
+export function gameOpponent(game: TankRecord, team: string) {
+  const abv = normalizeTeam(team).toUpperCase();
+  const away = firstOf(game, ["away", "awayTeam", "away_team"]);
+  const home = firstOf(game, ["home", "homeTeam", "home_team"]);
+  if (!away || !home) return null;
+  return away.toUpperCase() === abv ? { opponent: home, atOrVs: "@" } : { opponent: away, atOrVs: "vs" };
+}
+
+/** Schedule rows in week-number order, with a synthetic BYE WEEK row inserted at any
+ * gap in the sequence (Tank01's schedule response has no explicit bye-week entry). */
+export function buildScheduleWithBye(schedule: TankRecord[], team: string) {
+  const rows = schedule
+    .filter(game => { const seasonType = firstOf(game, ["seasonType", "season_type"]); return !seasonType || seasonType === "Regular Season"; })
+    .map(game => ({ game, week: Number.parseInt(firstOf(game, ["gameWeek", "week"])?.replace(/\D/g, "") ?? "0", 10), opponent: gameOpponent(game, team) }))
+    .filter(row => row.week > 0 && row.opponent)
+    .sort((a, b) => a.week - b.week);
+  const withBye: ({ type: "game"; week: number; game: TankRecord; opponent: { opponent: string; atOrVs: string } } | { type: "bye"; week: number })[] = [];
+  let expected = 1;
+  for (const row of rows) {
+    while (expected < row.week) { withBye.push({ type: "bye", week: expected }); expected += 1; }
+    withBye.push({ type: "game", week: row.week, game: row.game, opponent: row.opponent! });
+    expected = row.week + 1;
+  }
+  return withBye;
+}
+
+export type ScheduleSummary = { byeWeek: number | null; nextOpponent: { opponent: string; atOrVs: string } | null; nextGameTime: string | null };
+
+/** Given a team's full schedule, returns the bye week number (if findable) and the
+ * next unplayed game's opponent/time. */
+export function summarizeSchedule(schedule: TankRecord[] | null, team: string | null | undefined): ScheduleSummary {
+  if (!schedule || !team) return { byeWeek: null, nextOpponent: null, nextGameTime: null };
+  const rows = buildScheduleWithBye(schedule, team);
+  const byeWeek = rows.find(row => row.type === "bye")?.week ?? null;
+  const todayStr = new Date().toISOString().slice(0, 10).replace(/-/g, "");
+  const nextGameRow = rows.find(row => row.type === "game" && (firstOf(row.game, ["gameDate", "date"]) ?? "") >= todayStr);
+  if (nextGameRow && nextGameRow.type === "game") {
+    return { byeWeek, nextOpponent: nextGameRow.opponent, nextGameTime: firstOf(nextGameRow.game, ["gameTime", "time"]) };
+  }
+  return { byeWeek, nextOpponent: null, nextGameTime: null };
+}
+
+async function fetchTeamSchedule(abv: string): Promise<TankRecord[] | null> {
+  if (scheduleCache.has(abv)) return scheduleCache.get(abv) ?? null;
+  try {
+    const response = await fetch(`/api/tank01/getNFLTeamSchedule?teamAbv=${encodeURIComponent(abv)}`);
+    const payload = await (response.ok ? response.json() : null) as { body?: TankRecord | TankRecord[] } | null;
+    const raw = payload?.body;
+    const list = Array.isArray(raw) ? raw : raw && typeof raw === "object" ? Object.values(raw as Record<string, unknown>).filter((entry): entry is TankRecord => Boolean(entry) && typeof entry === "object") : [];
+    scheduleCache.set(abv, list.length ? list : null);
+    return list.length ? list : null;
+  } catch { scheduleCache.set(abv, null); return null; }
+}
+
+/** For pages listing many players across many NFL teams at once (Free Agents), rather
+ * than one useTeamSchedule call per team, which isn't possible anyway (React hooks
+ * can't be called in a loop/conditionally). Fetches every distinct team's schedule
+ * once (deduplicated, cached), returns a map keyed by uppercase team abbreviation. */
+export function useTeamSchedulesFor(teams: (string | null | undefined)[]): { schedules: Record<string, ScheduleSummary>; loading: boolean } {
+  const uniqueTeams = Array.from(new Set(teams.filter((team): team is string => Boolean(team)).map(team => normalizeTeam(team).toUpperCase()))).sort().join(",");
+  const [schedules, setSchedules] = useState<Record<string, ScheduleSummary>>({});
+  const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    const teamList = uniqueTeams ? uniqueTeams.split(",") : [];
+    if (!teamList.length) { setSchedules({}); return; }
+    let cancelled = false;
+    setLoading(true);
+    Promise.all(teamList.map(async abv => {
+      const schedule = await fetchTeamSchedule(abv);
+      return [abv, summarizeSchedule(schedule, abv)] as const;
+    })).then(entries => {
+      if (!cancelled) setSchedules(Object.fromEntries(entries));
+    }).finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
+  }, [uniqueTeams]);
+
+  return { schedules, loading };
+}

@@ -5,8 +5,8 @@ import { trpc } from "@/lib/trpc";
 import { normalizePlayerName } from "@shared/playerNameMatch";
 import { useCvcOwnerAuth } from "@/hooks/useCvcOwnerAuth";
 import { CvcNewsRow, type CvcNewsItem } from "@/components/CvcNewsRow";
+import { buildScheduleWithBye, fmtDate, gameOpponent, normalizeTeam, teamLogoUrl, useTeamSchedule, type TankRecord } from "@/lib/nflSchedule";
 
-type TankRecord = Record<string, unknown>;
 type TankPlayerInfo = { body?: TankRecord | TankRecord[] };
 type TankNewsItem = { title?: string; link?: string; image?: string; playerIDs?: string[] };
 
@@ -14,21 +14,10 @@ const positionColor: Record<string, string> = { QB: "bg-red-600", RB: "bg-emeral
 const NEWS_CACHE_KEY = "cvc_tank01_news_v1";
 const NEWS_TTL_MS = 15 * 60_000;
 const infoCache = new Map<string, TankRecord | null>();
-const scheduleCache = new Map<string, TankRecord[] | null>();
-const TEAM_CODE_ALIASES: Record<string, string> = { kan: "kc", tam: "tb", arz: "ari", jax: "jac", was: "wsh" };
 
 function asRecord(value: unknown): TankRecord { return value && typeof value === "object" && !Array.isArray(value) ? value as TankRecord : {}; }
 function firstOf(source: TankRecord | undefined, keys: string[]): string | null { for (const key of keys) { const candidate = source?.[key]; if (candidate !== undefined && candidate !== null && candidate !== "") return String(candidate); } return null; }
 function looksLikeInjury(text: string) { return /injur|questionable|doubtful| ruled out|out for|ir |surgery|concussion|hamstring|ankle|knee|illness/i.test(text); }
-const normalizeTeam = (team: string | null | undefined) => (TEAM_CODE_ALIASES[(team ?? "").toLowerCase()] ?? (team ?? "").toLowerCase());
-const teamLogoUrl = (team: string | null | undefined) => `https://a.espncdn.com/i/teamlogos/nfl/500/${normalizeTeam(team)}.png`;
-function fmtDate(dateStr: string | null | undefined): string {
-  if (!dateStr || dateStr.length < 8) return "—";
-  const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-  const month = Number.parseInt(dateStr.slice(4, 6), 10);
-  const day = Number.parseInt(dateStr.slice(6, 8), 10);
-  return `${months[month - 1] ?? ""} ${day}`;
-}
 
 /** Fetches Tank01's getNFLPlayerInfo for one player, cached by name for the session. Every
  * field below beyond `espnHeadshot` (already used in Protections.tsx/CvcOwnerLineup.tsx)
@@ -82,57 +71,6 @@ function usePlayerNews(displayName: string | undefined) {
  * page, so its response shape is parsed defensively against Tank01's documented field
  * names and hidden entirely if nothing recognizable comes back, rather than risk
  * showing wrong data. */
-function useTeamSchedule(team: string | null | undefined, enabled: boolean) {
-  const [games, setGames] = useState<TankRecord[] | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [rawResponse, setRawResponse] = useState<unknown>(null);
-  useEffect(() => {
-    if (!enabled || !team) return;
-    const abv = normalizeTeam(team).toUpperCase();
-    if (scheduleCache.has(abv)) { setGames(scheduleCache.get(abv) ?? null); return; }
-    let ignore = false;
-    setLoading(true);
-    fetch(`/api/tank01/getNFLTeamSchedule?teamAbv=${encodeURIComponent(abv)}`)
-      .then(response => (response.ok ? response.json() : null) as Promise<{ body?: TankRecord | TankRecord[] } | null>)
-      .then(payload => {
-        if (!ignore) setRawResponse(payload);
-        const raw = payload?.body;
-        const list = Array.isArray(raw) ? raw : raw && typeof raw === "object" ? Object.values(raw as Record<string, unknown>).filter((entry): entry is TankRecord => Boolean(entry) && typeof entry === "object") : [];
-        scheduleCache.set(abv, list.length ? list : null);
-        if (!ignore) setGames(list.length ? list : null);
-      })
-      .catch(() => { scheduleCache.set(abv, null); if (!ignore) setGames(null); })
-      .finally(() => { if (!ignore) setLoading(false); });
-    return () => { ignore = true; };
-  }, [team, enabled]);
-  return { games, loading, rawResponse };
-}
-
-function gameOpponent(game: TankRecord, team: string) {
-  const abv = normalizeTeam(team).toUpperCase();
-  const away = firstOf(game, ["away", "awayTeam", "away_team"]);
-  const home = firstOf(game, ["home", "homeTeam", "home_team"]);
-  if (!away || !home) return null;
-  return away.toUpperCase() === abv ? { opponent: home, atOrVs: "@" } : { opponent: away, atOrVs: "vs" };
-}
-
-/** Schedule rows in week-number order, with a synthetic BYE WEEK row inserted at any
- * gap in the sequence (Tank01's schedule response has no explicit bye-week entry). */
-function buildScheduleWithBye(schedule: TankRecord[], team: string) {
-  const rows = schedule
-    .filter(game => { const seasonType = firstOf(game, ["seasonType", "season_type"]); return !seasonType || seasonType === "Regular Season"; })
-    .map(game => ({ game, week: Number.parseInt(firstOf(game, ["gameWeek", "week"])?.replace(/\D/g, "") ?? "0", 10), opponent: gameOpponent(game, team) }))
-    .filter(row => row.week > 0 && row.opponent)
-    .sort((a, b) => a.week - b.week);
-  const withBye: ({ type: "game"; week: number; game: TankRecord; opponent: { opponent: string; atOrVs: string } } | { type: "bye"; week: number })[] = [];
-  let expected = 1;
-  for (const row of rows) {
-    while (expected < row.week) { withBye.push({ type: "bye", week: expected }); expected += 1; }
-    withBye.push({ type: "game", week: row.week, game: row.game, opponent: row.opponent! });
-    expected = row.week + 1;
-  }
-  return withBye;
-}
 
 const GAME_LOG_COLUMNS: Record<string, { key: string; label: string }[]> = {
   QB: [["passCmp", "CMP"], ["passAtt", "ATT"], ["passYds", "YDS"], ["passTD", "TD"], ["passInt", "INT"], ["rushAtt", "RUSH"], ["rushYds", "RUSH YDS"]].map(([key, label]) => ({ key, label })),

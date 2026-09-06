@@ -4,6 +4,7 @@ import { useCvcOwnerAuth } from "@/hooks/useCvcOwnerAuth";
 import { Link } from "wouter";
 import { ArrowDownUp, DollarSign, Search, ShieldCheck, Star, Users } from "lucide-react";
 import { useMemo, useState } from "react";
+import { teamLogoUrl as scheduleTeamLogoUrl, useTeamSchedulesFor } from "@/lib/nflSchedule";
 
 const POSITIONS = ["FLEX", "QB", "RB", "WR", "TE", "K", "DST"];
 const FLEX_POSITIONS = new Set(["QB", "RB", "WR", "TE"]);
@@ -131,7 +132,9 @@ export function CvcFreeAgents() {
   const toggleSort = (next: string) => { if (next === sort) setDirection(current => current === "asc" ? "desc" : "asc"); else { setSort(next); setDirection("asc"); } };
   const SortHeader = ({ field, label }: { field: string; label: string }) => <th className="whitespace-nowrap px-3 py-3 text-right cursor-pointer select-none hover:text-cvc-accent" onClick={() => toggleSort(field)}><span className="inline-flex items-center gap-1">{label}{sort === field ? <ArrowDownUp size={11} className={direction === "desc" ? "rotate-180" : ""} /> : null}</span></th>;
 
-  const colSpan = 3 + activeColumns.length;
+  const { schedules } = useTeamSchedulesFor(players.map((player: any) => player.nfl_team));
+
+  const colSpan = 6 + activeColumns.length;
   const emptyLabel = tab === "watchlist" ? "No players on your watchlist yet — tap the star next to a player to add one." : matchingRightsOnly ? "No free agents currently carry a matching-rights tag." : "No players match this filter.";
   const isLoading = activePool.isLoading;
   const isError = activePool.error;
@@ -169,6 +172,9 @@ export function CvcFreeAgents() {
           <table className="min-w-[1000px] w-full text-left">
             <thead className="bg-[#edf4ee]"><tr className="font-display text-xs uppercase tracking-[.08em] text-cvc-deep">
               <th className="cursor-pointer select-none px-5 py-3 hover:text-cvc-accent" onClick={() => toggleSort("name")}><span className="inline-flex items-center gap-1">Player{sort === "name" ? <ArrowDownUp size={11} className={direction === "desc" ? "rotate-180" : ""} /> : null}</span></th>
+              <th className="whitespace-nowrap px-3 py-3 text-center">Bye</th>
+              <th className="whitespace-nowrap px-3 py-3 text-center">Opp</th>
+              <th className="whitespace-nowrap px-3 py-3 text-center">Game</th>
               {activeColumns.map(column => <SortHeader key={column} field={column} label={COLUMN_DEFS[column].label} />)}
               <th className="px-3 py-3">Availability</th>
               <th className="px-5 py-3 text-right">FAAB</th>
@@ -178,6 +184,11 @@ export function CvcFreeAgents() {
                 : isError ? <tr><td colSpan={colSpan} className="px-5 py-8 text-center text-sm text-red-700">{activePool.error.message}</td></tr>
                 : players.length ? players.map((player: any) => <tr key={player.id} className="border-t border-slate-200 hover:bg-slate-50">
                     <td className="px-5 py-2.5"><PlayerCell player={player} isWatched={watchedIds.has(player.id)} canWatch={Boolean(owner?.franchise)} onToggleWatch={() => toggleWatch.mutate({ playerId: player.id })} /></td>
+                    {(() => { const schedule = schedules[(player.nfl_team ?? "").toUpperCase()]; return <>
+                      <td className="whitespace-nowrap px-3 py-2.5 text-center text-xs font-bold text-amber-700">{schedule?.byeWeek ?? "—"}</td>
+                      <td className="whitespace-nowrap px-3 py-2.5 text-center text-xs font-bold text-cvc-deep">{schedule?.nextOpponent ? <span className="inline-flex items-center gap-1"><img src={scheduleTeamLogoUrl(schedule.nextOpponent.opponent)} alt="" className="h-4 w-4 object-contain" />{schedule.nextOpponent.atOrVs} {schedule.nextOpponent.opponent}</span> : "—"}</td>
+                      <td className="whitespace-nowrap px-3 py-2.5 text-center text-xs text-slate-500">{schedule?.nextGameTime ?? "—"}</td>
+                    </>; })()}
                     {activeColumns.map(column => <td key={column} className="whitespace-nowrap px-3 py-2.5 text-right text-sm text-slate-600">{fmt(cellValue(player, column))}</td>)}
                     <td className="px-3 py-2.5">{player.rosteredByFranchiseName ? <span className="rounded-full bg-slate-100 px-2 py-1 text-[10px] font-bold uppercase tracking-[.08em] text-slate-600">Rostered</span> : <span className="rounded-full bg-emerald-50 px-2 py-1 text-[10px] font-bold uppercase tracking-[.08em] text-emerald-700">Available</span>}</td>
                     <td className="px-5 py-2.5 text-right">{player.rosteredByFranchiseName ? <span className="text-xs text-slate-400">—</span> : owner?.franchise && waiver.data?.period ? <button onClick={() => setSelectedPlayerId(player.id)} className="cvc-mini-button"><DollarSign size={13} /> {isFreePeriod ? "Claim ($1)" : "Bid"}</button> : <span className="text-xs text-slate-400">{owner ? "Window closed" : "Sign in"}</span>}</td>
