@@ -761,16 +761,16 @@ export const leagueRouter = router({
     // without a player_id filter and matching in-memory avoids building a .in() clause
     // from potentially 1000 player IDs, which produces a URL long enough that
     // Supabase/PostgREST rejects it outright with a 400 Bad Request.
-    const assignments = unwrap(await supabase.from("roster_assignment").select("player_id, franchise:franchise_id(name)").eq("season_id", season.id).is("released_at", null)) ?? [];
-    const franchiseByPlayerId = new Map<string, string>();
+    const assignments = unwrap(await supabase.from("roster_assignment").select("player_id, franchise:franchise_id(name, abbreviation)").eq("season_id", season.id).is("released_at", null)) ?? [];
+    const franchiseByPlayerId = new Map<string, { name: string; abbreviation: string | null }>();
     for (const row of assignments as any[]) {
-      const franchiseField = row.franchise as { name: string } | { name: string }[] | null;
-      const name = Array.isArray(franchiseField) ? franchiseField[0]?.name : franchiseField?.name;
-      if (name) franchiseByPlayerId.set(row.player_id, name);
+      const franchiseField = row.franchise as { name: string; abbreviation: string | null } | { name: string; abbreviation: string | null }[] | null;
+      const franchise = Array.isArray(franchiseField) ? franchiseField[0] : franchiseField;
+      if (franchise?.name) franchiseByPlayerId.set(row.player_id, franchise);
     }
     const tagged = players.map(player => {
-      const franchiseName = franchiseByPlayerId.get(player.id);
-      return franchiseName ? { ...player, rosteredByFranchiseName: franchiseName } : player;
+      const franchise = franchiseByPlayerId.get(player.id);
+      return franchise ? { ...player, rosteredByFranchiseName: franchise.name, rosteredByFranchiseAbbreviation: franchise.abbreviation } : player;
     });
     return attachSeasonStats(tagged, season.id);
   }),

@@ -76,7 +76,6 @@ function PlayerCell({ player }: { player: any }) {
         <span className="text-[11px] text-slate-500">{player.nfl_team ?? "FA"}</span>
       </div>
       {player.cutByFranchiseName ? <p className="mt-0.5 text-[9px] font-bold uppercase tracking-[.06em] text-amber-600">Matching rights: {player.cutByFranchiseName}</p> : null}
-      {player.rosteredByFranchiseName ? <p className="mt-0.5 text-[9px] font-bold uppercase tracking-[.06em] text-slate-500">Rostered: {player.rosteredByFranchiseName}</p> : null}
     </div>
   </div>;
 }
@@ -207,7 +206,7 @@ export function CvcFreeAgents() {
                 : isError ? <tr><td colSpan={colSpan} className="px-5 py-8 text-center text-sm text-red-700">{activePool.error.message}</td></tr>
                 : players.length ? players.map((player: any) => <tr key={player.id} className="border-t border-slate-200 hover:bg-slate-50">
                     <td className="px-5 py-2.5"><PlayerCell player={player} /></td>
-                    <td className="px-2 py-2.5 text-center">{player.rosteredByFranchiseName ? <span className="text-[10px] font-bold uppercase tracking-[.06em] text-slate-400">Rostered</span> : owner?.franchise && waiver.data?.period ? <button onClick={() => setSelectedPlayerId(player.id)} className="inline-flex items-center gap-1 rounded-md bg-amber-500 px-2.5 py-1.5 text-xs font-bold text-white hover:bg-amber-600"><DollarSign size={11} /> {isFreePeriod ? "Claim ($1)" : "Bid"}</button> : <span className="text-[10px] font-bold uppercase tracking-[.06em] text-slate-400">{owner ? "Closed" : "Sign in"}</span>}</td>
+                    <td className="px-2 py-2.5 text-center">{player.rosteredByFranchiseName ? <span className="text-[10px] font-black uppercase tracking-[.04em] text-slate-500" title={player.rosteredByFranchiseName}>{player.rosteredByFranchiseAbbreviation ?? player.rosteredByFranchiseName.split(/\s+/).map((word: string) => word[0]).join("").slice(0, 3).toUpperCase()}</span> : owner?.franchise && waiver.data?.period ? <button onClick={() => setSelectedPlayerId(player.id)} className="inline-flex items-center gap-1 rounded-md bg-amber-500 px-2.5 py-1.5 text-xs font-bold text-white hover:bg-amber-600"><DollarSign size={11} /> {isFreePeriod ? "Claim ($1)" : "Bid"}</button> : <span className="text-[10px] font-bold uppercase tracking-[.06em] text-slate-400">{owner ? "Closed" : "Sign in"}</span>}</td>
                     <td className="px-2 py-2.5 text-center">{owner?.franchise ? <button onClick={() => toggleWatch.mutate({ playerId: player.id })} className="text-slate-300 hover:text-amber-500" aria-label={watchedIds.has(player.id) ? "Remove from watchlist" : "Add to watchlist"}><Star size={15} fill={watchedIds.has(player.id) ? "currentColor" : "none"} className={watchedIds.has(player.id) ? "text-amber-500" : ""} /></button> : null}</td>
                     {(() => { const schedule = schedules[(player.nfl_team ?? "").toUpperCase()]; return <>
                       <td className="whitespace-nowrap px-3 py-2.5 text-center text-xs font-bold text-amber-700">{schedule?.byeWeek ?? "—"}</td>
