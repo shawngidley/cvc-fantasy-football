@@ -143,7 +143,18 @@ async function applyRookieLotteryResults(lotteryId: string, draftId: string, rou
  * per-row Tank01 call. Players with no cached row yet (not synced) are left as-is. */
 async function attachSeasonStats<T extends { id: string }>(players: T[], seasonId: string): Promise<(T & { seasonStats?: Record<string, number | null> })[]> {
   if (!players.length) return players;
-  const rows = unwrap(await supabase.from("player_season_stat").select("player_id, games_played, pass_yds, pass_td, pass_int, rush_att, rush_yds, rush_td, targets, receptions, rec_yds, rec_td, fg_made, xp_made, sacks, def_int, def_td, fantasy_points, fantasy_points_per_game").eq("season_id", seasonId).in("player_id", players.map(player => player.id))) ?? [];
+  // A single .in() clause with up to 1000 player UUIDs (36+ chars each, plus URL
+  // encoding) produces a URL long enough that Supabase/PostgREST rejects it outright
+  // with a 400 Bad Request -- confirmed as the exact cause on the All Players tab,
+  // which requests up to 1000 players with no roster-size bound the way
+  // roster_assignment naturally has. Batched into chunks well within any reasonable
+  // URL length limit.
+  const BATCH_SIZE = 150;
+  const playerIds = players.map(player => player.id);
+  const batches: string[][] = [];
+  for (let index = 0; index < playerIds.length; index += BATCH_SIZE) batches.push(playerIds.slice(index, index + BATCH_SIZE));
+  const results = await Promise.all(batches.map(batch => supabase.from("player_season_stat").select("player_id, games_played, pass_yds, pass_td, pass_int, rush_att, rush_yds, rush_td, targets, receptions, rec_yds, rec_td, fg_made, xp_made, sacks, def_int, def_td, fantasy_points, fantasy_points_per_game").eq("season_id", seasonId).in("player_id", batch)));
+  const rows = results.flatMap(result => unwrap(result) ?? []);
   const byPlayerId = new Map(rows.map(row => [row.player_id, row]));
   return players.map(player => {
     const stats = byPlayerId.get(player.id);
@@ -745,7 +756,12 @@ export const leagueRouter = router({
     if (input?.search) playerQuery = playerQuery.ilike("display_name", `%${input.search.replace(/[%_]/g, "")}%`);
     if (input?.position) playerQuery = playerQuery.eq("position", input.position.toUpperCase());
     const players = unwrap(await playerQuery) ?? [];
-    const assignments = unwrap(await supabase.from("roster_assignment").select("player_id, franchise:franchise_id(name)").eq("season_id", season.id).is("released_at", null).in("player_id", players.map(player => player.id))) ?? [];
+    // roster_assignment for one season is small and bounded (number of active
+    // franchises x roster size, not by how many players were fetched) -- fetching it
+    // without a player_id filter and matching in-memory avoids building a .in() clause
+    // from potentially 1000 player IDs, which produces a URL long enough that
+    // Supabase/PostgREST rejects it outright with a 400 Bad Request.
+    const assignments = unwrap(await supabase.from("roster_assignment").select("player_id, franchise:franchise_id(name)").eq("season_id", season.id).is("released_at", null)) ?? [];
     const franchiseByPlayerId = new Map<string, string>();
     for (const row of assignments as any[]) {
       const franchiseField = row.franchise as { name: string } | { name: string }[] | null;
