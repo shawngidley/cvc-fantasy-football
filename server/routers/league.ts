@@ -1296,10 +1296,17 @@ export const leagueRouter = router({
     return unwrap(await supabase.from("scoring_rule").select("category, stat_key, label, value, applies_to_positions").eq("season_id", season.id).order("category").order("stat_key")) ?? [];
   }),
 
-  liveScoringBoard: publicProcedure.query(async () => {
+  scheduleWeeksList: publicProcedure.query(async () => {
+    const { season } = await getCurrentLeagueAndSeason();
+    return unwrap(await supabase.from("schedule_week").select("id, week_number, label, status").eq("season_id", season.id).order("week_number")) ?? [];
+  }),
+
+  liveScoringBoard: publicProcedure.input(z.object({ weekNumber: z.number().int().optional() }).optional()).query(async ({ input }) => {
     const { season } = await getCurrentLeagueAndSeason();
     const weeks = unwrap(await supabase.from("schedule_week").select("id, week_number, label, status").eq("season_id", season.id).order("week_number")) ?? [];
-    const week = weeks.find(item => item.status === "live") ?? weeks.find(item => item.status === "upcoming") ?? null;
+    const week = input?.weekNumber != null
+      ? weeks.find(item => item.week_number === input.weekNumber) ?? null
+      : weeks.find(item => item.status === "live") ?? weeks.find(item => item.status === "upcoming") ?? null;
     if (!week) return { week: null, matchups: [] };
     const matchups = unwrap(await supabase.from("matchup").select("id, home_franchise_id, away_franchise_id, home_score, away_score, result_state, home:home_franchise_id(id, name, logo_url), away:away_franchise_id(id, name, logo_url)").eq("schedule_week_id", week.id).order("created_at")) ?? [];
     const franchiseIds = Array.from(new Set(matchups.flatMap(item => [item.home_franchise_id, item.away_franchise_id])));
