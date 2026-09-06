@@ -125,7 +125,7 @@ export function CvcPlayerProfile() {
 
   const [headshotFailed, setHeadshotFailed] = useState(false);
 
-  if (!valid) return <div className="mx-auto max-w-3xl"><Link href="/free-agents" className="inline-flex items-center gap-2 text-xs font-black uppercase tracking-[0.12em] text-cvc-accent"><ArrowLeft size={15} /> Player pool</Link><p className="mt-8 text-sm text-cvc-muted">Choose a CVC player from the roster, free agent, or draft views.</p></div>;
+  if (!valid) return <div className="mx-auto max-w-3xl"><button type="button" onClick={() => window.history.back()} className="inline-flex items-center gap-2 text-xs font-black uppercase tracking-[0.12em] text-cvc-accent"><ArrowLeft size={15} /> Player pool</button><p className="mt-8 text-sm text-cvc-muted">Choose a CVC player from the roster, free agent, or draft views.</p></div>;
   if (detail.isLoading) return <div className="mx-auto max-w-3xl text-sm text-cvc-muted">Loading CVC player profile…</div>;
   if (detail.error || !detail.data) return <div className="mx-auto max-w-3xl text-sm text-cvc-muted">This CVC player record was not found.</div>;
 
@@ -150,7 +150,7 @@ export function CvcPlayerProfile() {
   const espnPlayerUrl = espnId ? `https://www.espn.com/nfl/player/_/id/${espnId}` : null;
 
   return <div className="mx-auto max-w-5xl">
-    <Link href="/free-agents" className="inline-flex items-center gap-2 text-xs font-black uppercase tracking-[0.12em] text-cvc-accent hover:text-[var(--cvc-accent-soft)]"><ArrowLeft size={15} /> Back to players</Link>
+    <button type="button" onClick={() => window.history.back()} className="inline-flex items-center gap-2 text-xs font-black uppercase tracking-[0.12em] text-cvc-accent hover:text-[var(--cvc-accent-soft)]"><ArrowLeft size={15} /> Back</button>
 
     <section className="cvc-card mt-5"><div className="cvc-card-stripe" /><div className="cvc-card-body sm:p-7">
       <div className="flex flex-wrap items-start justify-between gap-5">
