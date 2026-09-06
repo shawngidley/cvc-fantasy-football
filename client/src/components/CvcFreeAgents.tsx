@@ -2,7 +2,7 @@
 import { trpc } from "@/lib/trpc";
 import { useCvcOwnerAuth } from "@/hooks/useCvcOwnerAuth";
 import { Link } from "wouter";
-import { ArrowDownUp, DollarSign, Search, ShieldCheck, Star, Users } from "lucide-react";
+import { ArrowDownUp, DollarSign, Search, ShieldCheck, Star, Users, X } from "lucide-react";
 import { useMemo, useState } from "react";
 import { teamLogoUrl as scheduleTeamLogoUrl } from "@/lib/nflSchedule";
 
@@ -111,7 +111,7 @@ export function CvcFreeAgents() {
   const myBids = trpc.league.myFaabBids.useQuery(undefined, { enabled: Boolean(owner?.franchise) });
   const commissioner = ["commissioner", "administrator"].includes(owner?.role ?? "");
   const queue = trpc.league.waiverBidQueue.useQuery(undefined, { enabled: commissioner });
-  const submit = trpc.league.submitFaabBid.useMutation({ onSuccess: async () => { setSelectedPlayerId(""); setAmount("1"); setMaxPlayersDesired("1"); await Promise.all([utils.league.myFaabBids.invalidate(), utils.league.myFaabBalance.invalidate(), utils.league.activity.invalidate()]); } });
+  const submit = trpc.league.submitFaabBid.useMutation({ onSuccess: async () => { setSelectedPlayerId(""); setAmount("1"); setMaxPlayersDesired("1"); setDropPlayerId(""); await Promise.all([utils.league.myFaabBids.invalidate(), utils.league.myFaabBalance.invalidate(), utils.league.activity.invalidate()]); } });
   const resolve = trpc.league.resolveFaabBid.useMutation({ onSuccess: () => { utils.league.waiverBidQueue.invalidate(); utils.league.freeAgents.invalidate(); utils.league.myFaabBalance.invalidate(); utils.league.activity.invalidate(); } });
 
   const activePool = tab === "all-players" ? allPlayersPool : tab === "watchlist" ? watchlistPool : freeAgentsPool;
@@ -153,6 +153,15 @@ export function CvcFreeAgents() {
     const dayNames = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
     return `${dayNames[date.getDay()]} ${time} ET`;
   }
+
+  const myRoster = trpc.league.franchiseRoster.useQuery({ franchiseId: owner?.franchise?.id ?? "00000000-0000-0000-0000-000000000000" }, { enabled: Boolean(owner?.franchise?.id) && Boolean(selectedPlayerId) });
+  // Must match server/waiverRules.ts's MAX_ROSTER_SIZE (22) -- server code can't be
+  // imported into the client bundle, so this constant is duplicated intentionally.
+  const MAX_ROSTER_SIZE = 22;
+  const myRosterPlayers = (myRoster.data?.players ?? []).filter((row: any) => row.player);
+  const rosterIsFull = myRosterPlayers.length >= MAX_ROSTER_SIZE;
+  const [dropPlayerId, setDropPlayerId] = useState("");
+  const selectedPlayer = players.find((player: any) => player.id === selectedPlayerId);
 
   const colSpan = 6 + activeColumns.length;
   const emptyLabel = tab === "watchlist" ? "No players on your watchlist yet — tap the star next to a player to add one." : matchingRightsOnly ? "No free agents currently carry a matching-rights tag." : "No players match this filter.";
@@ -206,7 +215,7 @@ export function CvcFreeAgents() {
                 : isError ? <tr><td colSpan={colSpan} className="px-5 py-8 text-center text-sm text-red-700">{activePool.error.message}</td></tr>
                 : players.length ? players.map((player: any) => <tr key={player.id} className="border-t border-slate-200 hover:bg-slate-50">
                     <td className="px-5 py-2.5"><PlayerCell player={player} /></td>
-                    <td className="px-2 py-2.5 text-center">{player.rosteredByFranchiseName ? <span className="text-[10px] font-black uppercase tracking-[.04em] text-slate-500" title={player.rosteredByFranchiseName}>{player.rosteredByFranchiseAbbreviation ?? player.rosteredByFranchiseName.split(/\s+/).map((word: string) => word[0]).join("").slice(0, 3).toUpperCase()}</span> : owner?.franchise && waiver.data?.period ? <button onClick={() => setSelectedPlayerId(player.id)} className="inline-flex items-center gap-1 rounded-md bg-amber-500 px-2.5 py-1.5 text-xs font-bold text-white hover:bg-amber-600"><DollarSign size={11} /> {isFreePeriod ? "Claim ($1)" : "Bid"}</button> : <span className="text-[10px] font-bold uppercase tracking-[.06em] text-slate-400">{owner ? "Closed" : "Sign in"}</span>}</td>
+                    <td className="px-2 py-2.5 text-center">{player.rosteredByFranchiseName ? <span className="text-[10px] font-black uppercase tracking-[.04em] text-slate-500" title={player.rosteredByFranchiseName}>{player.rosteredByFranchiseAbbreviation ?? player.rosteredByFranchiseName.split(/\s+/).map((word: string) => word[0]).join("").slice(0, 3).toUpperCase()}</span> : owner?.franchise && waiver.data?.period ? <button onClick={() => { setSelectedPlayerId(player.id); setDropPlayerId(""); }} className="inline-flex items-center gap-1 rounded-md bg-amber-500 px-2.5 py-1.5 text-xs font-bold text-white hover:bg-amber-600"><DollarSign size={11} /> {isFreePeriod ? "Claim ($1)" : "Bid"}</button> : <span className="text-[10px] font-bold uppercase tracking-[.06em] text-slate-400">{owner ? "Closed" : "Sign in"}</span>}</td>
                     <td className="px-2 py-2.5 text-center">{owner?.franchise ? <button onClick={() => toggleWatch.mutate({ playerId: player.id })} className="text-slate-300 hover:text-amber-500" aria-label={watchedIds.has(player.id) ? "Remove from watchlist" : "Add to watchlist"}><Star size={15} fill={watchedIds.has(player.id) ? "currentColor" : "none"} className={watchedIds.has(player.id) ? "text-amber-500" : ""} /></button> : null}</td>
                     {(() => { const schedule = schedules[(player.nfl_team ?? "").toUpperCase()]; return <>
                       <td className="whitespace-nowrap px-3 py-2.5 text-center text-xs font-bold text-amber-700">{schedule?.byeWeek ?? "—"}</td>
@@ -222,15 +231,36 @@ export function CvcFreeAgents() {
       </section>
     )}
 
-    {selectedPlayerId ? <section className="mt-6 rounded-xl border border-cvc-accent/40 bg-cvc-accent/10 p-5"><div className="flex flex-wrap items-center justify-between gap-3"><div><p className="font-display text-xl uppercase text-white">{isFreePeriod ? "Submit free agent claim" : "Submit FAAB claim"}</p><p className="mt-1 text-sm text-cvc-muted">{isFreePeriod ? "This is the post-Sunday free agent period: every player is $1.00, bid-exempt, and awarded by waiver priority (worst-record-first, then rotates to the back after each win) at the next Thursday 9:00am ET resolution." : "Bids are resolved automatically Thursday and Sunday mornings at 9:00am ET. Winner is the highest bid; ties go to the worse-record team."} The awarded player joins your roster at ${isFreePeriod ? "1" : "their winning bid"} as salary and can't be cut until the following resolution.</p></div><button onClick={() => setSelectedPlayerId("")} className="text-xs font-bold uppercase tracking-[.08em] text-cvc-muted">Cancel</button></div>
-      <div className="mt-4 flex flex-wrap items-end gap-3">
-        {isFreePeriod ? <div className="flex flex-col gap-1"><span className="text-[10px] font-black uppercase tracking-[.08em] text-cvc-muted">Claim price</span><span className="rounded-md border border-white/20 bg-cvc-deep px-3 py-2 text-sm text-white">$1 flat</span></div> : <label className="flex flex-col gap-1"><span className="text-[10px] font-black uppercase tracking-[.08em] text-cvc-muted">Bid ($1–$30)</span><input value={amount} onChange={event => setAmount(event.target.value.replace(/\D/g, ""))} className="w-28 rounded-md border border-white/20 bg-cvc-deep px-3 py-2 text-sm text-white" inputMode="numeric" placeholder="$0" /></label>}
-        <label className="flex flex-col gap-1"><span className="text-[10px] font-black uppercase tracking-[.08em] text-cvc-muted">Max players to win this cycle</span><input value={maxPlayersDesired} onChange={event => setMaxPlayersDesired(event.target.value.replace(/\D/g, ""))} className="w-20 rounded-md border border-white/20 bg-cvc-deep px-3 py-2 text-sm text-white" inputMode="numeric" placeholder="1" /></label>
-        {faabBalance.data?.balance != null ? <span className="pb-2.5 text-xs text-cvc-muted">${faabBalance.data.balance} left this season</span> : null}
-        <button disabled={submit.isPending || (!isFreePeriod && (Number(amount) < 1 || Number(amount) > 30))} onClick={() => submit.mutate({ playerId: selectedPlayerId, amount: isFreePeriod ? 1 : Number(amount), maxPlayersDesired: Number(maxPlayersDesired) || 1 })} className="cvc-button-compact disabled:opacity-50 pb-2.5">{submit.isPending ? "Submitting…" : isFreePeriod ? "Submit claim" : "Submit bid"}</button>
-        {submit.error ? <p className="w-full text-sm text-red-200">{submit.error.message}</p> : null}
+    {selectedPlayerId ? <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4" onClick={() => setSelectedPlayerId("")}>
+      <div className="max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-xl border border-cvc-accent/40 bg-cvc-deep p-5 shadow-2xl" onClick={event => event.stopPropagation()}>
+        <div className="flex items-start justify-between gap-3"><div className="flex items-center gap-2 text-cvc-accent"><DollarSign size={18} /><p className="font-display text-xl uppercase text-white">{isFreePeriod ? "Free agent claim" : "FAAB bid"} — {selectedPlayer?.display_name ?? ""}</p></div><button onClick={() => setSelectedPlayerId("")} className="text-cvc-muted hover:text-white" aria-label="Close"><X size={20} /></button></div>
+        <p className="mt-3 text-sm leading-5 text-cvc-muted">{isFreePeriod ? "This is the post-Sunday free agent period: every player is $1.00, bid-exempt, and awarded by waiver priority (worst-record-first, then rotates to the back after each win)." : "This is a blind auction. Your bid is sealed until the next Thursday or Sunday 9:00am ET resolution. Highest bid wins; ties go to the worse-record team."}</p>
+
+        {selectedPlayer ? <div className="mt-4 flex items-center justify-between gap-3 rounded-lg bg-white px-4 py-3 text-cvc-deep">
+          <div className="flex items-center gap-3">{selectedPlayer.nfl_team ? <img src={teamLogo(selectedPlayer.nfl_team)} alt="" className="h-9 w-9 rounded-full bg-slate-100 object-contain" /> : null}<div><p className="font-bold">{selectedPlayer.display_name}</p><p className="text-xs text-slate-500">{selectedPlayer.position} · {selectedPlayer.nfl_team ?? "FA"}</p></div></div>
+          <div className="text-right"><p className="text-[10px] font-bold uppercase tracking-[.06em] text-slate-500">FAAB Balance</p><p className="font-display text-xl text-emerald-700">${faabBalance.data?.balance ?? "—"}</p></div>
+        </div> : null}
+
+        <div className="mt-4 flex flex-wrap items-end gap-3">
+          {isFreePeriod ? <div className="flex flex-col gap-1"><span className="text-[10px] font-black uppercase tracking-[.08em] text-cvc-muted">Claim price</span><span className="rounded-md border border-white/20 bg-black/20 px-3 py-2 text-sm text-white">$1 flat</span></div> : <label className="flex flex-col gap-1"><span className="text-[10px] font-black uppercase tracking-[.08em] text-cvc-muted">Bid ($1–$30)</span><input value={amount} onChange={event => setAmount(event.target.value.replace(/\D/g, ""))} className="w-28 rounded-md border border-white/20 bg-black/20 px-3 py-2 text-sm text-white" inputMode="numeric" placeholder="$0" /></label>}
+          <label className="flex flex-col gap-1"><span className="text-[10px] font-black uppercase tracking-[.08em] text-cvc-muted">Max players to win this cycle</span><input value={maxPlayersDesired} onChange={event => setMaxPlayersDesired(event.target.value.replace(/\D/g, ""))} className="w-20 rounded-md border border-white/20 bg-black/20 px-3 py-2 text-sm text-white" inputMode="numeric" placeholder="1" /></label>
+        </div>
+
+        <div className="mt-4">
+          <p className="text-sm font-bold text-white">Drop player {rosterIsFull ? <span className="text-rose-300">(required — roster full)</span> : <span className="text-cvc-muted">(optional)</span>}</p>
+          <select value={dropPlayerId} onChange={event => setDropPlayerId(event.target.value)} className="mt-2 w-full rounded-md border border-white/20 bg-black/20 px-3 py-2 text-sm text-white">
+            <option value="">— No drop needed —</option>
+            {myRosterPlayers.map((row: any) => <option key={row.player.id} value={row.player.id}>{row.player.display_name} ({row.player.position})</option>)}
+          </select>
+          {myRoster.data ? <p className="mt-1.5 text-xs text-cvc-muted">Your roster has {myRosterPlayers.length}/{MAX_ROSTER_SIZE} players.{rosterIsFull ? " You must drop a player to add one." : ""}</p> : null}
+        </div>
+
+        <p className="mt-4 text-center text-xs text-cvc-muted">{waiver.data?.period?.label ?? "Waiver"} · Bids are blind until the commissioner's resolution runs</p>
+        {submit.error ? <p className="mt-2 text-center text-sm text-red-300">{submit.error.message}</p> : null}
+
+        <div className="mt-4 flex gap-3"><button onClick={() => setSelectedPlayerId("")} className="flex-1 rounded-lg border border-white/20 py-2.5 text-sm font-bold text-white hover:bg-white/10">Cancel</button><button disabled={submit.isPending || (!isFreePeriod && (Number(amount) < 1 || Number(amount) > 30)) || (rosterIsFull && !dropPlayerId)} onClick={() => submit.mutate({ playerId: selectedPlayerId, amount: isFreePeriod ? 1 : Number(amount), maxPlayersDesired: Number(maxPlayersDesired) || 1, dropPlayerId: dropPlayerId || undefined })} className="cvc-button-compact flex-[2] justify-center disabled:opacity-50">{submit.isPending ? "Submitting…" : `Submit $${isFreePeriod ? 1 : Number(amount) || 0} ${isFreePeriod ? "claim" : "bid"}`}</button></div>
+        <p className="mt-3 text-[11px] leading-4 text-cvc-muted">If you submit several {isFreePeriod ? "claims" : "bids"} this cycle, "max players to win" caps how many of them you're actually willing to win at once — leave it at 1 unless you're prepared to trim your roster afterward.</p>
       </div>
-      <p className="mt-2 text-[11px] text-cvc-muted">If you submit several {isFreePeriod ? "claims" : "bids"} this cycle, "max players to win" caps how many of them you're actually willing to win at once — leave it at 1 unless you specifically want to try for more than one player and are prepared to trim your roster down to 22 afterward.</p>
-    </section> : null}
+    </div> : null}
   </div>;
 }
