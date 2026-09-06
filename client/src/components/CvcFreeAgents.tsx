@@ -2,17 +2,11 @@
 import { trpc } from "@/lib/trpc";
 import { useCvcOwnerAuth } from "@/hooks/useCvcOwnerAuth";
 import { Link } from "wouter";
-import { ArrowDownUp, DollarSign, Search, ShieldCheck, SlidersHorizontal, Star, Users } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
-import {
-  FREE_AGENT_CONFIGURABLE_COLUMNS,
-  normalizeFreeAgentVisibleColumns,
-  toggleFreeAgentVisibleColumn,
-  type FreeAgentConfigurableColumn,
-} from "@/lib/freeAgentColumnPreferences";
+import { ArrowDownUp, DollarSign, Search, ShieldCheck, Users } from "lucide-react";
+import { useMemo, useState } from "react";
 
-const POSITIONS = ["ALL", "SFLEX", "QB", "RB", "WR", "TE", "K", "DST"];
-const SFLEX_POSITIONS = new Set(["QB", "RB", "WR", "TE"]);
+const POSITIONS = ["FLEX", "QB", "RB", "WR", "TE", "K", "DST"];
+const FLEX_POSITIONS = new Set(["QB", "RB", "WR", "TE"]);
 const badgeTone: Record<string, string> = { QB: "bg-violet-50 text-violet-700", RB: "bg-emerald-50 text-emerald-700", WR: "bg-sky-50 text-sky-700", TE: "bg-amber-50 text-amber-700", K: "bg-fuchsia-50 text-fuchsia-700", DST: "bg-slate-100 text-slate-700" };
 const normalizeTeam = (team: string | null | undefined) => ({ kan: "kc", tam: "tb", arz: "ari", jax: "jac", was: "wsh" }[(team ?? "").toLowerCase()] ?? (team ?? "").toLowerCase());
 const teamLogo = (team: string | null | undefined) => `https://a.espncdn.com/i/teamlogos/nfl/500/${normalizeTeam(team)}.png`;
@@ -23,7 +17,12 @@ const fmt = (value: number | null | undefined) => value === null || value === un
 // schedule/bye-week/opponent or projections data source, so Age/Bye/Opp/Game/Proj are
 // intentionally not included here -- that would need a separate subsystem, not just a
 // UI change.
-const COLUMN_DEFS: Record<FreeAgentConfigurableColumn, { label: string; statKey: string }> = {
+// "kickerPts" is a synthetic column (real NFL scoring value: FGM*3 + XPM*1, not CVC
+// fantasy points -- computed inline, no direct database column) and "safety"/
+// "takeaways" are placeholders: neither safeties nor fumble recoveries have a tracked
+// column in player_season_stat yet, so they render as "—" until that's built.
+type ColumnKey = "gp" | "fpts" | "fpg" | "passYds" | "passTD" | "passInt" | "rushAtt" | "rushYds" | "rushTD" | "targets" | "receptions" | "recYds" | "recTD" | "fgMade" | "xpMade" | "kickerPts" | "sacks" | "safety" | "takeaways" | "defTD";
+const COLUMN_DEFS: Record<ColumnKey, { label: string; statKey: string }> = {
   gp: { label: "GP", statKey: "games_played" },
   fpts: { label: "FPTS", statKey: "fantasy_points" },
   fpg: { label: "FP/G", statKey: "fantasy_points_per_game" },
@@ -39,17 +38,31 @@ const COLUMN_DEFS: Record<FreeAgentConfigurableColumn, { label: string; statKey:
   recTD: { label: "REC TD", statKey: "rec_td" },
   fgMade: { label: "FGM", statKey: "fg_made" },
   xpMade: { label: "XPM", statKey: "xp_made" },
-  sacks: { label: "SACK", statKey: "sacks" },
-  defInt: { label: "D.INT", statKey: "def_int" },
-  defTD: { label: "D.TD", statKey: "def_td" },
+  kickerPts: { label: "PTS", statKey: "__kicker_pts" },
+  sacks: { label: "SK", statKey: "sacks" },
+  safety: { label: "SFT", statKey: "__unavailable" },
+  takeaways: { label: "TA", statKey: "__unavailable" },
+  defTD: { label: "TDDST", statKey: "def_td" },
 };
 
-const COLUMN_STORAGE_KEY = "cvc_free_agent_columns_v1";
-function loadStoredColumns(): FreeAgentConfigurableColumn[] {
-  try {
-    const raw = localStorage.getItem(COLUMN_STORAGE_KEY);
-    return normalizeFreeAgentVisibleColumns(raw ? JSON.parse(raw) : null);
-  } catch { return normalizeFreeAgentVisibleColumns(null); }
+// Fixed per-position-group columns (not user-toggleable) -- every offensive position
+// (including FLEX, which mixes QB/RB/WR/TE) shares the same full offensive stat set;
+// K and DST each get their own group-specific columns.
+const OFFENSE_COLUMNS: ColumnKey[] = ["gp", "fpts", "fpg", "passYds", "passTD", "passInt", "rushAtt", "rushYds", "rushTD", "targets", "receptions", "recYds", "recTD"];
+const KICKER_COLUMNS: ColumnKey[] = ["gp", "fpts", "fpg", "fgMade", "xpMade", "kickerPts"];
+const DST_COLUMNS: ColumnKey[] = ["fpts", "fpg", "sacks", "safety", "takeaways", "defTD", "gp"];
+function columnsForPosition(position: string): ColumnKey[] {
+  if (position === "K") return KICKER_COLUMNS;
+  if (position === "DST") return DST_COLUMNS;
+  return OFFENSE_COLUMNS;
+}
+function cellValue(player: any, column: ColumnKey): number | null | undefined {
+  if (column === "kickerPts") {
+    const fg = player.seasonStats?.fg_made; const xp = player.seasonStats?.xp_made;
+    if (fg == null && xp == null) return null;
+    return (fg ?? 0) * 3 + (xp ?? 0) * 1;
+  }
+  return player.seasonStats?.[COLUMN_DEFS[column].statKey];
 }
 
 function PlayerCell({ player, isWatched, onToggleWatch, canWatch }: { player: any; isWatched: boolean; onToggleWatch: () => void; canWatch: boolean }) {
@@ -72,7 +85,7 @@ export function CvcFreeAgents() {
   const { owner } = useCvcOwnerAuth();
   const utils = trpc.useUtils();
   const [tab, setTab] = useState<"free-agents" | "all-players" | "watchlist" | "manage-bids">("free-agents");
-  const [position, setPosition] = useState("ALL");
+  const [position, setPosition] = useState("FLEX");
   const [search, setSearch] = useState("");
   const [sort, setSort] = useState<string>("fpts");
   const [direction, setDirection] = useState<"asc" | "desc">("desc");
@@ -80,11 +93,9 @@ export function CvcFreeAgents() {
   const [amount, setAmount] = useState("1");
   const [maxPlayersDesired, setMaxPlayersDesired] = useState("1");
   const [matchingRightsOnly, setMatchingRightsOnly] = useState(false);
-  const [visibleColumns, setVisibleColumns] = useState<FreeAgentConfigurableColumn[]>(() => loadStoredColumns());
-  const [columnsOpen, setColumnsOpen] = useState(false);
-  useEffect(() => { try { localStorage.setItem(COLUMN_STORAGE_KEY, JSON.stringify(visibleColumns)); } catch { /* ignore */ } }, [visibleColumns]);
+  const activeColumns = columnsForPosition(position);
 
-  const queryPosition = position === "ALL" || position === "SFLEX" ? undefined : position;
+  const queryPosition = position === "FLEX" ? undefined : position;
   const freeAgentInput = useMemo(() => ({ search: search.trim() || undefined, position: queryPosition, limit: 1000, matchingRightsOnly: matchingRightsOnly || undefined }), [queryPosition, search, matchingRightsOnly]);
   const allPlayersInput = useMemo(() => ({ search: search.trim() || undefined, position: queryPosition, limit: 1000 }), [queryPosition, search]);
 
@@ -106,22 +117,21 @@ export function CvcFreeAgents() {
 
   const activePool = tab === "all-players" ? allPlayersPool : tab === "watchlist" ? watchlistPool : freeAgentsPool;
   const rawPlayers = activePool.data ?? [];
-  const positionFiltered = position === "SFLEX" ? rawPlayers.filter((player: any) => SFLEX_POSITIONS.has(player.position)) : rawPlayers;
+  const positionFiltered = position === "FLEX" ? rawPlayers.filter((player: any) => FLEX_POSITIONS.has(player.position)) : rawPlayers;
 
   const players = [...positionFiltered].sort((a: any, b: any) => {
     if (sort === "name") return a.display_name.localeCompare(b.display_name) * (direction === "asc" ? 1 : -1);
     if (sort === "position") return String(a.position ?? "").localeCompare(String(b.position ?? "")) * (direction === "asc" ? 1 : -1);
     if (sort === "team") return String(a.nfl_team ?? "").localeCompare(String(b.nfl_team ?? "")) * (direction === "asc" ? 1 : -1);
-    const statKey = COLUMN_DEFS[sort as FreeAgentConfigurableColumn]?.statKey ?? "fantasy_points";
-    const va = a.seasonStats?.[statKey] ?? -Infinity;
-    const vb = b.seasonStats?.[statKey] ?? -Infinity;
+    const va = cellValue(a, sort as ColumnKey) ?? -Infinity;
+    const vb = cellValue(b, sort as ColumnKey) ?? -Infinity;
     return (va - vb) * (direction === "asc" ? 1 : -1);
   });
 
   const toggleSort = (next: string) => { if (next === sort) setDirection(current => current === "asc" ? "desc" : "asc"); else { setSort(next); setDirection("asc"); } };
   const SortHeader = ({ field, label }: { field: string; label: string }) => <th className="whitespace-nowrap px-3 py-3 text-right cursor-pointer select-none hover:text-cvc-accent" onClick={() => toggleSort(field)}><span className="inline-flex items-center gap-1">{label}{sort === field ? <ArrowDownUp size={11} className={direction === "desc" ? "rotate-180" : ""} /> : null}</span></th>;
 
-  const colSpan = 3 + visibleColumns.length;
+  const colSpan = 3 + activeColumns.length;
   const emptyLabel = tab === "watchlist" ? "No players on your watchlist yet — tap the star next to a player to add one." : matchingRightsOnly ? "No free agents currently carry a matching-rights tag." : "No players match this filter.";
   const isLoading = activePool.isLoading;
   const isError = activePool.error;
@@ -153,17 +163,13 @@ export function CvcFreeAgents() {
           <label className="relative flex-1"><Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" /><input value={search} onChange={event => setSearch(event.target.value)} placeholder="Search player name" className="w-full rounded-md border border-slate-200 py-2.5 pl-9 pr-3 text-sm text-cvc-deep" /></label>
           <div className="flex flex-wrap gap-2">
             {tab === "free-agents" ? <button onClick={() => setMatchingRightsOnly(current => !current)} className={matchingRightsOnly ? "cvc-mini-button bg-cvc-deep text-white" : "cvc-mini-button"}><ShieldCheck size={13} /> Matching rights only</button> : null}
-            <div className="relative">
-              <button onClick={() => setColumnsOpen(current => !current)} className="cvc-mini-button"><SlidersHorizontal size={13} /> Columns</button>
-              {columnsOpen ? <div className="absolute right-0 top-full z-10 mt-1 w-56 rounded-md border border-slate-200 bg-white p-2 shadow-lg">{FREE_AGENT_CONFIGURABLE_COLUMNS.map(column => <label key={column} className="flex items-center gap-2 rounded px-2 py-1.5 text-xs text-cvc-deep hover:bg-slate-50"><input type="checkbox" checked={visibleColumns.includes(column)} onChange={() => setVisibleColumns(current => toggleFreeAgentVisibleColumn(current, column))} />{COLUMN_DEFS[column].label}</label>)}</div> : null}
-            </div>
           </div>
         </div>
         <div className="overflow-x-auto">
           <table className="min-w-[1000px] w-full text-left">
             <thead className="bg-[#edf4ee]"><tr className="font-display text-xs uppercase tracking-[.08em] text-cvc-deep">
               <th className="cursor-pointer select-none px-5 py-3 hover:text-cvc-accent" onClick={() => toggleSort("name")}><span className="inline-flex items-center gap-1">Player{sort === "name" ? <ArrowDownUp size={11} className={direction === "desc" ? "rotate-180" : ""} /> : null}</span></th>
-              {visibleColumns.map(column => <SortHeader key={column} field={column} label={COLUMN_DEFS[column].label} />)}
+              {activeColumns.map(column => <SortHeader key={column} field={column} label={COLUMN_DEFS[column].label} />)}
               <th className="px-3 py-3">Availability</th>
               <th className="px-5 py-3 text-right">FAAB</th>
             </tr></thead>
@@ -172,7 +178,7 @@ export function CvcFreeAgents() {
                 : isError ? <tr><td colSpan={colSpan} className="px-5 py-8 text-center text-sm text-red-700">{activePool.error.message}</td></tr>
                 : players.length ? players.map((player: any) => <tr key={player.id} className="border-t border-slate-200 hover:bg-slate-50">
                     <td className="px-5 py-2.5"><PlayerCell player={player} isWatched={watchedIds.has(player.id)} canWatch={Boolean(owner?.franchise)} onToggleWatch={() => toggleWatch.mutate({ playerId: player.id })} /></td>
-                    {visibleColumns.map(column => <td key={column} className="whitespace-nowrap px-3 py-2.5 text-right text-sm text-slate-600">{fmt(player.seasonStats?.[COLUMN_DEFS[column].statKey])}</td>)}
+                    {activeColumns.map(column => <td key={column} className="whitespace-nowrap px-3 py-2.5 text-right text-sm text-slate-600">{fmt(cellValue(player, column))}</td>)}
                     <td className="px-3 py-2.5">{player.rosteredByFranchiseName ? <span className="rounded-full bg-slate-100 px-2 py-1 text-[10px] font-bold uppercase tracking-[.08em] text-slate-600">Rostered</span> : <span className="rounded-full bg-emerald-50 px-2 py-1 text-[10px] font-bold uppercase tracking-[.08em] text-emerald-700">Available</span>}</td>
                     <td className="px-5 py-2.5 text-right">{player.rosteredByFranchiseName ? <span className="text-xs text-slate-400">—</span> : owner?.franchise && waiver.data?.period ? <button onClick={() => setSelectedPlayerId(player.id)} className="cvc-mini-button"><DollarSign size={13} /> {isFreePeriod ? "Claim ($1)" : "Bid"}</button> : <span className="text-xs text-slate-400">{owner ? "Window closed" : "Sign in"}</span>}</td>
                   </tr>)
