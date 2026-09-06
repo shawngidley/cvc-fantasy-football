@@ -201,6 +201,32 @@ function SeasonStatsSyncModule() {
     },
     onError: error => toast.error(error.message),
   });
+  const utils2 = trpc.useUtils();
+  const [periodLabel, setPeriodLabel] = useState("Week 1 waivers");
+  const [periodOpensAt, setPeriodOpensAt] = useState("");
+  const [periodClosesAt, setPeriodClosesAt] = useState("");
+  const createPeriod = trpc.league.createWaiverPeriod.useMutation({
+    onSuccess: async data => { toast.success(`Opened "${data.label}" -- bidding is live now, closes ${new Date(data.closes_at).toLocaleString()}.`); await utils2.league.waiverStatus.invalidate(); },
+    onError: error => toast.error(error.message),
+  });
+  // Same DST-aware America/New_York wall-clock -> UTC conversion as
+  // waiverResolutionTiming.ts's easternWallClockToUtc, so "9am ET" here always matches
+  // what the actual Thursday/Sunday resolution cron means by "9am ET".
+  const easternWallClockToUtc = (year: number, month: number, day: number, hour: number): Date => {
+    const asIfUtc = Date.UTC(year, month - 1, day, hour, 0, 0);
+    const formatter = new Intl.DateTimeFormat("en-US", { timeZone: "America/New_York", hour12: false, year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit" });
+    const parts: Record<string, string> = {};
+    for (const part of formatter.formatToParts(new Date(asIfUtc))) parts[part.type] = part.value;
+    const reinterpretedAsUtc = Date.UTC(Number(parts.year), Number(parts.month) - 1, Number(parts.day), parts.hour === "24" ? 0 : Number(parts.hour), Number(parts.minute), Number(parts.second));
+    return new Date(asIfUtc - (reinterpretedAsUtc - asIfUtc));
+  };
+  const toLocalInputValue = (date: Date) => { const pad = (n: number) => String(n).padStart(2, "0"); return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`; };
+  const quickFillFirstPeriod = () => {
+    setPeriodLabel("Week 1 waivers");
+    setPeriodOpensAt(toLocalInputValue(new Date()));
+    setPeriodClosesAt(toLocalInputValue(easternWallClockToUtc(2026, 9, 17, 9)));
+  };
+
   const [dstYear, setDstYear] = useState(new Date().getFullYear());
   const [dstThroughWeek, setDstThroughWeek] = useState(18);
   const syncDst = trpc.league.syncDstSeasonStats.useMutation({
@@ -219,6 +245,17 @@ function SeasonStatsSyncModule() {
     onError: error => toast.error(error.message),
   });
   return <div className="grid gap-4">
+    <div className="rounded-lg border border-dashed border-cvc-deep/20 bg-cvc-tint p-4">
+      <p className="text-sm font-semibold text-cvc-deep">Open a waiver period</p>
+      <p className="mt-1 text-xs leading-5 text-slate-500">Bidding on Free Agents only works while an open waiver_period row covers the current time -- that's why the $Bid badge shows "Closed" right now, there's no active period yet. Creates one via the same createWaiverPeriod path the app already uses.</p>
+      <div className="mt-3 flex flex-wrap items-end gap-3">
+        <label className="text-xs font-bold uppercase tracking-[0.06em] text-slate-600">Label<input value={periodLabel} onChange={event => setPeriodLabel(event.target.value)} className="ml-2 w-40 rounded-md border border-slate-300 px-2 py-1.5 text-sm"/></label>
+        <label className="text-xs font-bold uppercase tracking-[0.06em] text-slate-600">Opens<input type="datetime-local" value={periodOpensAt} onChange={event => setPeriodOpensAt(event.target.value)} className="ml-2 rounded-md border border-slate-300 px-2 py-1.5 text-sm"/></label>
+        <label className="text-xs font-bold uppercase tracking-[0.06em] text-slate-600">Closes<input type="datetime-local" value={periodClosesAt} onChange={event => setPeriodClosesAt(event.target.value)} className="ml-2 rounded-md border border-slate-300 px-2 py-1.5 text-sm"/></label>
+        <button type="button" className="cvc-button-secondary" onClick={quickFillFirstPeriod}>Quick fill: opens now, closes Thu Sep 17 9am ET</button>
+        <button type="button" className="cvc-button-compact" disabled={createPeriod.isPending || !periodLabel || !periodOpensAt || !periodClosesAt} onClick={() => createPeriod.mutate({ label: periodLabel, opensAt: new Date(periodOpensAt).toISOString(), closesAt: new Date(periodClosesAt).toISOString(), periodType: "bid" })}><Save size={14} /> {createPeriod.isPending ? "Opening…" : "Open bidding"}</button>
+      </div>
+    </div>
     <div className="rounded-lg border border-dashed border-cvc-deep/20 bg-cvc-tint p-4">
       <p className="text-sm font-semibold text-cvc-deep">Team bye week / schedule cache</p>
       <p className="mt-1 text-xs leading-5 text-slate-500">Computes each NFL team's bye week and next opponent once and caches it, instead of every Free Agents page load fetching and parsing all 32 teams' full season schedules live from Tank01 (this was the main cause of Free Agents loading slowly). Runs automatically once a day -- use this to force a refresh sooner, e.g. right after the schedule changes.</p>
