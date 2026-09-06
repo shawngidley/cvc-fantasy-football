@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 export type TankRecord = Record<string, unknown>;
 
@@ -79,6 +79,9 @@ export function buildScheduleWithBye(schedule: TankRecord[], team: string) {
 
 export type ScheduleSummary = { byeWeek: number | null; nextOpponent: { opponent: string; atOrVs: string } | null; nextGameTime: string | null };
 
+let lastFetchDebug: { teamsRequested: string[]; url: string | null; status: number | null; rawBody: unknown; error: string | null } = { teamsRequested: [], url: null, status: null, rawBody: null, error: null };
+export function getLastScheduleFetchDebug() { return lastFetchDebug; }
+
 /** Given a team's full schedule, returns the bye week number (if findable) and the
  * next unplayed game's opponent/time. */
 export function summarizeSchedule(schedule: TankRecord[] | null, team: string | null | undefined): ScheduleSummary {
@@ -95,26 +98,39 @@ export function summarizeSchedule(schedule: TankRecord[] | null, team: string | 
 
 async function fetchTeamSchedule(abv: string): Promise<TankRecord[] | null> {
   if (scheduleCache.has(abv)) return scheduleCache.get(abv) ?? null;
+  const url = `/api/tank01/getNFLTeamSchedule?teamAbv=${encodeURIComponent(abv)}`;
   try {
-    const response = await fetch(`/api/tank01/getNFLTeamSchedule?teamAbv=${encodeURIComponent(abv)}`);
-    const payload = await (response.ok ? response.json() : null) as { body?: TankRecord | TankRecord[] } | null;
+    const response = await fetch(url);
+    const payload = await (response.ok ? response.json() : response.json().catch(() => null)) as { body?: TankRecord | TankRecord[]; error?: string } | null;
+    lastFetchDebug = { teamsRequested: [...lastFetchDebug.teamsRequested, abv], url, status: response.status, rawBody: payload, error: payload?.error ?? null };
     const raw = payload?.body;
     const list = Array.isArray(raw) ? raw : raw && typeof raw === "object" ? Object.values(raw as Record<string, unknown>).filter((entry): entry is TankRecord => Boolean(entry) && typeof entry === "object") : [];
     scheduleCache.set(abv, list.length ? list : null);
     return list.length ? list : null;
-  } catch { scheduleCache.set(abv, null); return null; }
+  } catch (error) {
+    lastFetchDebug = { teamsRequested: [...lastFetchDebug.teamsRequested, abv], url, status: null, rawBody: null, error: error instanceof Error ? error.message : String(error) };
+    scheduleCache.set(abv, null); return null;
+  }
 }
 
 /** For pages listing many players across many NFL teams at once (Free Agents), rather
  * than one useTeamSchedule call per team, which isn't possible anyway (React hooks
  * can't be called in a loop/conditionally). Fetches every distinct team's schedule
- * once (deduplicated, cached), returns a map keyed by uppercase team abbreviation. */
+ * once (deduplicated, cached), returns a map keyed by uppercase team abbreviation.
+ * Uses a ref-guarded effect with no dependency array (re-checks readiness on every
+ * render instead of relying on React's dependency-change detection for the joined
+ * team-list string) -- the same fix that resolved an effect that appeared to fire
+ * once and never again despite its inputs clearly changing on later renders, in
+ * useCvcNFLProjections.ts earlier today. */
 export function useTeamSchedulesFor(teams: (string | null | undefined)[]): { schedules: Record<string, ScheduleSummary>; loading: boolean } {
   const uniqueTeams = Array.from(new Set(teams.filter((team): team is string => Boolean(team)).map(team => normalizeTeam(team).toUpperCase()))).sort().join(",");
   const [schedules, setSchedules] = useState<Record<string, ScheduleSummary>>({});
   const [loading, setLoading] = useState(false);
+  const fetchedForKey = useRef<string | null>(null);
 
   useEffect(() => {
+    if (fetchedForKey.current === uniqueTeams) return; // already fetched (or in flight) for this exact team set
+    fetchedForKey.current = uniqueTeams;
     const teamList = uniqueTeams ? uniqueTeams.split(",") : [];
     if (!teamList.length) { setSchedules({}); return; }
     let cancelled = false;
@@ -125,8 +141,7 @@ export function useTeamSchedulesFor(teams: (string | null | undefined)[]): { sch
     })).then(entries => {
       if (!cancelled) setSchedules(Object.fromEntries(entries));
     }).finally(() => { if (!cancelled) setLoading(false); });
-    return () => { cancelled = true; };
-  }, [uniqueTeams]);
+  }); // Intentionally no dependency array -- see comment above.
 
   return { schedules, loading };
 }

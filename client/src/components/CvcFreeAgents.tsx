@@ -4,7 +4,7 @@ import { useCvcOwnerAuth } from "@/hooks/useCvcOwnerAuth";
 import { Link } from "wouter";
 import { ArrowDownUp, DollarSign, Search, ShieldCheck, Star, Users } from "lucide-react";
 import { useMemo, useState } from "react";
-import { teamLogoUrl as scheduleTeamLogoUrl, useTeamSchedulesFor } from "@/lib/nflSchedule";
+import { getLastScheduleFetchDebug, teamLogoUrl as scheduleTeamLogoUrl, useTeamSchedulesFor } from "@/lib/nflSchedule";
 
 const POSITIONS = ["FLEX", "QB", "RB", "WR", "TE", "K", "DST"];
 const FLEX_POSITIONS = new Set(["QB", "RB", "WR", "TE"]);
@@ -161,6 +161,7 @@ export function CvcFreeAgents() {
       <section className="overflow-hidden rounded-xl bg-white shadow-xl">
         <div className="h-1.5 bg-cvc-accent" />
         <div className="flex flex-wrap items-center justify-between gap-3 bg-cvc-deep px-5 py-4 text-white"><div><p className="font-display text-2xl uppercase tracking-[.06em]">{tab === "watchlist" ? "Your watchlist" : tab === "all-players" ? "All players" : "Available players"}</p><p className="mt-1 text-xs text-white/65">{tab === "all-players" ? "Every CVC-tracked player, rostered or not." : tab === "watchlist" ? "Players you're tracking for a future claim or trade." : "Unrostered CVC player records only. Rookies remain in the rookie draft pool."}</p></div><span className="text-xs font-bold uppercase tracking-[.1em] text-cvc-accent">{players.length} shown</span></div>
+        {players.length && Object.keys(schedules).length === 0 ? <details className="border-b border-slate-200 bg-amber-50 px-5 py-3 text-xs text-amber-900"><summary className="cursor-pointer font-bold uppercase tracking-[.08em]">Debug: no Bye/Opp/Game data loaded (tap to view, then screenshot for Claude)</summary><pre className="mt-2 max-h-64 overflow-auto whitespace-pre-wrap break-all rounded bg-white p-2 text-[10px]">{JSON.stringify(getLastScheduleFetchDebug(), null, 2)}</pre></details> : null}
         <div className="border-b border-slate-200 bg-[#edf4ee] px-4 pt-3"><div className="flex w-max min-w-full gap-1">{POSITIONS.map(item => <button key={item} onClick={() => setPosition(item)} className={position === item ? "rounded-t-md bg-cvc-deep px-3 py-2 font-display text-sm uppercase text-white" : "rounded-t-md px-3 py-2 font-display text-sm uppercase text-cvc-deep/60 hover:bg-white"}>{item}</button>)}</div></div>
         <div className="flex flex-col gap-3 border-b border-slate-200 p-4 sm:flex-row sm:items-center">
           <label className="relative flex-1"><Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" /><input value={search} onChange={event => setSearch(event.target.value)} placeholder="Search player name" className="w-full rounded-md border border-slate-200 py-2.5 pl-9 pr-3 text-sm text-cvc-deep" /></label>
