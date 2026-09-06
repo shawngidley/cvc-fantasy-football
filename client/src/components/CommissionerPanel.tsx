@@ -247,7 +247,7 @@ function SeasonStatsSyncModule() {
   return <div className="grid gap-4">
     <div className="rounded-lg border border-dashed border-cvc-deep/20 bg-cvc-tint p-4">
       <p className="text-sm font-semibold text-cvc-deep">Open a waiver period</p>
-      <p className="mt-1 text-xs leading-5 text-slate-500">Bidding on Free Agents only works while an open waiver_period row covers the current time -- that's why the $Bid badge shows "Closed" right now, there's no active period yet. Creates one via the same createWaiverPeriod path the app already uses.</p>
+      <p className="mt-1 text-xs leading-5 text-slate-500">Only needed once, for the very first period of the season -- every period after this one opens and closes automatically (Thursday 9am ET award → immediately reopens through Sunday 9am ET award → free period opens immediately, closes 1pm ET the same day → closed until the next Tuesday 9am ET, when a new bid period opens on its own). There's no prior period yet for that automatic cycle to continue from, which is why the badge shows "Closed" right now.</p>
       <div className="mt-3 flex flex-wrap items-end gap-3">
         <label className="text-xs font-bold uppercase tracking-[0.06em] text-slate-600">Label<input value={periodLabel} onChange={event => setPeriodLabel(event.target.value)} className="ml-2 w-40 rounded-md border border-slate-300 px-2 py-1.5 text-sm"/></label>
         <label className="text-xs font-bold uppercase tracking-[0.06em] text-slate-600">Opens<input type="datetime-local" value={periodOpensAt} onChange={event => setPeriodOpensAt(event.target.value)} className="ml-2 rounded-md border border-slate-300 px-2 py-1.5 text-sm"/></label>

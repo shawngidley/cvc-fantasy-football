@@ -21,6 +21,34 @@ function easternWallClockToUtc(year: number, month: number, day: number, hour: n
   return new Date(asIfUtc - offsetMs);
 }
 
+/** The same Eastern calendar day as `instant`, but at a different wall-clock hour.
+ * Used for the free period's close: it opens immediately when the Sunday 9am bid
+ * period resolves, and closes the same day at 1pm ET -- not the "next Thursday or
+ * Sunday 9am" pattern computeNextResolutionTime produces. */
+export function sameEasternDayAt(instant: Date, hour: number): Date {
+  const parts = getEasternDateParts(instant);
+  return easternWallClockToUtc(parts.year, parts.month, parts.day, hour);
+}
+
+/** The next occurrence of a specific weekday (0=Sun..6=Sat) at a given Eastern hour,
+ * strictly after `from`. Used for the free period's 1pm Sunday close -> the next bid
+ * period doesn't open immediately (unlike every other period transition); it waits
+ * until Tuesday 9am ET, leaving Sunday afternoon through Monday night as a real gap
+ * with no open waiver period at all. */
+export function nextEasternWeekdayAt(from: Date, weekday: number, hour: number): Date {
+  const start = getEasternDateParts(from);
+  for (let daysAhead = 0; daysAhead <= 8; daysAhead++) {
+    const noonUtcOnCandidateDate = Date.UTC(start.year, start.month - 1, start.day + daysAhead, 12);
+    const candidateDate = getEasternDateParts(new Date(noonUtcOnCandidateDate));
+    if (candidateDate.weekday !== weekday) continue;
+    const candidate = easternWallClockToUtc(candidateDate.year, candidateDate.month, candidateDate.day, hour);
+    if (candidate.getTime() > from.getTime()) return candidate;
+  }
+  const fallback = new Date(from);
+  fallback.setUTCDate(fallback.getUTCDate() + 7);
+  return fallback;
+}
+
 /** Next Thursday-or-Sunday 9:00am America/New_York strictly after `from`. Both the
  * cut-lock ("must stay on your roster until the next bid awarding occurs the following
  * Thursday or Sunday") and the next waiver_period's closes_at are computed with this

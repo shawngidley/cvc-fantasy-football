@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { computeNextResolutionTime } from "./waiverResolutionTiming";
+import { computeNextResolutionTime, nextEasternWeekdayAt, sameEasternDayAt } from "./waiverResolutionTiming";
 
 // Helper: format a UTC instant as an America/New_York wall-clock string for readable
 // assertions.
@@ -47,5 +47,65 @@ describe("computeNextResolutionTime", () => {
     const from = new Date("2026-09-06T13:00:00.000Z"); // exactly a resolution instant
     const result = computeNextResolutionTime(from);
     expect(result.getTime()).toBeGreaterThan(from.getTime());
+  });
+});
+
+describe("sameEasternDayAt", () => {
+  it("returns the same Eastern calendar day at a different hour -- Sunday 9am -> 1pm", () => {
+    const sunday9am = new Date("2026-09-06T13:00:00.000Z"); // Sun Sep 6 2026, 9am EDT
+    const result = sameEasternDayAt(sunday9am, 13);
+    expect(easternString(result)).toBe("Sun, 09/06/2026, 13:00");
+    // 1pm EDT = 17:00 UTC
+    expect(result.toISOString()).toBe("2026-09-06T17:00:00.000Z");
+  });
+
+  it("handles the fall DST boundary correctly for a same-day shift", () => {
+    // Nov 1 2026 9am is already EST (see computeNextResolutionTime's DST test above).
+    const sundayNov1_9am = new Date("2026-11-01T14:00:00.000Z");
+    const result = sameEasternDayAt(sundayNov1_9am, 13);
+    expect(easternString(result)).toBe("Sun, 11/01/2026, 13:00");
+    expect(result.toISOString()).toBe("2026-11-01T18:00:00.000Z"); // 1pm EST = 18:00 UTC
+  });
+});
+
+describe("nextEasternWeekdayAt", () => {
+  it("finds the next Tuesday 9am ET after a Sunday 1pm close", () => {
+    const sunday1pm = new Date("2026-09-06T17:00:00.000Z"); // Sun Sep 6 2026, 1pm EDT
+    const result = nextEasternWeekdayAt(sunday1pm, 2, 9); // 2 = Tuesday
+    expect(easternString(result)).toBe("Tue, 09/08/2026, 09:00");
+  });
+
+  it("skips to the following week's Tuesday if already past this week's", () => {
+    const tuesday10am = new Date("2026-09-08T14:00:00.000Z"); // Tue Sep 8 2026, 10am EDT (past 9am)
+    const result = nextEasternWeekdayAt(tuesday10am, 2, 9);
+    expect(easternString(result)).toBe("Tue, 09/15/2026, 09:00");
+  });
+});
+
+describe("the full confirmed real waiver cycle, end to end", () => {
+  // Simulates the exact sequence: Tue 9am open (bid) -> Thu 9am award, immediate
+  // reopen (bid) -> Sun 9am award, immediate open (free) -> Sun 1pm close -> gap ->
+  // Tue 9am reopen (bid). This is the core business rule confirmed directly, so it's
+  // tested as one continuous chain rather than isolated units only.
+  it("walks through one full week correctly", () => {
+    // Tuesday 9am ET bid period opens, closes Thursday 9am ET.
+    const tuesdayOpen = new Date("2026-09-08T13:00:00.000Z");
+    const thursdayClose = computeNextResolutionTime(tuesdayOpen);
+    expect(easternString(thursdayClose)).toBe("Thu, 09/10/2026, 09:00");
+
+    // Thursday 9am close -> immediately reopens (bid), closes Sunday 9am ET.
+    const sundayClose = computeNextResolutionTime(thursdayClose);
+    expect(easternString(sundayClose)).toBe("Sun, 09/13/2026, 09:00");
+
+    // Sunday 9am close -> free period opens immediately, same day, closes 1pm ET.
+    const freePeriodCloses = sameEasternDayAt(sundayClose, 13);
+    expect(easternString(freePeriodCloses)).toBe("Sun, 09/13/2026, 13:00");
+
+    // Free period's 1pm close -> next bid period doesn't open immediately; waits
+    // until Tuesday 9am ET, a real gap of about 44 hours with nothing open.
+    const nextTuesdayOpen = nextEasternWeekdayAt(freePeriodCloses, 2, 9);
+    expect(easternString(nextTuesdayOpen)).toBe("Tue, 09/15/2026, 09:00");
+    const gapHours = (nextTuesdayOpen.getTime() - freePeriodCloses.getTime()) / (1000 * 60 * 60);
+    expect(gapHours).toBeCloseTo(44, 0);
   });
 });

@@ -1,6 +1,6 @@
 import { supabase, unwrap } from "./supabase";
 import { computeFranchiseStandings, getFaabBalance, MAX_ROSTER_SIZE, sortByWorstRecordFirst } from "./waiverRules";
-import { computeNextResolutionTime } from "./waiverResolutionTiming";
+import { computeNextResolutionTime, nextEasternWeekdayAt, sameEasternDayAt } from "./waiverResolutionTiming";
 
 type PendingBid = { id: string; franchise_id: string; player_id: string; drop_player_id: string | null; amount: number; max_players_desired: number };
 
@@ -17,20 +17,39 @@ export type WaiverResolutionSummary = {
 };
 
 /** The type of the period that opens right after a period closing on `closesAt`.
- * Sunday's close always opens the free period (bid-exempt, flat $1, waiver-priority
- * ordered) running through Thursday; Thursday's close (whether the prior period was a
- * normal bid cycle or the free period -- both always close on Thursday or Sunday
- * respectively) always opens a normal bid cycle running through Sunday. This is a pure
- * function of the closing weekday, not of what type just closed. */
-function nextPeriodType(closesAt: Date): "bid" | "free" {
-  return closesAt.getUTCDay() === 0 ? "free" : "bid"; // 0 = Sunday
+ * Sunday's 9am close opens the free period (bid-exempt, flat $1, waiver-priority
+ * ordered) immediately, but it only runs until 1pm ET the same day -- not through
+ * Thursday. After that 1pm close, bidding is closed entirely until the next bid
+ * period opens Tuesday 9am ET (a real gap, unlike every other transition, which
+ * reopens immediately). Thursday's 9am close always reopens a normal bid period
+ * immediately, running through Sunday. */
+function nextPeriodType(previousPeriodType: "bid" | "free", closesAt: Date): "bid" | "free" {
+  if (previousPeriodType === "free") return "bid"; // the free period always transitions to the next bid period
+  return closesAt.getUTCDay() === 0 ? "free" : "bid"; // a bid period closing Sunday opens the free period; Thursday opens the next bid period
 }
 
-async function createNextWaiverPeriod(seasonId: string, previousClosesAt: Date): Promise<string | null> {
-  const nextCloses = computeNextResolutionTime(previousClosesAt);
-  const type = nextPeriodType(previousClosesAt);
+async function createNextWaiverPeriod(seasonId: string, previousClosesAt: Date, previousPeriodType: "bid" | "free"): Promise<string | null> {
+  const type = nextPeriodType(previousPeriodType, previousClosesAt);
+  let opensAt: Date;
+  let nextCloses: Date;
+  if (previousPeriodType === "free") {
+    // Free period just closed at 1pm Sunday ET -- next bid period doesn't open until
+    // Tuesday 9am ET, a real gap with nothing open in between.
+    opensAt = nextEasternWeekdayAt(previousClosesAt, 2, 9); // 2 = Tuesday
+    nextCloses = computeNextResolutionTime(opensAt); // that week's Thursday 9am ET
+  } else if (type === "free") {
+    // Sunday 9am bid period just resolved -- free period opens immediately, same day,
+    // closing at 1pm ET (not the next Thu/Sun 9am).
+    opensAt = previousClosesAt;
+    nextCloses = sameEasternDayAt(previousClosesAt, 13);
+  } else {
+    // Thursday 9am bid period just resolved -- next bid period opens immediately,
+    // closing Sunday 9am ET.
+    opensAt = previousClosesAt;
+    nextCloses = computeNextResolutionTime(previousClosesAt);
+  }
   const label = type === "free" ? "Free agent period (waiver priority, $1)" : (nextCloses.getUTCDay() === 4 ? "Thursday waiver period" : "Sunday waiver period");
-  const created = unwrap(await supabase.from("waiver_period").insert({ season_id: seasonId, label, opens_at: previousClosesAt.toISOString(), closes_at: nextCloses.toISOString(), status: "open", period_type: type }).select("id, label").single());
+  const created = unwrap(await supabase.from("waiver_period").insert({ season_id: seasonId, label, opens_at: opensAt.toISOString(), closes_at: nextCloses.toISOString(), status: "open", period_type: type }).select("id, label").single());
   return created?.label ?? null;
 }
 
@@ -201,7 +220,7 @@ export async function resolveOpenWaiverPeriod(): Promise<WaiverResolutionSummary
   }
 
   unwrap(await supabase.from("waiver_period").update({ status: "final" }).eq("id", period.id).select("id").single());
-  const nextPeriodLabel = await createNextWaiverPeriod(seasonId, period.closes_at ? new Date(period.closes_at) : now);
+  const nextPeriodLabel = await createNextWaiverPeriod(seasonId, period.closes_at ? new Date(period.closes_at) : now, periodType);
 
   return { periodId: period.id, periodLabel: period.label, periodType, playersContested: byPlayer.size, awarded, skipped, nextPeriodLabel };
 }
