@@ -2,7 +2,7 @@
 import { trpc } from "@/lib/trpc";
 import { useCvcOwnerAuth } from "@/hooks/useCvcOwnerAuth";
 import { Link } from "wouter";
-import { ArrowDownUp, DollarSign, Search, ShieldCheck, Users } from "lucide-react";
+import { ArrowDownUp, DollarSign, Search, ShieldCheck, Star, Users } from "lucide-react";
 import { useMemo, useState } from "react";
 
 const POSITIONS = ["FLEX", "QB", "RB", "WR", "TE", "K", "DST"];
