@@ -134,16 +134,27 @@ export function CvcFreeAgents() {
 
   const teamScheduleCache = trpc.league.teamScheduleCache.useQuery();
   const schedules = useMemo(() => {
-    const map: Record<string, { byeWeek: number | null; nextOpponent: { opponent: string; atOrVs: string } | null; nextGameTime: string | null }> = {};
+    const map: Record<string, { byeWeek: number | null; nextOpponent: { opponent: string; atOrVs: string } | null; nextGameTime: string | null; nextGameDate: string | null }> = {};
     for (const row of teamScheduleCache.data ?? []) {
       map[row.nfl_team] = {
         byeWeek: row.bye_week,
         nextOpponent: row.next_opponent ? { opponent: row.next_opponent, atOrVs: row.next_opponent_is_home ? "vs" : "@" } : null,
         nextGameTime: row.next_game_time,
+        nextGameDate: row.next_game_date,
       };
     }
     return map;
   }, [teamScheduleCache.data]);
+
+  // Matches WRC's formatGameTime exactly: "Sun 1:00p ET", day-of-week derived from the
+  // game date since Tank01's schedule doesn't include it directly.
+  function formatGameTimeWithDay(dateStr: string | null | undefined, time: string | null | undefined): string {
+    if (!time) return "—";
+    if (!dateStr || dateStr.length < 8) return time;
+    const date = new Date(`${dateStr.slice(0, 4)}-${dateStr.slice(4, 6)}-${dateStr.slice(6, 8)}T12:00:00`);
+    const dayNames = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+    return `${dayNames[date.getDay()]} ${time} ET`;
+  }
 
   const colSpan = 6 + activeColumns.length;
   const emptyLabel = tab === "watchlist" ? "No players on your watchlist yet — tap the star next to a player to add one." : matchingRightsOnly ? "No free agents currently carry a matching-rights tag." : "No players match this filter.";
@@ -199,7 +210,7 @@ export function CvcFreeAgents() {
                     {(() => { const schedule = schedules[(player.nfl_team ?? "").toUpperCase()]; return <>
                       <td className="whitespace-nowrap px-3 py-2.5 text-center text-xs font-bold text-amber-700">{schedule?.byeWeek ?? "—"}</td>
                       <td className="whitespace-nowrap px-3 py-2.5 text-center text-xs font-bold text-cvc-deep">{schedule?.nextOpponent ? <span className="inline-flex items-center gap-1"><img src={scheduleTeamLogoUrl(schedule.nextOpponent.opponent)} alt="" className="h-4 w-4 object-contain" />{schedule.nextOpponent.atOrVs} {schedule.nextOpponent.opponent}</span> : "—"}</td>
-                      <td className="whitespace-nowrap px-3 py-2.5 text-center text-xs text-slate-500">{schedule?.nextGameTime ?? "—"}</td>
+                      <td className="whitespace-nowrap px-3 py-2.5 text-center text-xs text-slate-500">{formatGameTimeWithDay(schedule?.nextGameDate, schedule?.nextGameTime)}</td>
                     </>; })()}
                     {activeColumns.map(column => <td key={column} className="whitespace-nowrap px-3 py-2.5 text-right text-sm text-slate-600">{fmt(cellValue(player, column))}</td>)}
                     <td className="px-3 py-2.5">{player.rosteredByFranchiseName ? <span className="rounded-full bg-slate-100 px-2 py-1 text-[10px] font-bold uppercase tracking-[.08em] text-slate-600">Rostered</span> : <span className="rounded-full bg-emerald-50 px-2 py-1 text-[10px] font-bold uppercase tracking-[.08em] text-emerald-700">Available</span>}</td>
