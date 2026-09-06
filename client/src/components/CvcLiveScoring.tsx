@@ -73,7 +73,7 @@ export function CvcLiveScoring() {
       {maxBenchRows ? <><div className="bg-slate-100 px-4 py-3 text-center text-[11px] font-bold uppercase tracking-[0.18em] text-slate-500">Bench</div>
       <div className="divide-y divide-slate-200 opacity-80">{Array.from({ length: maxBenchRows }).map((_, index) => { const away = benchAway[index]; const home = benchHome[index]; return <LineupRow key={`bn-${away?.id ?? "away"}-${home?.id ?? "home"}-${index}`} away={away} home={home} slot="BN" points={points} live={live} />; })}</div></> : null}
     </section>
-    <p className="text-center text-xs text-cvc-muted">{live.error ? `Tank01 status: ${live.error}` : "Tank01 is the sole CVC source for live totals and automatic final results."}</p>
+    {live.error ? <p className="text-center text-xs text-cvc-muted">Tank01 status: {live.error}</p> : null}
   </div>;
 }
 
