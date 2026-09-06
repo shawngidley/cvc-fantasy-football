@@ -32,7 +32,8 @@ export function useTeamSchedule(team: string | null | undefined, enabled: boolea
   useEffect(() => {
     if (!enabled || !team) return;
     const abv = normalizeTeam(team).toUpperCase();
-    if (scheduleCache.has(abv)) { setGames(scheduleCache.get(abv) ?? null); return; }
+    const cached = scheduleCache.get(abv);
+    if (cached) { setGames(cached); return; } // only trust a cached *successful* result
     let ignore = false;
     setLoading(true);
     fetch(`/api/tank01/getNFLTeamSchedule?teamAbv=${encodeURIComponent(abv)}`)
@@ -41,10 +42,10 @@ export function useTeamSchedule(team: string | null | undefined, enabled: boolea
         if (!ignore) setRawResponse(payload);
         const raw = payload?.body;
         const list = Array.isArray(raw) ? raw : raw && typeof raw === "object" ? Object.values(raw as Record<string, unknown>).filter((entry): entry is TankRecord => Boolean(entry) && typeof entry === "object") : [];
-        scheduleCache.set(abv, list.length ? list : null);
+        if (list.length) scheduleCache.set(abv, list);
         if (!ignore) setGames(list.length ? list : null);
       })
-      .catch(() => { scheduleCache.set(abv, null); if (!ignore) setGames(null); })
+      .catch(() => { if (!ignore) setGames(null); }) // not cached -- allow a retry next time
       .finally(() => { if (!ignore) setLoading(false); });
     return () => { ignore = true; };
   }, [team, enabled]);
@@ -97,7 +98,8 @@ export function summarizeSchedule(schedule: TankRecord[] | null, team: string | 
 }
 
 async function fetchTeamSchedule(abv: string): Promise<TankRecord[] | null> {
-  if (scheduleCache.has(abv)) return scheduleCache.get(abv) ?? null;
+  const cached = scheduleCache.get(abv);
+  if (cached) return cached; // only trust a cached *successful* result; never trust a cached null
   const url = `/api/tank01/getNFLTeamSchedule?teamAbv=${encodeURIComponent(abv)}`;
   try {
     const response = await fetch(url);
@@ -105,11 +107,11 @@ async function fetchTeamSchedule(abv: string): Promise<TankRecord[] | null> {
     lastFetchDebug = { teamsRequested: [...lastFetchDebug.teamsRequested, abv], url, status: response.status, rawBody: payload, error: payload?.error ?? null };
     const raw = payload?.body;
     const list = Array.isArray(raw) ? raw : raw && typeof raw === "object" ? Object.values(raw as Record<string, unknown>).filter((entry): entry is TankRecord => Boolean(entry) && typeof entry === "object") : [];
-    scheduleCache.set(abv, list.length ? list : null);
+    if (list.length) scheduleCache.set(abv, list);
     return list.length ? list : null;
   } catch (error) {
     lastFetchDebug = { teamsRequested: [...lastFetchDebug.teamsRequested, abv], url, status: null, rawBody: null, error: error instanceof Error ? error.message : String(error) };
-    scheduleCache.set(abv, null); return null;
+    return null; // not cached -- allow a retry next time
   }
 }
 
