@@ -3,6 +3,7 @@ import { syncTank01Scores } from "../tank01ScoringSync";
 import { syncNflTeamAssignments } from "../nflTeamAssignmentSync";
 import { resolveOpenWaiverPeriod } from "../waiverResolution";
 import { aggregateDstSeasonStats } from "../dstSeasonAggregation";
+import { syncNflTeamSchedules } from "../nflTeamScheduleSync";
 import { supabase, unwrap } from "../supabase";
 
 function checkCronAuth(req: Request, res: Response): boolean {
@@ -87,6 +88,24 @@ export async function runDstSeasonStatsSync(req: Request, res: Response) {
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     console.error("D/ST season stats sync failed", error);
+    res.status(500).json({ error: message, timestamp: new Date().toISOString() });
+  }
+}
+
+// Runs daily (see vercel.json). NFL schedules essentially never change mid-week, so
+// there's no need to compute this live per page view -- see syncNflTeamSchedules for
+// the full reasoning (32 external API calls per Free Agents page load, replaced by
+// one shared cached table).
+export async function runTeamScheduleSync(req: Request, res: Response) {
+  if (!checkCronAuth(req, res)) return;
+  try {
+    const season = await getCurrentSeason();
+    if (!season) { res.json({ ok: true, status: "skipped", reason: "No current season found." }); return; }
+    const result = await syncNflTeamSchedules(season.year);
+    res.json({ ok: true, ...result });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.error("NFL team schedule sync failed", error);
     res.status(500).json({ error: message, timestamp: new Date().toISOString() });
   }
 }

@@ -210,7 +210,23 @@ function SeasonStatsSyncModule() {
     },
     onError: error => toast.error(error.message),
   });
+  const [scheduleYear, setScheduleYear] = useState(new Date().getFullYear());
+  const syncSchedules = trpc.league.syncTeamSchedules.useMutation({
+    onSuccess: data => {
+      if (data.status === "skipped") { toast.error(data.reason ?? "Team schedule sync is unavailable."); return; }
+      toast.success(`Updated ${data.teamsUpdated} team schedule(s).`);
+    },
+    onError: error => toast.error(error.message),
+  });
   return <div className="grid gap-4">
+    <div className="rounded-lg border border-dashed border-cvc-deep/20 bg-cvc-tint p-4">
+      <p className="text-sm font-semibold text-cvc-deep">Team bye week / schedule cache</p>
+      <p className="mt-1 text-xs leading-5 text-slate-500">Computes each NFL team's bye week and next opponent once and caches it, instead of every Free Agents page load fetching and parsing all 32 teams' full season schedules live from Tank01 (this was the main cause of Free Agents loading slowly). Runs automatically once a day -- use this to force a refresh sooner, e.g. right after the schedule changes.</p>
+      <div className="mt-3 flex flex-wrap items-end gap-3">
+        <label className="text-xs font-bold uppercase tracking-[0.06em] text-slate-600">Year<input type="number" value={scheduleYear} onChange={event => setScheduleYear(Number(event.target.value))} className="ml-2 w-20 rounded-md border border-slate-300 px-2 py-1.5 text-sm"/></label>
+        <button type="button" className="cvc-button-compact" disabled={syncSchedules.isPending} onClick={() => syncSchedules.mutate({ year: scheduleYear })}><Save size={14} /> {syncSchedules.isPending ? "Syncing…" : "Sync team schedules"}</button>
+      </div>
+    </div>
     <div className="rounded-lg border border-dashed border-cvc-deep/20 bg-cvc-tint p-4">
       <p className="text-sm font-semibold text-cvc-deep">D/ST season stats (game-by-game)</p>
       <p className="mt-1 text-xs leading-5 text-slate-500">Team defenses can't be looked up the same way individual players are (Tank01 has no player-info match for a team name), so this walks through each completed week's box scores directly and sums sacks/interceptions/defensive TDs, correctly tiering the points-allowed bonus per game rather than averaging a season total (which would be wrong). Use year 2025 / through week 18 once to backfill last season as a placeholder, then re-run with the current year and an increasing week number as 2026 progresses.</p>

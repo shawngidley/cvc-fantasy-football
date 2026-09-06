@@ -13,6 +13,7 @@ import { computeNextResolutionTime } from "../waiverResolutionTiming";
 import { syncFantasyProsSnapshot, syncFantasyProsActiveFlags, syncFantasyProsRookieFlags } from "../fantasyProsSync";
 import { syncTank01SeasonStats } from "../tank01SeasonStatsSync";
 import { aggregateDstSeasonStats } from "../dstSeasonAggregation";
+import { syncNflTeamSchedules } from "../nflTeamScheduleSync";
 import { syncTank01ActiveRoster } from "../tank01ActiveRosterSync";
 import { LOTTERY_REVEAL_INTERVAL_SECONDS, lotteryCommitment, revealedLotteryCount, reverseLotteryPositions, secureShuffle } from "../rookieDraftLottery";
 import { activeLiveLineup } from "../liveScoringLineup";
@@ -963,6 +964,18 @@ export const leagueRouter = router({
     const { idsByPosition, errors, samplePlayers } = await getFantasyProsRookiePlayerIds(season.year);
     const result = await syncFantasyProsRookieFlags(idsByPosition, errors);
     return { ...result, samplePlayers };
+  }),
+
+  // Fast, cached team-level bye week/next opponent data for Free Agents -- a single DB
+  // read instead of every browser fetching and parsing 32 teams' full season schedules
+  // live from Tank01 on every page load.
+  teamScheduleCache: publicProcedure.query(async () => {
+    return unwrap(await supabase.from("nfl_team_schedule_cache").select("nfl_team, bye_week, next_opponent, next_opponent_is_home, next_game_date, next_game_time")) ?? [];
+  }),
+
+  syncTeamSchedules: protectedProcedure.input(z.object({ year: z.number().int().min(2000).max(2100) })).mutation(async ({ ctx, input }) => {
+    await requireCommissioner({ openId: ctx.user.openId });
+    return syncNflTeamSchedules(input.year);
   }),
 
   syncSeasonStats: protectedProcedure.input(z.object({ limit: z.number().int().min(1).max(100).optional() }).optional()).mutation(async ({ ctx, input }) => {
