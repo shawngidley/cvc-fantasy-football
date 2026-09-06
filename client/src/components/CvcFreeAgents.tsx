@@ -49,8 +49,8 @@ const COLUMN_DEFS: Record<ColumnKey, { label: string; statKey: string }> = {
 // Fixed per-position-group columns (not user-toggleable) -- every offensive position
 // (including FLEX, which mixes QB/RB/WR/TE) shares the same full offensive stat set;
 // K and DST each get their own group-specific columns.
-const OFFENSE_COLUMNS: ColumnKey[] = ["gp", "fpts", "fpg", "passYds", "passTD", "passInt", "rushAtt", "rushYds", "rushTD", "targets", "receptions", "recYds", "recTD"];
-const KICKER_COLUMNS: ColumnKey[] = ["gp", "fpts", "fpg", "fgMade", "xpMade", "kickerPts"];
+const OFFENSE_COLUMNS: ColumnKey[] = ["fpts", "fpg", "passYds", "passTD", "passInt", "rushAtt", "rushYds", "rushTD", "targets", "receptions", "recYds", "recTD", "gp"];
+const KICKER_COLUMNS: ColumnKey[] = ["fpts", "fpg", "fgMade", "xpMade", "kickerPts", "gp"];
 const DST_COLUMNS: ColumnKey[] = ["fpts", "fpg", "sacks", "safety", "takeaways", "defTD", "gp"];
 function columnsForPosition(position: string): ColumnKey[] {
   if (position === "K") return KICKER_COLUMNS;
@@ -66,9 +66,8 @@ function cellValue(player: any, column: ColumnKey): number | null | undefined {
   return player.seasonStats?.[COLUMN_DEFS[column].statKey];
 }
 
-function PlayerCell({ player, isWatched, onToggleWatch, canWatch }: { player: any; isWatched: boolean; onToggleWatch: () => void; canWatch: boolean }) {
+function PlayerCell({ player }: { player: any }) {
   return <div className="flex items-center gap-2.5">
-    {canWatch ? <button onClick={onToggleWatch} className="shrink-0 text-slate-300 hover:text-amber-500" aria-label={isWatched ? "Remove from watchlist" : "Add to watchlist"}><Star size={15} fill={isWatched ? "currentColor" : "none"} className={isWatched ? "text-amber-500" : ""} /></button> : null}
     {player.nfl_team ? <img src={teamLogo(player.nfl_team)} alt="" className="h-7 w-7 shrink-0 rounded-full bg-slate-100 object-contain" onError={event => { event.currentTarget.style.visibility = "hidden"; }} /> : <span className="h-7 w-7 shrink-0 rounded-full bg-slate-100" />}
     <div className="min-w-0">
       <Link href={`/player/${player.id}`} className="block truncate text-sm font-semibold text-cvc-deep hover:text-cvc-accent">{player.display_name}</Link>
@@ -195,26 +194,27 @@ export function CvcFreeAgents() {
           <table className="min-w-[1000px] w-full text-left">
             <thead className="bg-[#edf4ee]"><tr className="font-display text-xs uppercase tracking-[.08em] text-cvc-deep">
               <th className="cursor-pointer select-none px-5 py-3 hover:text-cvc-accent" onClick={() => toggleSort("name")}><span className="inline-flex items-center gap-1">Player{sort === "name" ? <ArrowDownUp size={11} className={direction === "desc" ? "rotate-180" : ""} /> : null}</span></th>
+              <th className="px-2 py-3 text-center">Bid</th>
+              <th className="px-2 py-3 text-center"></th>
               <th className="whitespace-nowrap px-3 py-3 text-center">Bye</th>
               <th className="whitespace-nowrap px-3 py-3 text-center">Opp</th>
               <th className="whitespace-nowrap px-3 py-3 text-center">Game</th>
               {activeColumns.map(column => <SortHeader key={column} field={column} label={COLUMN_DEFS[column].label} />)}
-              <th className="px-3 py-3">Availability</th>
-              <th className="px-5 py-3 text-right">FAAB</th>
+
             </tr></thead>
             <tbody>
               {isLoading ? <tr><td colSpan={colSpan} className="px-5 py-8 text-center text-sm text-slate-500">Loading CVC player pool…</td></tr>
                 : isError ? <tr><td colSpan={colSpan} className="px-5 py-8 text-center text-sm text-red-700">{activePool.error.message}</td></tr>
                 : players.length ? players.map((player: any) => <tr key={player.id} className="border-t border-slate-200 hover:bg-slate-50">
-                    <td className="px-5 py-2.5"><PlayerCell player={player} isWatched={watchedIds.has(player.id)} canWatch={Boolean(owner?.franchise)} onToggleWatch={() => toggleWatch.mutate({ playerId: player.id })} /></td>
+                    <td className="px-5 py-2.5"><PlayerCell player={player} /></td>
+                    <td className="px-2 py-2.5 text-center">{player.rosteredByFranchiseName ? <span className="text-[10px] font-bold uppercase tracking-[.06em] text-slate-400">Rostered</span> : owner?.franchise && waiver.data?.period ? <button onClick={() => setSelectedPlayerId(player.id)} className="inline-flex items-center gap-1 rounded-md bg-amber-500 px-2.5 py-1.5 text-xs font-bold text-white hover:bg-amber-600"><DollarSign size={11} /> {isFreePeriod ? "Claim ($1)" : "Bid"}</button> : <span className="text-[10px] font-bold uppercase tracking-[.06em] text-slate-400">{owner ? "Closed" : "Sign in"}</span>}</td>
+                    <td className="px-2 py-2.5 text-center">{owner?.franchise ? <button onClick={() => toggleWatch.mutate({ playerId: player.id })} className="text-slate-300 hover:text-amber-500" aria-label={watchedIds.has(player.id) ? "Remove from watchlist" : "Add to watchlist"}><Star size={15} fill={watchedIds.has(player.id) ? "currentColor" : "none"} className={watchedIds.has(player.id) ? "text-amber-500" : ""} /></button> : null}</td>
                     {(() => { const schedule = schedules[(player.nfl_team ?? "").toUpperCase()]; return <>
                       <td className="whitespace-nowrap px-3 py-2.5 text-center text-xs font-bold text-amber-700">{schedule?.byeWeek ?? "—"}</td>
                       <td className="whitespace-nowrap px-3 py-2.5 text-center text-xs font-bold text-cvc-deep">{schedule?.nextOpponent ? <span className="inline-flex items-center gap-1"><img src={scheduleTeamLogoUrl(schedule.nextOpponent.opponent)} alt="" className="h-4 w-4 object-contain" />{schedule.nextOpponent.atOrVs} {schedule.nextOpponent.opponent}</span> : "—"}</td>
                       <td className="whitespace-nowrap px-3 py-2.5 text-center text-xs text-slate-500">{formatGameTimeWithDay(schedule?.nextGameDate, schedule?.nextGameTime)}</td>
                     </>; })()}
                     {activeColumns.map(column => <td key={column} className="whitespace-nowrap px-3 py-2.5 text-right text-sm text-slate-600">{fmt(cellValue(player, column))}</td>)}
-                    <td className="px-3 py-2.5">{player.rosteredByFranchiseName ? <span className="rounded-full bg-slate-100 px-2 py-1 text-[10px] font-bold uppercase tracking-[.08em] text-slate-600">Rostered</span> : <span className="rounded-full bg-emerald-50 px-2 py-1 text-[10px] font-bold uppercase tracking-[.08em] text-emerald-700">Available</span>}</td>
-                    <td className="px-5 py-2.5 text-right">{player.rosteredByFranchiseName ? <span className="text-xs text-slate-400">—</span> : owner?.franchise && waiver.data?.period ? <button onClick={() => setSelectedPlayerId(player.id)} className="cvc-mini-button"><DollarSign size={13} /> {isFreePeriod ? "Claim ($1)" : "Bid"}</button> : <span className="text-xs text-slate-400">{owner ? "Window closed" : "Sign in"}</span>}</td>
                   </tr>)
                 : <tr><td colSpan={colSpan} className="px-5 py-8 text-center text-sm text-slate-500">{emptyLabel}</td></tr>}
             </tbody>
