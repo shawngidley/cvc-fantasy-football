@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Link, useLocation, useRoute } from "wouter";
 import { useCvcOwnerAuth } from "@/hooks/useCvcOwnerAuth";
 import type { Tank01LiveStats } from "@shared/cvcScoring";
+import { shortenTeamName } from "@/lib/nflSchedule";
 import { useCvcTank01LiveScores } from "@/hooks/useCvcTank01LiveScores";
 import { getCvcProjectedPoints, useCvcNFLProjections, type CvcProjectionMap } from "@/hooks/useCvcNFLProjections";
 import { trpc } from "@/lib/trpc";
@@ -79,7 +80,8 @@ function abbreviateName(fullName: string): string {
 function PlayerIdentity({ player, profile }: { player: CvcLineupPlayer; profile: Tank01Profile | null | undefined }) {
   const [failed, setFailed] = useState(false);
   const source = isDst(player.position) ? teamLogo(player.nfl_team) : profile?.espnHeadshot;
-  return <div className="flex items-center gap-2.5"><span className="flex h-9 w-9 shrink-0 items-center justify-center overflow-hidden rounded-full bg-[#edf3ef] text-[10px] font-black text-cvc-deep">{source && !failed ? <img src={source} alt={isDst(player.position) ? `${player.nfl_team ?? "NFL"} team logo` : ""} className={isDst(player.position) ? "h-8 w-8 object-contain" : "h-full w-full object-cover object-top"} onError={() => setFailed(true)} /> : teamInitial(player.display_name)}</span><span><Link href={`/player/${player.id}`} className="block whitespace-nowrap text-sm font-bold leading-5 text-cvc-deep hover:text-cvc-accent">{abbreviateName(player.display_name)}</Link><span className="block whitespace-nowrap text-[11px] font-bold text-slate-500">{isDst(player.position) ? "D/ST" : player.position ?? "—"} · {player.nfl_team ?? "FA"}</span></span></div>;
+  const displayName = isDst(player.position) ? shortenTeamName(player.display_name, player.nfl_team) : abbreviateName(player.display_name);
+  return <div className="flex items-center gap-2.5"><span className="flex h-9 w-9 shrink-0 items-center justify-center overflow-hidden rounded-full bg-[#edf3ef] text-[10px] font-black text-cvc-deep">{source && !failed ? <img src={source} alt={isDst(player.position) ? `${player.nfl_team ?? "NFL"} team logo` : ""} className={isDst(player.position) ? "h-8 w-8 object-contain" : "h-full w-full object-cover object-top"} onError={() => setFailed(true)} /> : teamInitial(player.display_name)}</span><span><Link href={`/player/${player.id}`} className="block whitespace-nowrap text-sm font-bold leading-5 text-cvc-deep hover:text-cvc-accent">{displayName}</Link><span className="block whitespace-nowrap text-[11px] font-bold text-slate-500">{isDst(player.position) ? "D/ST" : player.position ?? "—"} · {player.nfl_team ?? "FA"}</span></span></div>;
 }
 
 function matchupText(matchup: { opponent: string; isHome: boolean; gameTime: string } | undefined) {

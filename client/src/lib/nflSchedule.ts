@@ -21,6 +21,19 @@ const scheduleCache = new Map<string, TankRecord[] | null>();
 export function normalizeTeam(team: string | null | undefined): string {
   return TEAM_CODE_ALIASES[(team ?? "").toLowerCase()] ?? (team ?? "").toLowerCase();
 }
+
+/** Shortens a team's two-word city name to its standard short code, e.g. "Los Angeles
+ * Rams" -> "LA Rams", "New England Patriots" -> "NE Patriots". Keyed by the actual NFL
+ * team code (not by parsing the name string) since that's exact and avoids edge cases
+ * like "Green Bay" or "Tampa Bay" not neatly matching a "first word is the city" rule. */
+const CITY_SHORTENED_TEAM_NAMES: Record<string, string> = {
+  GB: "GB Packers", KC: "KC Chiefs", LAC: "LA Chargers", LAR: "LA Rams", LV: "LV Raiders",
+  NE: "NE Patriots", NO: "NO Saints", NYG: "NY Giants", NYJ: "NY Jets", SF: "SF 49ers", TB: "TB Buccaneers",
+};
+export function shortenTeamName(fullName: string, team: string | null | undefined): string {
+  const code = normalizeTeam(team).toUpperCase();
+  return CITY_SHORTENED_TEAM_NAMES[code] ?? fullName;
+}
 export function teamLogoUrl(team: string | null | undefined): string {
   return `https://a.espncdn.com/i/teamlogos/nfl/500/${normalizeTeam(team)}.png`;
 }

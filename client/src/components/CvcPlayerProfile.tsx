@@ -5,7 +5,7 @@ import { trpc } from "@/lib/trpc";
 import { normalizePlayerName } from "@shared/playerNameMatch";
 import { useCvcOwnerAuth } from "@/hooks/useCvcOwnerAuth";
 import { CvcNewsRow, type CvcNewsItem } from "@/components/CvcNewsRow";
-import { buildScheduleWithBye, fmtDate, gameOpponent, normalizeTeam, teamLogoUrl, useTeamSchedule, type TankRecord } from "@/lib/nflSchedule";
+import { buildScheduleWithBye, fmtDate, gameOpponent, normalizeTeam, shortenTeamName, teamLogoUrl, useTeamSchedule, type TankRecord } from "@/lib/nflSchedule";
 
 type TankPlayerInfo = { body?: TankRecord | TankRecord[] };
 type TankNewsItem = { title?: string; link?: string; image?: string; playerIDs?: string[] };
@@ -160,7 +160,7 @@ export function CvcPlayerProfile() {
             <span className={`absolute -right-1 -top-1 rounded-full px-2 py-0.5 text-[10px] font-black text-white ${positionColor[pos] ?? "bg-slate-700"}`}>{pos}</span>
           </span>
           <div className="min-w-0 flex-1">
-            <div className="flex flex-wrap items-center gap-2"><h1 className="font-display text-4xl uppercase leading-none tracking-[0.02em] text-cvc-deep sm:text-5xl">{player.display_name}</h1>{jerseyNum ? <span className="text-lg font-bold text-slate-400">#{jerseyNum}</span> : null}</div>
+            <div className="flex flex-wrap items-center gap-2"><h1 className="font-display text-4xl uppercase leading-none tracking-[0.02em] text-cvc-deep sm:text-5xl">{pos === "DST" ? shortenTeamName(player.display_name, player.nfl_team) : player.display_name}</h1>{jerseyNum ? <span className="text-lg font-bold text-slate-400">#{jerseyNum}</span> : null}</div>
             <p className="mt-2 flex items-center gap-1.5 text-sm text-slate-500">
               {player.nfl_team ? <img src={teamLogoUrl(player.nfl_team)} alt="" className="h-4 w-4 object-contain" /> : null}
               {player.nfl_team ?? "NFL team pending"}{height ? ` · ${height}` : ""}{weight ? `, ${weight} lbs` : ""}{age ? ` · Age ${age}` : ""}{experience ? ` · ${experience} yrs` : ""}

@@ -13,11 +13,12 @@ const opponentLabel = (team: string | null | undefined, matchups: ReturnType<typ
 };
 
 // Same starter ordering as WRC's build (SLOT_ORDER in LiveScoring.tsx), adapted to
-// CVC's actual configured roster_slot codes -- confirmed live via roster_slot: CVC uses
-// distinct RB1/RB2 and WR1/WR2 codes rather than one repeated RB/WR code with a count
-// (WRC's model), so no duplicate-slot pairing logic is needed here, just a straight
-// rank lookup. Anything not in this list (i.e. BENCH) sorts after all starters.
-const SLOT_ORDER = ["QB", "RB1", "RB2", "WR1", "WR2", "TE", "FLEX", "K", "DST"];
+// CVC's actual configured roster_slot codes. CVC previously used distinct RB1/RB2 and
+// WR1/WR2 codes but merged them into single RB/WR slots with capacity 2 each, so two
+// players can share the same rank here -- Array.sort is stable, so their relative
+// order is preserved rather than jumping around. Anything not in this list (i.e.
+// BENCH) sorts after all starters.
+const SLOT_ORDER = ["QB", "RB", "WR", "TE", "FLEX", "K", "DST"];
 const slotRank = (code: unknown) => { const rank = SLOT_ORDER.indexOf(String(code ?? "").toUpperCase()); return rank === -1 ? SLOT_ORDER.length : rank; };
 const isStarterSlot = (code: unknown) => SLOT_ORDER.includes(String(code ?? "").toUpperCase());
 

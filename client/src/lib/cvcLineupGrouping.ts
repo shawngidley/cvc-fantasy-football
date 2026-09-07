@@ -9,7 +9,7 @@ export function isCvcBenchAssignment(assignment: Pick<CvcLineupAssignment, "assi
 }
 
 function orderLineupRows(rows: CvcLineupAssignment[]) {
-  const starterOrder: Record<string, number> = { QB: 0, RB1: 1, RB2: 2, WR1: 3, WR2: 4, TE: 5, FLEX: 6, K: 7, DST: 8 };
+  const starterOrder: Record<string, number> = { QB: 0, RB: 1, WR: 2, TE: 3, FLEX: 4, K: 5, DST: 6 };
   const benchOrder: Record<string, number> = { QB: 0, RB: 1, WR: 2, TE: 3, K: 4, DST: 5, DEF: 5 };
   return [...rows].sort((a, b) => {
     const aBench = isCvcBenchAssignment(a); const bBench = isCvcBenchAssignment(b);

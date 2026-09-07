@@ -4,7 +4,7 @@ import { useCvcOwnerAuth } from "@/hooks/useCvcOwnerAuth";
 import { Link } from "wouter";
 import { ArrowDownUp, DollarSign, Search, ShieldCheck, Star, Users, X } from "lucide-react";
 import { useMemo, useState } from "react";
-import { teamLogoUrl as scheduleTeamLogoUrl } from "@/lib/nflSchedule";
+import { teamLogoUrl as scheduleTeamLogoUrl, shortenTeamName } from "@/lib/nflSchedule";
 
 const POSITIONS = ["FLEX", "QB", "RB", "WR", "TE", "K", "DST"];
 const FLEX_POSITIONS = new Set(["QB", "RB", "WR", "TE"]);
@@ -70,7 +70,7 @@ function PlayerCell({ player }: { player: any }) {
   return <div className="flex items-center gap-2.5">
     {player.nfl_team ? <img src={teamLogo(player.nfl_team)} alt="" className="h-7 w-7 shrink-0 rounded-full bg-slate-100 object-contain" onError={event => { event.currentTarget.style.visibility = "hidden"; }} /> : <span className="h-7 w-7 shrink-0 rounded-full bg-slate-100" />}
     <div className="min-w-0">
-      <Link href={`/player/${player.id}`} className="block truncate text-sm font-semibold text-cvc-deep hover:text-cvc-accent">{player.display_name}</Link>
+      <Link href={`/player/${player.id}`} className="block truncate text-sm font-semibold text-cvc-deep hover:text-cvc-accent">{player.position === "DST" ? shortenTeamName(player.display_name, player.nfl_team) : player.display_name}</Link>
       <div className="mt-0.5 flex items-center gap-1.5">
         <span className={`rounded px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-[.06em] ${badgeTone[player.position] ?? "bg-slate-100 text-slate-700"}`}>{player.position ?? "—"}</span>
         <span className="text-[11px] text-slate-500">{player.nfl_team ?? "FA"}</span>
