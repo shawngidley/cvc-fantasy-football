@@ -45,6 +45,7 @@ function Router() {
       <Route path="/playoffs" component={() => <LeaguePage kind="playoffs" />} />
       <Route path="/rules" component={() => <LeaguePage kind="rules" />} />
       <Route path="/nfl-sites" component={() => <LeaguePage kind="nfl-sites" />} />
+      <Route path="/suggestions" component={() => <LeaguePage kind="suggestions" />} />
       <Route path="/money" component={() => <LeaguePage kind="money" />} />
       <Route path="/player/:playerName" component={() => <LeaguePage kind="player" />} />
       <Route path="/settings"><ProtectedPage commissioner><LeaguePage kind="settings" /></ProtectedPage></Route>

@@ -11,7 +11,7 @@ const primaryLinks: NavLink[] = [
   { href: "/standings", label: "Standings" }, { href: "/live", label: "Live", live: true }, { href: "/lineup", label: "Lineup" }, { href: "/rosters", label: "Rosters" }, { href: "/free-agents", label: "Free agents" }, { href: "/transactions", label: "Transactions" }, { href: "/results", label: "Schedule" }, { href: "/news", label: "News" }, { href: "/trades", label: "Trades" },
 ];
 const draftLinks: NavLink[] = [{ href: "/auction", label: "Auction draft" }, { href: "/draft-recap", label: "Rookie draft" }, { href: "/auction#auction-players", label: "Draft players" }, { href: "/protections", label: "Protections" }];
-const leagueLinks: NavLink[] = [{ href: "/rules", label: "Rules" }, { href: "/money", label: "Money" }, { href: "/history", label: "History" }, { href: "/playoffs", label: "Playoffs" }, { href: "/owner-settings", label: "Owner settings" }, { href: "/nfl-sites", label: "NFL sites" }];
+const leagueLinks: NavLink[] = [{ href: "/rules", label: "Rules" }, { href: "/money", label: "Money" }, { href: "/history", label: "History" }, { href: "/playoffs", label: "Playoffs" }, { href: "/suggestions", label: "Suggestions" }, { href: "/owner-settings", label: "Owner settings" }, { href: "/nfl-sites", label: "NFL sites" }];
 
 function DrawerGroup({ label, links, location, onNavigate }: { label: string; links: NavLink[]; location: string; onNavigate: () => void }) {
   const [expanded, setExpanded] = useState(false);

@@ -1010,6 +1010,26 @@ export const leagueRouter = router({
     return aggregateDstSeasonStats(season.id, input.year, input.throughWeek);
   }),
 
+  // Owner-submitted website feedback, shown to the whole league with the submitter's
+  // franchise name and timestamp attached.
+  listSuggestions: publicProcedure.query(async () => {
+    const rows = unwrap(await supabase.from("site_suggestion").select("id, message, created_at, franchise:franchise_id(name, logo_url), owner:owner_id(display_name)").order("created_at", { ascending: false }).limit(200)) ?? [];
+    return rows.map((row: any) => {
+      const franchise = Array.isArray(row.franchise) ? row.franchise[0] : row.franchise;
+      const owner = Array.isArray(row.owner) ? row.owner[0] : row.owner;
+      return { id: row.id, message: row.message, createdAt: row.created_at, franchiseName: franchise?.name ?? null, franchiseLogoUrl: franchise?.logo_url ?? null, ownerName: owner?.display_name ?? null };
+    });
+  }),
+
+  submitSuggestion: protectedProcedure.input(z.object({ message: z.string().trim().min(1).max(2000) })).mutation(async ({ ctx, input }) => {
+    const owner = await getOwnerAccess({ openId: ctx.user.openId });
+    if (!owner) throw new TRPCError({ code: "FORBIDDEN", message: "A CVC owner session is required to submit a suggestion." });
+    const franchise = unwrap(await supabase.from("franchise").select("id").eq("current_owner_id", owner.id).eq("is_active", true).limit(1).maybeSingle());
+    if (!franchise) throw new TRPCError({ code: "FORBIDDEN", message: "Only owners with an assigned CVC franchise can submit suggestions." });
+    const created = unwrap(await supabase.from("site_suggestion").insert({ franchise_id: franchise.id, owner_id: owner.id, message: input.message }).select("id, created_at").single());
+    return { id: created?.id, createdAt: created?.created_at };
+  }),
+
   waiverStatus: publicProcedure.query(async () => {
     const { season } = await getCurrentLeagueAndSeason();
     const now = new Date().toISOString();

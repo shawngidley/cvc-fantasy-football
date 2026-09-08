@@ -21,15 +21,16 @@ import { CvcHistory } from "@/components/CvcHistory";
 import { CvcDraftHub } from "@/components/CvcDraftHub";
 import { CvcPlayoffs } from "@/components/CvcPlayoffs";
 import { CvcNflSites } from "@/components/CvcNflSites";
+import { CvcSuggestions } from "@/components/CvcSuggestions";
 import { CvcDraftRecap } from "@/components/CvcDraftRecap";
 import { TeamLogo } from "@/components/TeamLogo";
 import { selectCvcStandingsMatchup } from "@/lib/cvcStandingsMatchup";
 import { CvcInjuryReport, CvcMyTeamNews } from "@/components/CvcInjuryAndNewsPanels";
-import { Activity, ArrowRight, BadgeDollarSign, BookOpen, CalendarDays, Check, ChevronRight, ClipboardList, Crown, FileText, Gavel, LayoutDashboard, ListFilter, Newspaper, Plus, Radio, ReceiptText, Scale, Settings2, ShieldCheck, Sparkles, Trophy, Upload, UsersRound, WalletCards } from "lucide-react";
+import { Activity, ArrowRight, BadgeDollarSign, BookOpen, CalendarDays, Check, ChevronRight, ClipboardList, Crown, FileText, Gavel, LayoutDashboard, ListFilter, MessageSquarePlus, Newspaper, Plus, Radio, ReceiptText, Scale, Settings2, ShieldCheck, Sparkles, Trophy, Upload, UsersRound, WalletCards } from "lucide-react";
 import { useMemo, useState } from "react";
 import { Link, useRoute } from "wouter";
 
-export type PageKind = "standings" | "live" | "lineup" | "draft" | "draft-recap" | "rundown" | "news" | "transactions" | "trades" | "free-agents" | "results" | "history" | "playoffs" | "rules" | "nfl-sites" | "rosters" | "money" | "settings" | "player";
+export type PageKind = "standings" | "live" | "lineup" | "draft" | "draft-recap" | "rundown" | "news" | "transactions" | "trades" | "free-agents" | "results" | "history" | "playoffs" | "rules" | "nfl-sites" | "rosters" | "money" | "settings" | "player" | "suggestions";
 
 const pageMeta: Record<PageKind, { eyebrow: string; title: string; detail: string; icon: React.ElementType }> = {
   standings: { eyebrow: "League table", title: "Standings", detail: "The current competitive picture, driven by CVC-configured records, divisions, and tiebreakers.", icon: Trophy },
@@ -47,6 +48,7 @@ const pageMeta: Record<PageKind, { eyebrow: string; title: string; detail: strin
   playoffs: { eyebrow: "Postseason", title: "Playoffs", detail: "A configurable playoff bracket with seeding, matchup, and tiebreaker support.", icon: Crown },
   rules: { eyebrow: "League governance", title: "Rules & policies", detail: "Versioned CVC rules documents will publish directly from commissioner-managed content.", icon: ShieldCheck },
   "nfl-sites": { eyebrow: "Reference desk", title: "NFL sites", detail: "Commissioner-curated reference links, data-source acknowledgements, and league resources.", icon: ListFilter },
+  suggestions: { eyebrow: "League feedback", title: "Suggestions", detail: "Owner-submitted ideas and feedback for the site, shared with your team name and timestamp.", icon: MessageSquarePlus },
   rosters: { eyebrow: "Franchises", title: "Rosters", detail: "Explore every CVC franchise, owner identity, roster build, and weekly status.", icon: UsersRound },
   money: { eyebrow: "League office", title: "League finance", detail: "A private league-ledger view for dues, payouts, balances, and commissioner financial notes.", icon: WalletCards },
   settings: { eyebrow: "Commissioner office", title: "League configuration", detail: "Set up CVC teams, owners, scoring, schedule, rules, and financial settings without code changes.", icon: Settings2 },
@@ -205,9 +207,10 @@ export default function LeaguePage({ kind }: { kind: PageKind }) {
   else if (kind === "history") body = <CvcHistory />;
   else if (kind === "playoffs") body = <CvcPlayoffs />;
   else if (kind === "nfl-sites") body = <CvcNflSites />;
+  else if (kind === "suggestions") body = <CvcSuggestions />;
   else if (kind === "rosters") body = <CvcRosters />;
   else if (kind === "settings") body = <CommissionerPanel />;
   else body = <Informational kind={kind as "history" | "playoffs" | "rules" | "nfl-sites" | "money"} />;
-  const usesDirectWrcWorkspace = kind === "standings" || kind === "live" || kind === "lineup" || kind === "draft" || kind === "draft-recap" || kind === "free-agents" || kind === "rosters" || kind === "transactions" || kind === "results" || kind === "rundown" || kind === "trades" || kind === "news" || kind === "player" || kind === "money" || kind === "rules" || kind === "history" || kind === "playoffs" || kind === "nfl-sites";
+  const usesDirectWrcWorkspace = kind === "standings" || kind === "live" || kind === "lineup" || kind === "draft" || kind === "draft-recap" || kind === "free-agents" || kind === "rosters" || kind === "transactions" || kind === "results" || kind === "rundown" || kind === "trades" || kind === "news" || kind === "player" || kind === "money" || kind === "rules" || kind === "history" || kind === "playoffs" || kind === "nfl-sites" || kind === "suggestions";
   return <LeagueLayout>{usesDirectWrcWorkspace ? null : <PageHeader kind={kind} />}{body}</LeagueLayout>;
 }
