@@ -84,8 +84,16 @@ function PlayerIdentity({ player, profile }: { player: CvcLineupPlayer; profile:
   return <div className="flex items-center gap-2.5"><span className="flex h-9 w-9 shrink-0 items-center justify-center overflow-hidden rounded-full bg-[#edf3ef] text-[10px] font-black text-cvc-deep">{source && !failed ? <img src={source} alt={isDst(player.position) ? `${player.nfl_team ?? "NFL"} team logo` : ""} className={isDst(player.position) ? "h-8 w-8 object-contain" : "h-full w-full object-cover object-top"} onError={() => setFailed(true)} /> : teamInitial(player.display_name)}</span><span><Link href={`/player/${player.id}`} className="block whitespace-nowrap text-sm font-bold leading-5 text-cvc-deep hover:text-cvc-accent">{displayName}</Link><span className="block whitespace-nowrap text-[11px] font-bold text-slate-500">{isDst(player.position) ? "D/ST" : player.position ?? "—"} · {player.nfl_team ?? "FA"}</span></span></div>;
 }
 
-function matchupText(matchup: { opponent: string; isHome: boolean; gameTime: string } | undefined) {
-  return matchup ? { opponent: `${matchup.isHome ? "vs" : "@"} ${matchup.opponent.toUpperCase()}`, time: matchup.gameTime || "—" } : { opponent: "BYE", time: "—" };
+function matchupText(matchup: { opponent: string; isHome: boolean; gameTime: string; gameDate?: string } | undefined) {
+  if (!matchup) return { opponent: "BYE", time: "—" };
+  const time = matchup.gameTime || "—";
+  // Same day-of-week format as WRC and the Free Agents page's formatGameTimeWithDay:
+  // "Sun 1:00p" instead of just "1:00p" -- Tank01's live matchup data doesn't include
+  // the day name directly, only the raw gameDate, so it's derived here the same way.
+  const withDay = matchup.gameDate && matchup.gameDate.length >= 8 && time !== "—"
+    ? `${["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"][new Date(`${matchup.gameDate.slice(0, 4)}-${matchup.gameDate.slice(4, 6)}-${matchup.gameDate.slice(6, 8)}T12:00:00`).getDay()]} ${time}`
+    : time;
+  return { opponent: `${matchup.isHome ? "vs" : "@"} ${matchup.opponent.toUpperCase()}`, time: withDay };
 }
 
 function seasonFantasy(player: CvcLineupPlayer) {
