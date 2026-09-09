@@ -16,7 +16,7 @@ import { aggregateDstSeasonStats } from "../dstSeasonAggregation";
 import { syncNflTeamSchedules } from "../nflTeamScheduleSync";
 import { syncTank01ActiveRoster } from "../tank01ActiveRosterSync";
 import { LOTTERY_REVEAL_INTERVAL_SECONDS, lotteryCommitment, revealedLotteryCount, reverseLotteryPositions, secureShuffle } from "../rookieDraftLottery";
-import { activeLiveLineup } from "../liveScoringLineup";
+import { franchiseLiveLineup } from "../liveScoringLineup";
 import { supabase, unwrap } from "../supabase";
 import { cvcContractTier, cvcFranchiseTerms, cvcPriorSeasonSalary, cvcTransitionSalary, isCvcHighSalaryTransition, isCvcProtectionYear } from "../../shared/cvcProtectionPolicy";
 
@@ -1330,8 +1330,8 @@ export const leagueRouter = router({
     if (!week) return { week: null, matchups: [] };
     const matchups = unwrap(await supabase.from("matchup").select("id, home_franchise_id, away_franchise_id, home_score, away_score, result_state, home:home_franchise_id(id, name, logo_url), away:away_franchise_id(id, name, logo_url)").eq("schedule_week_id", week.id).order("created_at")) ?? [];
     const franchiseIds = Array.from(new Set(matchups.flatMap(item => [item.home_franchise_id, item.away_franchise_id])));
-    const assignments = franchiseIds.length ? unwrap(await supabase.from("roster_assignment").select("id, franchise_id, assigned_slot_code, player:player_id(id, display_name, position, nfl_team)").eq("season_id", season.id).in("franchise_id", franchiseIds).is("released_at", null).not("assigned_slot_code", "is", null)) ?? [] : [];
-    const lineupFor = (franchiseId: string) => activeLiveLineup(assignments, franchiseId);
+    const assignments = franchiseIds.length ? unwrap(await supabase.from("roster_assignment").select("id, franchise_id, assigned_slot_code, player:player_id(id, display_name, position, nfl_team)").eq("season_id", season.id).in("franchise_id", franchiseIds).is("released_at", null)) ?? [] : [];
+    const lineupFor = (franchiseId: string) => franchiseLiveLineup(assignments, franchiseId);
     const franchise = (value: unknown) => Array.isArray(value) ? value[0] as { name?: string; logo_url?: string | null } | undefined : value as { name?: string; logo_url?: string | null } | null;
     return {
       week: { weekNumber: week.week_number, label: week.label, status: week.status },
