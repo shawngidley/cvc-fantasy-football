@@ -24,6 +24,7 @@ const isStarterSlot = (code: unknown) => SLOT_ORDER.includes(String(code ?? "").
 
 export function CvcLiveScoring() {
   const [selectedWeekNumber, setSelectedWeekNumber] = useState<number | null>(null);
+  const [showBench, setShowBench] = useState(false);
   const weeksList = trpc.league.scheduleWeeksList.useQuery();
   const board = trpc.league.liveScoringBoard.useQuery({ weekNumber: selectedWeekNumber ?? undefined });
   const rules = trpc.league.scoringRules.useQuery();
@@ -61,7 +62,10 @@ export function CvcLiveScoring() {
   if (!selected || !board.data?.week) return <div className="cvc-card"><div className="cvc-card-title"><span>Live scoring</span></div><div className="cvc-card-body text-sm text-slate-500">No current CVC scoring week is available.</div></div>;
 
   return <div className="space-y-5">
-    <div className="flex flex-wrap items-end justify-between gap-3"><div><p className="cvc-eyebrow">Tank01 game center</p><h2 className="mt-2 font-display text-4xl uppercase tracking-[0.04em] text-white">Live scoring</h2></div><label className="flex items-center gap-2 text-[10px] font-bold uppercase tracking-[0.1em] text-cvc-accent">Week<select value={selectedWeekNumber ?? board.data?.week?.weekNumber ?? ""} onChange={event => { setSelectedWeekNumber(Number(event.target.value)); setSelectedId(null); }} className="rounded-md border border-cvc-accent/40 bg-cvc-accent/10 px-3 py-1.5 text-xs font-bold text-white">{(weeksList.data ?? []).map(week => <option key={week.id} value={week.week_number} className="text-cvc-deep">{week.label}</option>)}</select></label></div>
+    <div className="flex flex-wrap items-end justify-between gap-3"><div><p className="cvc-eyebrow">Tank01 game center</p><h2 className="mt-2 font-display text-4xl uppercase tracking-[0.04em] text-white">Live scoring</h2></div><div className="flex flex-wrap items-center gap-3">
+      <button type="button" onClick={() => setShowBench(value => !value)} className={`rounded-md border px-3 py-1.5 text-xs font-bold uppercase tracking-[0.08em] transition ${showBench ? "border-cvc-accent bg-cvc-accent text-cvc-deep" : "border-cvc-accent/40 bg-cvc-accent/10 text-cvc-accent hover:bg-cvc-accent/20"}`}>{showBench ? "Hide reserves" : `Show reserves${maxBenchRows ? ` (${maxBenchRows})` : ""}`}</button>
+      <label className="flex items-center gap-2 text-[10px] font-bold uppercase tracking-[0.1em] text-cvc-accent">Week<select value={selectedWeekNumber ?? board.data?.week?.weekNumber ?? ""} onChange={event => { setSelectedWeekNumber(Number(event.target.value)); setSelectedId(null); }} className="rounded-md border border-cvc-accent/40 bg-cvc-accent/10 px-3 py-1.5 text-xs font-bold text-white">{(weeksList.data ?? []).map(week => <option key={week.id} value={week.week_number} className="text-cvc-deep">{week.label}</option>)}</select></label>
+    </div></div>
 
     <div className="-mx-4 overflow-x-auto px-4 pb-1 sm:mx-0 sm:px-0"><div className="flex min-w-max gap-3">{matchups.map(matchup => { const selectedMatchup = matchup.id === selected.id; const away = hasLiveScores ? total(matchup.awayLineup.filter((entry: any) => isStarterSlot(entry.slot))) : Number(matchup.awayScore); const home = hasLiveScores ? total(matchup.homeLineup.filter((entry: any) => isStarterSlot(entry.slot))) : Number(matchup.homeScore); return <button key={matchup.id} type="button" onClick={() => setSelectedId(matchup.id)} className={`flex min-w-[220px] items-center gap-3 rounded-xl border px-3 py-2 text-left transition ${selectedMatchup ? "border-cvc-accent bg-cvc-tint shadow-sm" : "border-white/15 bg-white/5 hover:border-cvc-accent/60"}`}><TeamLogo name={matchup.away} logoUrl={matchup.awayLogoUrl} size="sm"/><strong className="font-display text-lg text-white">{away.toFixed(1)}</strong><span className="text-xs text-cvc-muted">vs</span><strong className="font-display text-lg text-white">{home.toFixed(1)}</strong><TeamLogo name={matchup.home} logoUrl={matchup.homeLogoUrl} size="sm"/></button>; })}</div></div>
 
@@ -72,7 +76,7 @@ export function CvcLiveScoring() {
         <div className="flex min-w-0 items-center justify-end gap-2 sm:gap-3"><p className="min-w-0 truncate text-right font-display text-base uppercase leading-tight text-cvc-deep sm:text-3xl">{selected.home}</p><TeamLogo name={selected.home} logoUrl={selected.homeLogoUrl} size="lg" className="shrink-0 rounded-xl border-cvc-accent/40"/></div>
       </div>
       <div className="divide-y divide-slate-200">{Array.from({ length: maxRows }).map((_, index) => { const away = selectedAway[index]; const home = selectedHome[index]; const slot = away?.slot ?? home?.slot ?? starterSlots[index] ?? "Open"; return <LineupRow key={`${away?.id ?? "away"}-${home?.id ?? "home"}-${index}`} away={away} home={home} slot={slot} points={points} live={live} />; })}</div>
-      {maxBenchRows ? <><div className="bg-slate-100 px-4 py-3 text-center text-[11px] font-bold uppercase tracking-[0.18em] text-slate-500">Bench</div>
+      {showBench && maxBenchRows ? <><div className="bg-slate-100 px-4 py-3 text-center text-[11px] font-bold uppercase tracking-[0.18em] text-slate-500">Bench</div>
       <div className="divide-y divide-slate-200 opacity-80">{Array.from({ length: maxBenchRows }).map((_, index) => { const away = benchAway[index]; const home = benchHome[index]; return <LineupRow key={`bn-${away?.id ?? "away"}-${home?.id ?? "home"}-${index}`} away={away} home={home} slot="BN" points={points} live={live} />; })}</div></> : null}
     </section>
     {live.error ? <p className="text-center text-xs text-cvc-muted">Tank01 status: {live.error}</p> : null}
