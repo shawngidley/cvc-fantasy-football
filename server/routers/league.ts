@@ -1330,7 +1330,7 @@ export const leagueRouter = router({
     if (!week) return { week: null, matchups: [] };
     const matchups = unwrap(await supabase.from("matchup").select("id, home_franchise_id, away_franchise_id, home_score, away_score, result_state, home:home_franchise_id(id, name, logo_url), away:away_franchise_id(id, name, logo_url)").eq("schedule_week_id", week.id).order("created_at")) ?? [];
     const franchiseIds = Array.from(new Set(matchups.flatMap(item => [item.home_franchise_id, item.away_franchise_id])));
-    const assignments = franchiseIds.length ? unwrap(await supabase.from("roster_assignment").select("id, franchise_id, assigned_slot_code, player:player_id(id, display_name, position, nfl_team)").eq("season_id", season.id).in("franchise_id", franchiseIds).is("released_at", null)) ?? [] : [];
+    const assignments = franchiseIds.length ? unwrap(await supabase.from("roster_assignment").select("id, franchise_id, assigned_slot_code, player:player_id(id, display_name, position, nfl_team, metadata)").eq("season_id", season.id).in("franchise_id", franchiseIds).is("released_at", null)) ?? [] : [];
     const lineupFor = (franchiseId: string) => franchiseLiveLineup(assignments, franchiseId);
     const franchise = (value: unknown) => Array.isArray(value) ? value[0] as { name?: string; logo_url?: string | null } | undefined : value as { name?: string; logo_url?: string | null } | null;
     return {

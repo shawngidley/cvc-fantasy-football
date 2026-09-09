@@ -1,66 +1,18 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link, useLocation, useRoute } from "wouter";
 import { useCvcOwnerAuth } from "@/hooks/useCvcOwnerAuth";
-import type { Tank01LiveStats } from "@shared/cvcScoring";
 import { shortenTeamName } from "@/lib/nflSchedule";
 import { useCvcTank01LiveScores } from "@/hooks/useCvcTank01LiveScores";
 import { getCvcProjectedPoints, useCvcNFLProjections, type CvcProjectionMap } from "@/hooks/useCvcNFLProjections";
+import { useCvcTank01PlayerProfiles, profileKey, type Tank01Profile } from "@/hooks/useCvcTank01PlayerProfiles";
 import { trpc } from "@/lib/trpc";
 import { groupCvcLineup, type CvcLineupAssignment, type CvcLineupGroup, type CvcLineupPlayer } from "@/lib/cvcLineupGrouping";
 import { TeamLogo } from "@/components/TeamLogo";
 
-const profileCache = new Map<string, { value: Tank01Profile | null; expiresAt: number }>();
-const PROFILE_TTL_MS = 12 * 60 * 60 * 1000;
-const profileKey = (value: string) => value.trim().toLowerCase().replace(/[^a-z0-9]/g, "");
 const normalizeTeam = (team: string | null | undefined) => ({ kan: "kc", tam: "tb", arz: "ari", jax: "jac", was: "wsh" }[(team ?? "").toLowerCase()] ?? (team ?? "").toLowerCase());
 const teamInitial = (name: string) => name.split(/\s+/).map(part => part[0]).join("").slice(0, 2).toUpperCase();
 const isDst = (position: string | null | undefined) => ["DST", "DEF"].includes((position ?? "").toUpperCase());
 
-type Tank01Profile = { espnHeadshot?: string; age?: string; stats?: Tank01LiveStats & { gamesPlayed?: string | number } };
-
-function useCvcTank01LineupProfiles(players: CvcLineupPlayer[]) {
-  const signature = players.map(player => player.display_name.trim()).sort().join("|");
-  const [profiles, setProfiles] = useState<Record<string, Tank01Profile | null>>({});
-
-  useEffect(() => {
-    let active = true;
-    const targets = Array.from(new Map<string, CvcLineupPlayer>(players.filter(player => player.display_name.trim()).map(player => [profileKey(player.display_name), player])).values()).slice(0, 22);
-    const load = async () => {
-      const next: Record<string, Tank01Profile | null> = {};
-      for (const player of targets) {
-        const key = profileKey(player.display_name);
-        const cached = profileCache.get(key);
-        if (cached && cached.expiresAt > Date.now()) { next[key] = cached.value; continue; }
-        try {
-          // Same preference order as tank01SeasonStatsSync.ts's server-side sync: an
-          // exact ID lookup first when a Tank01 ID is already confirmed, falling back to
-          // a name search. Confirmed there that the name search fails systematically for
-          // some real players/team defenses even when the ID lookup succeeds.
-          const tank01Id = player.metadata?.tank01_id ? String(player.metadata.tank01_id) : null;
-          let value: Tank01Profile | null = null;
-          if (tank01Id) {
-            const byIdResponse = await fetch(`/api/tank01/getNFLPlayerInfo?playerID=${encodeURIComponent(tank01Id)}&getStats=true`);
-            const byIdPayload = await byIdResponse.json() as { body?: Tank01Profile | Tank01Profile[] };
-            value = (Array.isArray(byIdPayload.body) ? byIdPayload.body[0] : byIdPayload.body) ?? null;
-          }
-          if (!value) {
-            const response = await fetch(`/api/tank01/getNFLPlayerInfo?playerName=${encodeURIComponent(player.display_name)}&getStats=true`);
-            const payload = await response.json() as { body?: Tank01Profile[] };
-            value = payload.body?.[0] ?? null;
-          }
-          profileCache.set(key, { value, expiresAt: Date.now() + PROFILE_TTL_MS });
-          next[key] = value;
-        } catch { profileCache.set(key, { value: null, expiresAt: Date.now() + 10 * 60 * 1000 }); next[key] = null; }
-        if (active) setProfiles(current => ({ ...current, ...next }));
-      }
-      if (active) setProfiles(current => ({ ...current, ...next }));
-    };
-    if (targets.length) void load(); else setProfiles({});
-    return () => { active = false; };
-  }, [signature]);
-
-  return profiles;
-}
 
 
 
@@ -143,7 +95,7 @@ export function CvcOwnerLineup() {
   const groups = useMemo(() => groupCvcLineup(players), [players]);
   const starterCount = groups.reduce((count, group) => count + group.starters.length, 0);
   const projectedTotal = groups.flatMap(group => group.starters).reduce((total, assignment) => total + (assignment.player ? getCvcProjectedPoints(projections, assignment.player.display_name, isDst(assignment.player.position) ? "DST" : assignment.player.position, assignment.player.nfl_team) ?? 0 : 0), 0);
-  const profiles = useCvcTank01LineupProfiles(players.flatMap(assignment => assignment.player ? [assignment.player] : []));
+  const profiles = useCvcTank01PlayerProfiles(players.flatMap(assignment => assignment.player ? [assignment.player] : []));
 
   // Staged edits: slot moves are held here (not sent to the server) until "Save Lineup"
   // is pressed, per the owners-must-save-explicitly requirement -- previously every

@@ -1,4 +1,4 @@
-export type LiveLineupPlayer = { id: string; display_name: string; position: string | null; nfl_team: string | null };
+export type LiveLineupPlayer = { id: string; display_name: string; position: string | null; nfl_team: string | null; metadata?: { tank01_id?: unknown } | null };
 export type LiveLineupAssignment = { id: string; franchise_id: string; assigned_slot_code: string | null; player: LiveLineupPlayer | LiveLineupPlayer[] | null };
 
 function playerFromRelation(value: LiveLineupAssignment["player"]) {
