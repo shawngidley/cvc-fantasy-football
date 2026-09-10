@@ -12,14 +12,27 @@ export type CvcNflMatchup = { opponent: string; isHome: boolean; gameTime: strin
 const normalize = (value: string) => value.toLowerCase().replace(/[^a-z0-9]/g, "");
 const normalizeTeam = (value: string) => ({ kan: "kc", tam: "tb", arz: "ari", jax: "jac", was: "wsh" }[value.toLowerCase()] ?? value.toLowerCase());
 
-function isGameActive(gameDate?: string, gameTime?: string): boolean {
-  if (!gameDate || !gameTime || gameDate.length < 8) return false;
+/** Parses a Tank01 gameDate (YYYYMMDD) + gameTime ("8:20p" style, assumed ET) into a
+ * UTC kickoff timestamp. Uses Date.UTC (not a string-interpolated "...T${hour}:00Z"
+ * timestamp) because for any 8pm-or-later local kickoff, hour + 4 overflows past 23
+ * (e.g. 20 + 4 = 24). A string-built "T24:20:00Z" is not a valid ISO hour and silently
+ * parses to an Invalid Date (NaN), which made every comparison against it false --
+ * meaning prime time games (a large share of the week's games) never registered as
+ * "active" at all. Date.UTC() correctly rolls hour 24 into 00:00 of the next UTC day.
+ * Returns null if the inputs can't be parsed. */
+export function computeKickoffUtc(gameDate: string | undefined, gameTime: string | undefined): number | null {
+  if (!gameDate || !gameTime || gameDate.length < 8) return null;
   const time = gameTime.match(/(\d+):(\d+)([ap])/i);
-  if (!time) return false;
+  if (!time) return null;
   let hour = Number(time[1]);
   if (time[3].toLowerCase() === "p" && hour !== 12) hour += 12;
   if (time[3].toLowerCase() === "a" && hour === 12) hour = 0;
-  const kickoff = new Date(`${gameDate.slice(0, 4)}-${gameDate.slice(4, 6)}-${gameDate.slice(6, 8)}T${String(hour + 4).padStart(2, "0")}:${time[2]}:00Z`).getTime();
+  return Date.UTC(Number(gameDate.slice(0, 4)), Number(gameDate.slice(4, 6)) - 1, Number(gameDate.slice(6, 8)), hour + 4, Number(time[2]), 0);
+}
+
+function isGameActive(gameDate?: string, gameTime?: string): boolean {
+  const kickoff = computeKickoffUtc(gameDate, gameTime);
+  if (kickoff === null) return false;
   const now = Date.now();
   return now >= kickoff && now <= kickoff + 4 * 60 * 60 * 1000;
 }
