@@ -121,7 +121,16 @@ export function CvcLiveScoring() {
         <p>Last updated: {live.lastUpdated ? live.lastUpdated.toISOString() : "never"}</p>
         <p>Live error: {live.error ?? "none"}</p>
         <p>Raw box-score debug: URL={live.rawBoxScoreDebug?.url ?? "not yet fetched"}, status={live.rawBoxScoreDebug?.status ?? "—"}</p>
-        <details><summary className="cursor-pointer">Full raw getNFLBoxScore response (first active game)</summary><pre className="mt-2 max-h-64 overflow-auto whitespace-pre-wrap break-all rounded bg-white p-2 text-[10px]">{JSON.stringify(live.rawBoxScoreDebug?.body, null, 2)}</pre></details>
+        {live.rawBoxScoreDebug ? (() => { const body: any = live.rawBoxScoreDebug.body; const playerStatsKeys = Object.keys(body?.body?.playerStats ?? {}); const teamStatsKeys = Object.keys(body?.body?.teamStats ?? {}); const topLevelBodyKeys = Object.keys(body?.body ?? {}); return <>
+          <p className="mt-2 font-bold">Compact summary:</p>
+          <p>Top-level response keys: {Object.keys(body ?? {}).join(", ") || "none"}</p>
+          <p>body.* keys: {topLevelBodyKeys.join(", ") || "none"}</p>
+          <p>playerStats key count: {playerStatsKeys.length} — sample keys: {playerStatsKeys.slice(0, 5).join(", ") || "none"}</p>
+          <p>teamStats key count: {teamStatsKeys.length} — keys: {teamStatsKeys.join(", ") || "none"}</p>
+          {playerStatsKeys.length ? <p>Sample playerStats entry ({playerStatsKeys[0]}): {JSON.stringify(body.body.playerStats[playerStatsKeys[0]])}</p> : null}
+        </>; })() : null}
+        <p className="mt-2 font-bold">Full raw getNFLBoxScore response (first active game):</p>
+        <pre className="mt-1 max-h-96 overflow-auto whitespace-pre-wrap break-all rounded bg-white p-2 text-[10px]">{live.rawBoxScoreDebug ? JSON.stringify(live.rawBoxScoreDebug.body, null, 2) : "not yet fetched"}</pre>
         <p>Live score entries fetched: {Object.keys(live.scores).length}</p>
         <p>NFL matchups loaded: {Object.keys(live.nflMatchups).length}</p>
         <p>Game status entries (ESPN): {Object.keys(gameStatus).length}</p>
