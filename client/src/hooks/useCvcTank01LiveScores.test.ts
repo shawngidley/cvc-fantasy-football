@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { computeKickoffUtc } from "./useCvcTank01LiveScores";
+import { computeKickoffUtc, getCvcLivePoints } from "./useCvcTank01LiveScores";
 
 describe("computeKickoffUtc", () => {
   it("correctly rolls an 8:20pm ET kickoff into the next UTC day (the exact overflow bug)", () => {
@@ -35,3 +35,42 @@ describe("computeKickoffUtc", () => {
     expect(computeKickoffUtc("20260913", "not-a-time")).toBeNull();
   });
 });
+
+describe("getCvcLivePoints (using the real confirmed NE @ SEA live box-score shape)", () => {
+  const rules = [
+    { stat_key: "passing_yards", value: 0.04, applies_to_positions: ["QB"] },
+    { stat_key: "passing_touchdown", value: 4, applies_to_positions: ["QB"] },
+    { stat_key: "rushing_yards", value: 0.1, applies_to_positions: ["QB", "RB", "WR", "TE"] },
+    { stat_key: "sack", value: 2, applies_to_positions: ["DST"] },
+    { stat_key: "defensive_interception", value: 2, applies_to_positions: ["DST"] },
+  ];
+
+  it("computes real points for a player even though Tank01's playerStats entries have no pos field at all (the actual bug: CVC previously required a truthy position on the raw stat line, which Tank01 never provides, so every player was silently skipped)", () => {
+    // Real Drake Maye stat line from the confirmed live NE@SEA box score -- note there
+    // is no "pos" key anywhere in this object, matching the real Tank01 response.
+    const drakeMayeStat = {
+      Rushing: { rushAvg: "4.7", rushYds: "14", carries: "3", longRush: "10", rushTD: "0" },
+      Passing: { passAttempts: "4", passTD: "0", passYds: "21", int: "0", passCompletions: "3" },
+      teamID: "22", team: "NE", teamAbv: "NE", playerID: "4431452", longName: "Drake Maye",
+    };
+    const statLines = { [normalizeForTest("Drake Maye")]: drakeMayeStat as any };
+    const points = getCvcLivePoints(statLines, "Drake Maye", "QB", "NE", rules as any);
+    // 21 passing yards * 0.04 + 14 rushing yards * 0.1 = 0.84 + 1.4 = 2.24
+    expect(points).toBeCloseTo(2.24, 2);
+  });
+
+  it("returns null (not 0) for a player with no live stat line yet", () => {
+    expect(getCvcLivePoints({}, "Nobody Yet", "QB", "NE", rules as any)) .toBeNull();
+  });
+
+  it("looks up DST by the real team code, not a stray 'away'/'home' key (the actual bug: Tank01's DST object is keyed 'away'/'home' at the top level, with the real team code inside each entry's own teamAbv field)", () => {
+    // Real NE defensive line from the confirmed live box score's top-level DST object.
+    const neDefense = { teamAbv: "NE", teamID: "22", defTD: "0", defensiveInterceptions: "0", sacks: "1", fumblesRecovered: "0", ptsAllowed: "0", safeties: "0" };
+    const statLines = { "dst:ne": { Defense: neDefense } as any };
+    const points = getCvcLivePoints(statLines, "New England Patriots", "DST", "NE", rules as any);
+    // 1 sack * 2 = 2
+    expect(points).toBeCloseTo(2, 2);
+  });
+});
+
+function normalizeForTest(value: string) { return value.toLowerCase().replace(/[^a-z0-9]/g, ""); }

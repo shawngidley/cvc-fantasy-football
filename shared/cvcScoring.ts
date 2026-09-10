@@ -48,7 +48,7 @@ export function calculateCvcFantasyPoints(stats: Tank01LiveStats, position: stri
     points += numeric(defense.sacks) * ruleValue(rules, "sack", position);
     points += numeric(defense.defensiveOrSpecialTeamsTds ?? defense.defTD) * ruleValue(rules, "defensive_touchdown", position);
     points += numeric(defense.safeties) * ruleValue(rules, "safety", position);
-    const pointsAllowed = numeric(defense.ptsAgainst);
+    const pointsAllowed = numeric(defense.ptsAgainst ?? defense.ptsAllowed);
     if (pointsAllowed === 0) points += ruleValue(rules, "points_allowed_0", position);
     else if (pointsAllowed <= 6) points += ruleValue(rules, "points_allowed_1_6", position);
     else if (pointsAllowed <= 13) points += ruleValue(rules, "points_allowed_7_13", position);

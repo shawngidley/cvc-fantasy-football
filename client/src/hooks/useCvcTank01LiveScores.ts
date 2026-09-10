@@ -5,7 +5,6 @@ const TANK01_BASE_URL = "/api/tank01";
 const POLL_INTERVAL_MS = 30_000;
 
 type TankGame = { gameID?: string; away?: string; home?: string; gameDate?: string; gameTime?: string };
-type LiveScoreMap = Record<string, number>;
 export type LiveStatMap = Record<string, Tank01LiveStats>;
 export type CvcNflMatchup = { opponent: string; isHome: boolean; gameTime: string; gameDate: string; gameId: string };
 
@@ -38,7 +37,6 @@ function isGameActive(gameDate?: string, gameTime?: string): boolean {
 }
 
 export function useCvcTank01LiveScores(week: number | undefined, season: number | undefined, rules: CvcScoringRule[]) {
-  const [scores, setScores] = useState<LiveScoreMap>({});
   const [isPolling, setIsPolling] = useState(false);
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -69,27 +67,38 @@ export function useCvcTank01LiveScores(week: number | undefined, season: number 
       if (!activeGames.length) { setIsPolling(false); return false; }
       setIsPolling(true);
       setError(null);
-      const next: LiveScoreMap = {};
       const nextStatLines: LiveStatMap = {};
       let capturedDebug: { url: string; status: number; body: unknown } | null = null;
       await Promise.all(activeGames.map(async game => {
         const url = `${TANK01_BASE_URL}/getNFLBoxScore?gameID=${encodeURIComponent(game.gameID ?? "")}&fantasyPoints=true&twoPointConversions=2&passYards=.04&passTD=4&passInterceptions=-3&pointsPerReception=1&carries=0&rushYards=.1&rushTD=6&fumbles=-3&receivingYards=.1&receivingTD=6&targets=0&defTD=6&fgMade=0&fgYards=.1&xpMade=1`;
         const response = await fetch(url);
         if (!response.ok) throw new Error(`Tank01 box-score request failed (${response.status})`);
-        const payload = await response.json() as { body?: { playerStats?: Record<string, Record<string, unknown>>; teamStats?: Record<string, Tank01LiveStats> } };
+        const payload = await response.json() as {
+          body?: {
+            playerStats?: Record<string, Record<string, unknown>>;
+            // Confirmed live: this is general team offense stats (totalYards,
+            // rushingAttempts, etc.) -- NOT the dedicated defensive-scoring source.
+            teamStats?: Record<string, Record<string, unknown>>;
+            // Confirmed live: the actual DST scoring source, keyed "away"/"home" with
+            // the real team code inside each entry's own teamAbv field (not the outer
+            // key itself, which is just the literal string "away"/"home").
+            DST?: Record<string, Record<string, unknown>>;
+          };
+        };
         if (!capturedDebug) capturedDebug = { url, status: response.status, body: payload };
+        // Confirmed live: Tank01's playerStats entries have no "pos" field at all --
+        // position must come from the caller (CVC's own player record) at lookup time,
+        // not from this raw stat line. Store the raw stat here; getCvcLivePoints
+        // computes fantasy points lazily once it has the real position.
         for (const stat of Object.values(payload.body?.playerStats ?? {})) {
           const name = String(stat.longName ?? "");
-          const position = String(stat.pos ?? "");
-          if (name && position) { next[normalize(name)] = calculateCvcFantasyPoints(stat as Tank01LiveStats, position, rules); nextStatLines[normalize(name)] = stat as Tank01LiveStats; }
+          if (name) nextStatLines[normalize(name)] = stat as Tank01LiveStats;
         }
-        for (const [team, stat] of Object.entries(payload.body?.teamStats ?? {})) {
-          const key = `dst:${normalizeTeam(team)}`;
-          next[key] = calculateCvcFantasyPoints({ Defense: stat as unknown as Record<string, string | number> }, "DST", rules);
-          nextStatLines[key] = { Defense: stat as unknown as Record<string, string | number> };
+        for (const stat of Object.values(payload.body?.DST ?? {})) {
+          const teamAbv = String(stat.teamAbv ?? "");
+          if (teamAbv) nextStatLines[`dst:${normalizeTeam(teamAbv)}`] = { Defense: stat as unknown as Record<string, string | number> };
         }
       }));
-      setScores(next);
       setStatLines(nextStatLines);
       setRawBoxScoreDebug(capturedDebug);
       setLastUpdated(new Date());
@@ -108,10 +117,17 @@ export function useCvcTank01LiveScores(week: number | undefined, season: number 
     return () => { active = false; if (timer.current) clearTimeout(timer.current); };
   }, [refresh]);
 
-  return { scores, statLines, nflMatchups, isPolling, lastUpdated, error, rawBoxScoreDebug };
+  return { statLines, nflMatchups, isPolling, lastUpdated, error, rawBoxScoreDebug };
 }
 
-export function getCvcLivePoints(scores: LiveScoreMap, playerName: string, position: string, nflTeam: string | null | undefined): number | null {
-  if (position === "DST") return scores[`dst:${normalizeTeam(nflTeam ?? "")}`] ?? null;
-  return scores[normalize(playerName)] ?? null;
+/** Computes a player's live fantasy points lazily, from the raw stat line, using the
+ * position the CALLER supplies (CVC's own player record) -- not a pre-computed score,
+ * since Tank01's box score gives no reliable position of its own to compute with in
+ * advance, and CVC's scoring rules are position-gated (ruleValue only matches a rule
+ * when applies_to_positions includes the given position). */
+export function getCvcLivePoints(statLines: LiveStatMap, playerName: string, position: string, nflTeam: string | null | undefined, rules: CvcScoringRule[]): number | null {
+  const key = position === "DST" ? `dst:${normalizeTeam(nflTeam ?? "")}` : normalize(playerName);
+  const stat = statLines[key];
+  if (!stat) return null;
+  return calculateCvcFantasyPoints(stat, position, rules);
 }

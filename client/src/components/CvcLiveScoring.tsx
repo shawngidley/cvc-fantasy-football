@@ -67,11 +67,11 @@ export function CvcLiveScoring() {
   const starterSlots = (slots.data ?? []).filter(slot => !["BENCH", "BN", "IR", "TAXI"].includes(slot.code.toUpperCase())).flatMap(slot => Array.from({ length: Math.max(1, Number(slot.maximum_count ?? 1)) }, () => slot.code)).sort((a, b) => slotRank(a) - slotRank(b));
   const maxRows = Math.max(selectedAway.length, selectedHome.length, starterSlots.length);
   const maxBenchRows = Math.max(benchAway.length, benchHome.length);
-  const points = (entry: any) => entry?.player ? getCvcLivePoints(live.scores, entry.player.display_name, entry.player.position, entry.player.nfl_team) : null;
+  const points = (entry: any) => entry?.player ? getCvcLivePoints(live.statLines, entry.player.display_name, entry.player.position, entry.player.nfl_team, rules.data ?? []) : null;
   const total = (lineup: any[]) => lineup.reduce((sum, entry) => sum + (points(entry) ?? 0), 0);
   const awayTotal = total(selectedAway);
   const homeTotal = total(selectedHome);
-  const hasLiveScores = Object.keys(live.scores).length > 0;
+  const hasLiveScores = Object.keys(live.statLines).length > 0;
   const gameDates = useMemo(() => Array.from(new Set(Object.values(live.nflMatchups).map(m => m.gameDate).filter(Boolean))), [live.nflMatchups]);
   const { gameStatus } = useCvcNFLGameStatus(gameDates);
   // Same aggregation as WRC's build: sum minutesRemainingInGame and projected points
@@ -131,7 +131,7 @@ export function CvcLiveScoring() {
         </>; })() : null}
         <p className="mt-2 font-bold">Full raw getNFLBoxScore response (first active game):</p>
         <pre className="mt-1 max-h-96 overflow-auto whitespace-pre-wrap break-all rounded bg-white p-2 text-[10px]">{live.rawBoxScoreDebug ? JSON.stringify(live.rawBoxScoreDebug.body, null, 2) : "not yet fetched"}</pre>
-        <p>Live score entries fetched: {Object.keys(live.scores).length}</p>
+        <p>Live stat lines fetched: {Object.keys(live.statLines).length}</p>
         <p>NFL matchups loaded: {Object.keys(live.nflMatchups).length}</p>
         <p>Game status entries (ESPN): {Object.keys(gameStatus).length}</p>
         <p>Away team ({selected.away}) starters' NFL teams + status:</p>
