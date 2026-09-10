@@ -120,6 +120,8 @@ export function CvcLiveScoring() {
         <p>Polling active: {String(live.isPolling)}</p>
         <p>Last updated: {live.lastUpdated ? live.lastUpdated.toISOString() : "never"}</p>
         <p>Live error: {live.error ?? "none"}</p>
+        <p>Raw box-score debug: URL={live.rawBoxScoreDebug?.url ?? "not yet fetched"}, status={live.rawBoxScoreDebug?.status ?? "—"}</p>
+        <details><summary className="cursor-pointer">Full raw getNFLBoxScore response (first active game)</summary><pre className="mt-2 max-h-64 overflow-auto whitespace-pre-wrap break-all rounded bg-white p-2 text-[10px]">{JSON.stringify(live.rawBoxScoreDebug?.body, null, 2)}</pre></details>
         <p>Live score entries fetched: {Object.keys(live.scores).length}</p>
         <p>NFL matchups loaded: {Object.keys(live.nflMatchups).length}</p>
         <p>Game status entries (ESPN): {Object.keys(gameStatus).length}</p>
