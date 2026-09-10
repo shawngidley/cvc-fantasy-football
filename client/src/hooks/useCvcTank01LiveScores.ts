@@ -120,6 +120,13 @@ export function useCvcTank01LiveScores(week: number | undefined, season: number 
   return { statLines, nflMatchups, isPolling, lastUpdated, error, rawBoxScoreDebug };
 }
 
+/** Looks up a player's raw live stat line (for rendering real game stats), using the
+ * exact same key logic as getCvcLivePoints. */
+export function getCvcLiveStatLine(statLines: LiveStatMap, playerName: string, position: string, nflTeam: string | null | undefined): Tank01LiveStats | null {
+  const key = position === "DST" ? `dst:${normalizeTeam(nflTeam ?? "")}` : normalize(playerName);
+  return statLines[key] ?? null;
+}
+
 /** Computes a player's live fantasy points lazily, from the raw stat line, using the
  * position the CALLER supplies (CVC's own player record) -- not a pre-computed score,
  * since Tank01's box score gives no reliable position of its own to compute with in
