@@ -34,11 +34,14 @@ export function calculateCvcFantasyPoints(stats: Tank01LiveStats, position: stri
   points += numeric(passing.passYds) * ruleValue(rules, "passing_yards", position);
   points += numeric(passing.passTD) * ruleValue(rules, "passing_touchdown", position);
   points += numeric(passing.int) * ruleValue(rules, "interception", position);
+  if (numeric(passing.passYds) >= 350) points += ruleValue(rules, "passing_350_bonus", position);
   points += numeric(rushing.rushYds) * ruleValue(rules, "rushing_yards", position);
   points += numeric(rushing.rushTD) * ruleValue(rules, "rushing_touchdown", position);
+  if (numeric(rushing.rushYds) >= 100) points += ruleValue(rules, "rushing_100_bonus", position);
   points += numeric(receiving.recYds) * ruleValue(rules, "receiving_yards", position);
   points += numeric(receiving.recTD) * ruleValue(rules, "receiving_touchdown", position);
   points += numeric(receiving.receptions) * ruleValue(rules, "reception", position);
+  if (numeric(receiving.recYds) >= 100) points += ruleValue(rules, "receiving_100_bonus", position);
   points += numeric(kicking.xpMade) * ruleValue(rules, "extra_point", position);
   points += numeric(kicking.fgYds ?? kicking.kickYards) * ruleValue(rules, "field_goal_yard", position);
 

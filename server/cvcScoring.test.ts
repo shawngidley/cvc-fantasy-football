@@ -10,6 +10,9 @@ const rules: CvcScoringRule[] = [
   { stat_key: "receiving_yards", value: 0.1, applies_to_positions: ["QB", "RB", "WR", "TE"] },
   { stat_key: "receiving_touchdown", value: 6, applies_to_positions: ["QB", "RB", "WR", "TE"] },
   { stat_key: "reception", value: 0.5, applies_to_positions: ["RB", "WR", "TE"] },
+  { stat_key: "passing_350_bonus", value: 5, applies_to_positions: ["QB", "RB", "WR", "TE"] },
+  { stat_key: "rushing_100_bonus", value: 5, applies_to_positions: ["QB", "RB", "WR", "TE"] },
+  { stat_key: "receiving_100_bonus", value: 5, applies_to_positions: ["QB", "RB", "WR", "TE"] },
   { stat_key: "extra_point", value: 1, applies_to_positions: ["K"] },
   { stat_key: "field_goal_yard", value: 0.1, applies_to_positions: ["K"] },
   { stat_key: "fumble_recovery", value: 2, applies_to_positions: ["DST"] },
@@ -35,5 +38,25 @@ describe("CVC scoring engine", () => {
   });
   it("scores D/ST events and the supplied points-allowed tier", () => {
     expect(calculateCvcFantasyPoints({ Defense: { sacks: 3, defensiveInterceptions: 1, fumblesRecovered: 1, defensiveOrSpecialTeamsTds: 1, safeties: 1, ptsAgainst: 7 } }, "DST", rules)).toBe(26);
+  });
+
+  it("awards the +5 bonus for exactly 100 rushing yards, but not for 99", () => {
+    expect(calculateCvcFantasyPoints({ Rushing: { rushYds: 100 } }, "RB", rules)).toBe(100 * 0.1 + 5);
+    expect(calculateCvcFantasyPoints({ Rushing: { rushYds: 99 } }, "RB", rules)).toBe(99 * 0.1);
+  });
+
+  it("awards the +5 bonus for exactly 100 receiving yards, but not for 99", () => {
+    expect(calculateCvcFantasyPoints({ Receiving: { recYds: 100 } }, "WR", rules)).toBe(100 * 0.1 + 5);
+    expect(calculateCvcFantasyPoints({ Receiving: { recYds: 99 } }, "WR", rules)).toBe(99 * 0.1);
+  });
+
+  it("awards the +5 bonus for exactly 350 passing yards, but not for 349", () => {
+    expect(calculateCvcFantasyPoints({ Passing: { passYds: 350 } }, "QB", rules)).toBe(350 * 0.05 + 5);
+    expect(calculateCvcFantasyPoints({ Passing: { passYds: 349 } }, "QB", rules)).toBe(349 * 0.05);
+  });
+
+  it("can award multiple bonuses at once for a dual-threat stat line (e.g. 350+ passing and 100+ rushing in the same game)", () => {
+    const points = calculateCvcFantasyPoints({ Passing: { passYds: 380 }, Rushing: { rushYds: 110 } }, "QB", rules);
+    expect(points).toBe(380 * 0.05 + 5 + 110 * 0.1 + 5);
   });
 });
