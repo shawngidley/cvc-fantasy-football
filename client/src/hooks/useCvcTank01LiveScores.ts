@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { calculateCvcFantasyPoints, type CvcScoringRule, type Tank01LiveStats } from "@shared/cvcScoring";
+import { getKickerEventsForPlayer, parseEspnKickerEvents, sumMadeFieldGoalYards, countMadeExtraPoints, type KickerPlayEvent } from "@/lib/espnKickerEvents";
 
 const TANK01_BASE_URL = "/api/tank01";
 const POLL_INTERVAL_MS = 30_000;
@@ -42,6 +43,41 @@ export function isGameActive(gameDate?: string, gameTime?: string): boolean {
   if (kickoff === null) return false;
   const now = Date.now();
   return now >= kickoff && now <= kickoff + 24 * 60 * 60 * 1000;
+}
+
+/** Fetches real per-kick FG/XP events from ESPN's play-by-play for each active game,
+ * matching WRC's proven approach: for each active game's date, fetch ESPN's scoreboard
+ * to find the matching event ID (by home/away team abbreviation), then fetch that
+ * event's summary and parse kicker plays out of the play-by-play text. This exists
+ * because Tank01's live box score doesn't reliably include FG yardage at all -- CVC's
+ * own scoring needs exact yardage (0.1 pts/yard), not just a made-count. */
+async function fetchEspnKickerEvents(activeGames: TankGame[]): Promise<KickerPlayEvent[]> {
+  const events: KickerPlayEvent[] = [];
+  const seen = new Set<string>();
+  const dates = Array.from(new Set(activeGames.map(game => game.gameDate).filter((date): date is string => Boolean(date))));
+  for (const date of dates) {
+    try {
+      const scoreboard = await fetch(`/api/espn/scoreboard?dates=${date}`);
+      if (!scoreboard.ok) continue;
+      const payload = await scoreboard.json() as { events?: Array<{ id?: string; competitions?: Array<{ competitors?: Array<{ homeAway?: string; team?: { abbreviation?: string } }> }> }> };
+      for (const game of activeGames.filter(candidate => candidate.gameDate === date)) {
+        const espnEvent = payload.events?.find(candidate => {
+          const competitors = candidate.competitions?.[0]?.competitors ?? [];
+          const home = competitors.find(item => item.homeAway === "home")?.team?.abbreviation;
+          const away = competitors.find(item => item.homeAway === "away")?.team?.abbreviation;
+          return normalizeTeam(home ?? "") === normalizeTeam(game.home ?? "") && normalizeTeam(away ?? "") === normalizeTeam(game.away ?? "");
+        });
+        if (!espnEvent?.id) continue;
+        const summary = await fetch(`/api/espn/summary?event=${espnEvent.id}`);
+        if (!summary.ok) continue;
+        for (const play of parseEspnKickerEvents(await summary.json())) {
+          const key = `${play.playerName}|${play.type}|${play.outcome}|${play.yards}|${play.text}`;
+          if (!seen.has(key)) { seen.add(key); events.push(play); }
+        }
+      }
+    } catch { /* one bad date's ESPN fetch shouldn't block the rest */ }
+  }
+  return events;
 }
 
 export function useCvcTank01LiveScores(week: number | undefined, season: number | undefined, rules: CvcScoringRule[]) {
@@ -110,6 +146,40 @@ export function useCvcTank01LiveScores(week: number | undefined, season: number 
       setStatLines(nextStatLines);
       setRawBoxScoreDebug(capturedDebug);
       setLastUpdated(new Date());
+      // Override kicker stats with real per-kick ESPN data where available. Tank01's
+      // live box score doesn't reliably include FG yardage at all (confirmed: none of
+      // the players in a real, verified live box score had usable Kicking.fgYds), so
+      // without this, a made field goal scores as if it were 0 yards. Only the field(s)
+      // ESPN actually gave events for get overridden -- if ESPN parsing fails to find
+      // events for a kicker (e.g. the play text didn't match, or nothing's happened
+      // yet), that kicker's stat line is left as Tank01 provided it, not blanked out.
+      try {
+        const kickerEvents = await fetchEspnKickerEvents(activeGames);
+        if (kickerEvents.length) {
+          setStatLines(current => {
+            const next = { ...current };
+            for (const key of Object.keys(next)) {
+              if (key.startsWith("dst:")) continue;
+              const entry = next[key] as Record<string, unknown>;
+              const longName = String(entry.longName ?? "");
+              const existingKicking = entry.Kicking as Record<string, unknown> | undefined;
+              // Only a player Tank01 already flagged with FG attempt data is treated as
+              // a place-kicker here -- a returner's Kicking field (kick-return yards)
+              // has no fgMade at all, so this avoids misapplying FG/XP data to them even
+              // if their name happens to match an ESPN kicker event.
+              if (!longName || !existingKicking || existingKicking.fgMade === undefined) continue;
+              const playerEvents = getKickerEventsForPlayer(kickerEvents, longName);
+              if (!playerEvents.length) continue;
+              const fgYds = sumMadeFieldGoalYards(playerEvents);
+              const xpMade = countMadeExtraPoints(playerEvents);
+              const hasFgEvents = playerEvents.some(event => event.type === "fg");
+              const hasXpEvents = playerEvents.some(event => event.type === "xp");
+              next[key] = { ...entry, Kicking: { ...existingKicking, ...(hasFgEvents ? { fgYds } : {}), ...(hasXpEvents ? { xpMade } : {}) } } as Tank01LiveStats;
+            }
+            return next;
+          });
+        }
+      } catch { /* ESPN kicker-event fetch failing shouldn't break the rest of live scoring */ }
       return true;
     } catch (cause) {
       setIsPolling(false);
