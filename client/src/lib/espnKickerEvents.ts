@@ -94,3 +94,14 @@ export function sumMadeFieldGoalYards(events: KickerPlayEvent[]): number {
 export function countMadeExtraPoints(events: KickerPlayEvent[]): number {
   return events.filter(event => event.type === "xp" && event.outcome === "made").length;
 }
+
+/** Formats a single kick event for display -- distance and outcome only, no attached
+ * point value (unlike WRC's formatKickerEvent, which bakes in WRC's own hardcoded
+ * scoring formula). CVC's actual point value for a made kick depends on its own
+ * configured field_goal_yard rule, which this shared parsing module has no business
+ * assuming. */
+export function formatKickerEvent(event: KickerPlayEvent): string {
+  if (event.type === "xp") return event.outcome === "made" ? "XP made" : "XP missed";
+  const distance = `${event.yards ?? "?"} yd`;
+  return event.outcome === "made" ? `${distance} FG made` : `${distance} FG missed`;
+}

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { countMadeExtraPoints, getKickerEventsForPlayer, parseEspnKickerEvents, sumMadeFieldGoalYards } from "./espnKickerEvents";
+import { countMadeExtraPoints, formatKickerEvent, getKickerEventsForPlayer, parseEspnKickerEvents, sumMadeFieldGoalYards } from "./espnKickerEvents";
 
 describe("ESPN kicker play parsing (ported from WRC's proven example)", () => {
   const summary = {
@@ -33,5 +33,10 @@ describe("ESPN kicker play parsing (ported from WRC's proven example)", () => {
   it("returns 0 for a kicker with no matching events", () => {
     expect(sumMadeFieldGoalYards([])).toBe(0);
     expect(countMadeExtraPoints([])).toBe(0);
+  });
+
+  it("formats individual kick events without a point value (unlike WRC's version, since CVC's actual point value depends on CVC's own configured rules, not something this parsing module should assume)", () => {
+    const events = getKickerEventsForPlayer(parseEspnKickerEvents(summary), "Brandon Aubrey");
+    expect(events.map(formatKickerEvent)).toEqual(["54 yd FG made", "47 yd FG missed", "XP made"]);
   });
 });

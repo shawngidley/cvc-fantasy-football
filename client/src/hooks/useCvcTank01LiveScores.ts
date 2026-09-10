@@ -86,6 +86,7 @@ export function useCvcTank01LiveScores(week: number | undefined, season: number 
   const [error, setError] = useState<string | null>(null);
   const [nflMatchups, setNflMatchups] = useState<Record<string, CvcNflMatchup>>({});
   const [statLines, setStatLines] = useState<LiveStatMap>({});
+  const [kickerEvents, setKickerEvents] = useState<KickerPlayEvent[]>([]);
   const [rawBoxScoreDebug, setRawBoxScoreDebug] = useState<{ url: string; status: number; body: unknown } | null>(null);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -155,6 +156,7 @@ export function useCvcTank01LiveScores(week: number | undefined, season: number 
       // yet), that kicker's stat line is left as Tank01 provided it, not blanked out.
       try {
         const kickerEvents = await fetchEspnKickerEvents(activeGames);
+        setKickerEvents(kickerEvents);
         if (kickerEvents.length) {
           setStatLines(current => {
             const next = { ...current };
@@ -195,7 +197,7 @@ export function useCvcTank01LiveScores(week: number | undefined, season: number 
     return () => { active = false; if (timer.current) clearTimeout(timer.current); };
   }, [refresh]);
 
-  return { statLines, nflMatchups, isPolling, lastUpdated, error, rawBoxScoreDebug };
+  return { statLines, nflMatchups, isPolling, lastUpdated, error, rawBoxScoreDebug, kickerEvents };
 }
 
 /** Looks up a player's raw live stat line (for rendering real game stats), using the
