@@ -112,12 +112,12 @@ export function CvcPlayerProfile() {
 
   const espnId = firstOf(tank ?? undefined, ["espnID", "espnId"]);
   const tank01PlayerId = firstOf(tank ?? undefined, ["playerID", "playerId"]);
-  const seasonStats = trpc.league.playerCareerSeasonStats.useQuery({ playerId, espnId: espnId ?? "" }, { enabled: valid && Boolean(espnId) && tab === "stats" });
+  const seasonStats = trpc.league.playerCareerSeasonStats.useQuery({ playerId, espnId: espnId ?? "" }, { enabled: valid && Boolean(espnId) && tab === "stats", staleTime: 30 * 60_000 });
 
   const currentSeasonYear = detail.data?.season?.year ?? new Date().getFullYear();
   const [gameLogYear, setGameLogYear] = useState(currentSeasonYear);
   useEffect(() => { setGameLogYear(currentSeasonYear); }, [currentSeasonYear]);
-  const gameLog = trpc.league.playerGameLog.useQuery({ playerId, tank01PlayerId: tank01PlayerId ?? "", year: gameLogYear }, { enabled: valid && Boolean(tank01PlayerId) && tab === "gamelog" });
+  const gameLog = trpc.league.playerGameLog.useQuery({ playerId, tank01PlayerId: tank01PlayerId ?? "", year: gameLogYear }, { enabled: valid && Boolean(tank01PlayerId) && tab === "gamelog", staleTime: 30 * 60_000 });
 
   const watchlist = trpc.league.watchlist.useQuery(undefined, { enabled: Boolean(owner?.franchise) });
   const isWatched = watchlist.data?.some(item => item.player_id === playerId) ?? false;

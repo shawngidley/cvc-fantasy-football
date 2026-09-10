@@ -30,20 +30,37 @@ export function computeKickoffUtc(gameDate: string | undefined, gameTime: string
   return Date.UTC(Number(gameDate.slice(0, 4)), Number(gameDate.slice(4, 6)) - 1, Number(gameDate.slice(6, 8)), hour + 4, Number(time[2]), 0);
 }
 
-// Whether a game's box score is worth fetching: kickoff has passed, and it's been less
-// than 24 hours since (a real NFL game, even with overtime or delays, never runs
-// anywhere close to that long). The previous 4-hour window was too narrow -- a game
-// that ran long, or simply being checked a while after it ended, fell outside that
-// window and its box score was never fetched at all on a fresh page load, meaning a
-// recently-completed game's final stats appeared to vanish. 24 hours comfortably
-// covers "just finished" while still eventually excluding stale games as the week's
-// schedule (already scoped to the current week by the caller) moves on.
-export function isGameActive(gameDate?: string, gameTime?: string): boolean {
+// CRITICAL: these two checks must stay separate. Using one wide window for both
+// "should we fetch this game's box score at all" AND "should the recurring 30-second
+// poll keep rescheduling itself" caused a real production incident in WRC (this same
+// architecture): once any game kicked off, the poll never stopped for the entire wide
+// window -- every open browser tab kept hitting Tank01/ESPN every 30 seconds,
+// continuously, for the full window (hours or days) even though the actual game ended
+// in ~3-4 hours. That's more than enough sustained volume to exhaust an API quota that
+// was previously fine.
+//
+// isGameFetchEligible (wide, 24h): which games are worth fetching a box score for at
+// all -- this is what keeps a recently-completed game's final stats populating on a
+// fresh page load (the original bug this 24h window was widened to fix).
+// isGameCurrentlyLive (narrow, ~4.5h from kickoff): whether the RECURRING poll should
+// keep rescheduling itself. The poll still does one fetch for anything fetch-eligible,
+// but only keeps re-scheduling while something is within this narrow window. Once
+// nothing is, it fetches once more and stops -- it does not keep polling for the rest
+// of the wide window.
+export function isGameFetchEligible(gameDate?: string, gameTime?: string): boolean {
   const kickoff = computeKickoffUtc(gameDate, gameTime);
   if (kickoff === null) return false;
   const now = Date.now();
   return now >= kickoff && now <= kickoff + 24 * 60 * 60 * 1000;
 }
+
+export function isGameCurrentlyLive(gameDate?: string, gameTime?: string): boolean {
+  const kickoff = computeKickoffUtc(gameDate, gameTime);
+  if (kickoff === null) return false;
+  const now = Date.now();
+  return now >= kickoff && now <= kickoff + 4.5 * 60 * 60 * 1000;
+}
+
 
 /** Fetches real per-kick FG/XP events from ESPN's play-by-play for each active game,
  * matching WRC's proven approach: for each active game's date, fetch ESPN's scoreboard
@@ -91,7 +108,7 @@ export function useCvcTank01LiveScores(week: number | undefined, season: number 
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const load = useCallback(async () => {
-    if (!week || !season || !rules.length) return [] as TankGame[];
+    if (!week || !season || !rules.length) return { fetchEligibleGames: [] as TankGame[], anyCurrentlyLive: false };
     const response = await fetch(`${TANK01_BASE_URL}/getNFLGamesForWeek?week=${week}&seasonType=Regular%20Season&season=${season}`);
     if (!response.ok) throw new Error(`Tank01 schedule request failed (${response.status})`);
     const payload = await response.json() as { body?: TankGame[] };
@@ -103,18 +120,20 @@ export function useCvcTank01LiveScores(week: number | undefined, season: number 
       nextMatchups[normalizeTeam(game.home)] = { opponent: normalizeTeam(game.away), isHome: true, gameTime: game.gameTime ?? "", gameDate: game.gameDate ?? "", gameId: game.gameID };
     }
     setNflMatchups(nextMatchups);
-    return games.filter(game => game.gameID && isGameActive(game.gameDate, game.gameTime));
+    const fetchEligibleGames = games.filter(game => game.gameID && isGameFetchEligible(game.gameDate, game.gameTime));
+    const anyCurrentlyLive = games.some(game => game.gameID && isGameCurrentlyLive(game.gameDate, game.gameTime));
+    return { fetchEligibleGames, anyCurrentlyLive };
   }, [rules.length, season, week]);
 
   const refresh = useCallback(async () => {
     try {
-      const activeGames = await load();
-      if (!activeGames.length) { setIsPolling(false); return false; }
+      const { fetchEligibleGames, anyCurrentlyLive } = await load();
+      if (!fetchEligibleGames.length) { setIsPolling(false); return false; }
       setIsPolling(true);
       setError(null);
       const nextStatLines: LiveStatMap = {};
       let capturedDebug: { url: string; status: number; body: unknown } | null = null;
-      await Promise.all(activeGames.map(async game => {
+      await Promise.all(fetchEligibleGames.map(async game => {
         const url = `${TANK01_BASE_URL}/getNFLBoxScore?gameID=${encodeURIComponent(game.gameID ?? "")}&fantasyPoints=true&twoPointConversions=2&passYards=.04&passTD=4&passInterceptions=-3&pointsPerReception=1&carries=0&rushYards=.1&rushTD=6&fumbles=-3&receivingYards=.1&receivingTD=6&targets=0&defTD=6&fgMade=0&fgYards=.1&xpMade=1`;
         const response = await fetch(url);
         if (!response.ok) throw new Error(`Tank01 box-score request failed (${response.status})`);
@@ -155,7 +174,7 @@ export function useCvcTank01LiveScores(week: number | undefined, season: number 
       // events for a kicker (e.g. the play text didn't match, or nothing's happened
       // yet), that kicker's stat line is left as Tank01 provided it, not blanked out.
       try {
-        const kickerEvents = await fetchEspnKickerEvents(activeGames);
+        const kickerEvents = await fetchEspnKickerEvents(fetchEligibleGames);
         setKickerEvents(kickerEvents);
         if (kickerEvents.length) {
           setStatLines(current => {
@@ -182,7 +201,13 @@ export function useCvcTank01LiveScores(week: number | undefined, season: number 
           });
         }
       } catch { /* ESPN kicker-event fetch failing shouldn't break the rest of live scoring */ }
-      return true;
+      // CRITICAL: this must be anyCurrentlyLive (narrow window), not
+      // fetchEligibleGames.length > 0 (wide window). Returning true here is what tells
+      // the poll loop to reschedule itself again in 30 seconds -- tying that decision to
+      // the wide window is exactly what caused the runaway-polling incident: the poll
+      // would never stop for up to 24 hours after any kickoff, regardless of whether the
+      // game itself had already ended hours earlier.
+      return anyCurrentlyLive;
     } catch (cause) {
       setIsPolling(false);
       setError(cause instanceof Error ? cause.message : "Tank01 live data could not load.");
