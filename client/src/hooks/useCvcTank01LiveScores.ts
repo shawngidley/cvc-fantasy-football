@@ -106,6 +106,15 @@ export function useCvcTank01LiveScores(week: number | undefined, season: number 
   const [kickerEvents, setKickerEvents] = useState<KickerPlayEvent[]>([]);
   const [rawBoxScoreDebug, setRawBoxScoreDebug] = useState<{ url: string; status: number; body: unknown } | null>(null);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Guards against the effect re-running (e.g. because `rules` -- an array built with
+  // `rules.data ?? []` in the caller -- gets a new reference on every render, which it
+  // does here every 30s as this hook's own state updates trigger a parent re-render)
+  // and firing an unconditional "initial fetch" again even after polling had already
+  // determined no game is in progress for this week. Once set, every fetch attempt --
+  // including that unconditional initial one -- is skipped for as long as `week`
+  // matches, making the stop guaranteed rather than dependent on the effect never
+  // re-running.
+  const stoppedForWeekRef = useRef<number | null>(null);
 
   const load = useCallback(async () => {
     if (!week || !season || !rules.length) return { fetchEligibleGames: [] as TankGame[], anyCurrentlyLive: false };
@@ -126,9 +135,10 @@ export function useCvcTank01LiveScores(week: number | undefined, season: number 
   }, [rules.length, season, week]);
 
   const refresh = useCallback(async () => {
+    if (week != null && stoppedForWeekRef.current === week) { setIsPolling(false); return false; }
     try {
       const { fetchEligibleGames, anyCurrentlyLive } = await load();
-      if (!fetchEligibleGames.length) { setIsPolling(false); return false; }
+      if (!fetchEligibleGames.length) { setIsPolling(false); if (week != null) stoppedForWeekRef.current = week; return false; }
       setIsPolling(true);
       setError(null);
       const nextStatLines: LiveStatMap = {};
@@ -207,6 +217,7 @@ export function useCvcTank01LiveScores(week: number | undefined, season: number 
       // the wide window is exactly what caused the runaway-polling incident: the poll
       // would never stop for up to 24 hours after any kickoff, regardless of whether the
       // game itself had already ended hours earlier.
+      if (!anyCurrentlyLive && week != null) stoppedForWeekRef.current = week;
       return anyCurrentlyLive;
     } catch (cause) {
       setIsPolling(false);
