@@ -115,6 +115,20 @@ export function CvcLiveScoring() {
       <div className="divide-y divide-slate-200 opacity-80">{Array.from({ length: maxBenchRows }).map((_, index) => { const away = benchAway[index]; const home = benchHome[index]; return <LineupRow key={`bn-${away?.id ?? "away"}-${home?.id ?? "home"}-${index}`} away={away} home={home} slot="BN" points={points} live={live} profiles={profiles} projections={projections} gameStatus={gameStatus} />; })}</div></> : null}
     </section>
     {live.error ? <p className="text-center text-xs text-cvc-muted">Tank01 status: {live.error}</p> : null}
+    <details className="rounded-lg border border-amber-400/30 bg-amber-50 px-4 py-3 text-xs text-amber-900"><summary className="cursor-pointer font-bold uppercase tracking-[0.08em]">Debug: live scoring (tap to view, then screenshot for Claude)</summary>
+      <div className="mt-2 space-y-1">
+        <p>Polling active: {String(live.isPolling)}</p>
+        <p>Last updated: {live.lastUpdated ? live.lastUpdated.toISOString() : "never"}</p>
+        <p>Live error: {live.error ?? "none"}</p>
+        <p>Live score entries fetched: {Object.keys(live.scores).length}</p>
+        <p>NFL matchups loaded: {Object.keys(live.nflMatchups).length}</p>
+        <p>Game status entries (ESPN): {Object.keys(gameStatus).length}</p>
+        <p>Away team ({selected.away}) starters' NFL teams + status:</p>
+        <ul className="ml-3 list-disc">{selectedAway.map((entry: any, index: number) => <li key={index}>{entry.player?.display_name ?? "empty"} — {entry.player?.nfl_team ?? "—"} — matchup: {JSON.stringify(live.nflMatchups[(entry.player?.nfl_team ?? "").toLowerCase()] ?? null)} — status: {JSON.stringify(gameStatus[(entry.player?.nfl_team ?? "").toUpperCase()] ?? null)} — livePts: {JSON.stringify(points(entry))}</li>)}</ul>
+        <p>Home team ({selected.home}) starters' NFL teams + status:</p>
+        <ul className="ml-3 list-disc">{selectedHome.map((entry: any, index: number) => <li key={index}>{entry.player?.display_name ?? "empty"} — {entry.player?.nfl_team ?? "—"} — matchup: {JSON.stringify(live.nflMatchups[(entry.player?.nfl_team ?? "").toLowerCase()] ?? null)} — status: {JSON.stringify(gameStatus[(entry.player?.nfl_team ?? "").toUpperCase()] ?? null)} — livePts: {JSON.stringify(points(entry))}</li>)}</ul>
+      </div>
+    </details>
   </div>;
 }
 
