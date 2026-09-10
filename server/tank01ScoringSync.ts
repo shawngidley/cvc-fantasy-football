@@ -6,6 +6,25 @@ const normalize = (value: string) => value.toLowerCase().replace(/[^a-z0-9]/g, "
 const normalizeTeam = (value: string) => ({ kan: "kc", tam: "tb", arz: "ari", jax: "jac", was: "wsh" }[value.toLowerCase()] ?? value.toLowerCase());
 export const correctionWindowClosed = (now = new Date()) => now.getUTCDay() === 5 && now.getUTCHours() >= 16;
 
+/** Whether a game's kickoff has already passed. Same Date.UTC()-based approach as the
+ * client-side computeKickoffUtc (see useCvcTank01LiveScores.ts) -- a string-interpolated
+ * "...T${hour}:00Z" timestamp silently produces an Invalid Date for any 8pm+ local
+ * kickoff (hour + 4 overflows past 23), so this is built the same correct way.
+ * Confirmed as a real, previously-ungated source of API usage: this function's caller
+ * (this cron, running every 5 minutes for the entire CVC week regardless of actual game
+ * timing) was fetching a box score for every game in the week on every single run --
+ * including games days in the future that hadn't kicked off yet at all. */
+export function hasKickedOff(gameDate?: string, gameTime?: string): boolean {
+  if (!gameDate || !gameTime || gameDate.length < 8) return false;
+  const time = gameTime.match(/(\d+):(\d+)([ap])/i);
+  if (!time) return false;
+  let hour = Number(time[1]);
+  if (time[3].toLowerCase() === "p" && hour !== 12) hour += 12;
+  if (time[3].toLowerCase() === "a" && hour === 12) hour = 0;
+  const kickoffUtc = Date.UTC(Number(gameDate.slice(0, 4)), Number(gameDate.slice(4, 6)) - 1, Number(gameDate.slice(6, 8)), hour + 4, Number(time[2]), 0);
+  return Date.now() >= kickoffUtc;
+}
+
 export type Tank01SyncSummary = {
   status: "skipped" | "updated" | "finalized";
   weekLabel?: string;
@@ -38,8 +57,9 @@ async function snapshotLineups(seasonId: string, weekId: string, franchiseIds: s
 
 async function tankScoresForWeek(adapter: Tank01NFLDataAdapter, nflWeek: number, seasonYear: number, rules: CvcScoringRule[]) {
   const games = await adapter.listGamesForWeek(nflWeek, seasonYear);
+  const kickedOffGames = games.filter(game => game.gameID && hasKickedOff(game.gameDate, game.gameTime));
   const scoreMap = new Map<string, number>();
-  for (const game of games) {
+  for (const game of kickedOffGames) {
     if (!game.gameID) continue;
     const box = await adapter.getBoxScore(game.gameID) as Tank01BoxScore;
     for (const raw of Object.values(box.playerStats ?? {})) {
