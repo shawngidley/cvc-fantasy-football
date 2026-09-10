@@ -3,6 +3,7 @@ import { Link } from "wouter";
 import { getCvcLivePoints, useCvcTank01LiveScores } from "@/hooks/useCvcTank01LiveScores";
 import { getCvcProjectedPoints, useCvcNFLProjections } from "@/hooks/useCvcNFLProjections";
 import { useCvcTank01PlayerProfiles, profileKey } from "@/hooks/useCvcTank01PlayerProfiles";
+import { minutesRemainingInGame, useCvcNFLGameStatus } from "@/hooks/useCvcNFLGameStatus";
 import { trpc } from "@/lib/trpc";
 import { TeamLogo } from "@/components/TeamLogo";
 import { useCvcOwnerAuth } from "@/hooks/useCvcOwnerAuth";
@@ -65,6 +66,28 @@ export function CvcLiveScoring() {
   const awayTotal = total(selectedAway);
   const homeTotal = total(selectedHome);
   const hasLiveScores = Object.keys(live.scores).length > 0;
+  const gameDates = useMemo(() => Array.from(new Set(Object.values(live.nflMatchups).map(m => m.gameDate).filter(Boolean))), [live.nflMatchups]);
+  const { gameStatus } = useCvcNFLGameStatus(gameDates);
+  // Same aggregation as WRC's build: sum minutesRemainingInGame and projected points
+  // across every starter, and count how many have finished/are live/haven't started
+  // yet, based on each player's own NFL team's game status. An empty slot (no player
+  // assigned) still counts as a full 60 minutes remaining, same reasoning as WRC's:
+  // it reflects the fixed starter-slot count regardless of whether every slot happens
+  // to be filled right now.
+  function sideStats(lineup: any[]) {
+    let played = 0; let playing = 0; let minutesRemaining = 0; let projTotal = 0;
+    for (const entry of lineup) {
+      const player = entry.player;
+      if (!player) { minutesRemaining += 60; continue; }
+      const status = gameStatus[(player.nfl_team ?? "").toUpperCase()];
+      if (status?.state === "post") played += 1; else if (status?.state === "in") playing += 1;
+      minutesRemaining += minutesRemainingInGame(status);
+      projTotal += getCvcProjectedPoints(projections, player.display_name, isDst(player.position) ? "DST" : player.position, player.nfl_team) ?? 0;
+    }
+    return { played, playing, yetToPlay: lineup.length - played - playing, minutesRemaining: Math.round(minutesRemaining), projTotal };
+  }
+  const awayStats = sideStats(selectedAway);
+  const homeStats = sideStats(selectedHome);
 
   if (board.isLoading || rules.isLoading || slots.isLoading) return <div className="cvc-card"><div className="cvc-card-title"><span>Live scoring</span></div><div className="cvc-card-body text-sm text-slate-500">Loading the current CVC week, configured starters, and scoring rules…</div></div>;
   if (board.error || rules.error || slots.error) return <div className="cvc-card"><div className="cvc-card-title"><span>Live scoring</span></div><div className="cvc-card-body text-sm text-red-700">{(board.error ?? rules.error ?? slots.error)?.message}</div></div>;
@@ -77,9 +100,9 @@ export function CvcLiveScoring() {
 
     <section className="overflow-hidden rounded-[1.5rem] bg-white shadow-2xl ring-1 ring-black/10">
       <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-2 border-b border-slate-200 px-3 py-5 sm:gap-3 sm:px-7">
-        <div className="flex min-w-0 items-center gap-2 sm:gap-3"><TeamLogo name={selected.away} logoUrl={selected.awayLogoUrl} size="lg" className="shrink-0 rounded-xl border-cvc-deep/20"/><p className="min-w-0 truncate font-display text-base uppercase leading-tight text-cvc-deep sm:text-3xl">{selected.away}</p></div>
+        <div className="flex min-w-0 items-center gap-2 sm:gap-3"><TeamLogo name={selected.away} logoUrl={selected.awayLogoUrl} size="lg" className="shrink-0 rounded-xl border-cvc-deep/20"/><div className="min-w-0"><p className="min-w-0 truncate font-display text-base uppercase leading-tight text-cvc-deep sm:text-3xl">{selected.away}</p><p className="text-[10px] text-slate-500 sm:text-xs">PROJ {awayStats.projTotal.toFixed(1)}</p><div className="mt-1 flex items-center gap-2 text-[9px] text-slate-500 sm:text-[10px]"><span title="Played / Playing now / Yet to play">👥 {awayStats.played} {awayStats.playing} {awayStats.yetToPlay}</span><span title="Total minutes remaining across all your starters' games">⏱ {awayStats.minutesRemaining}</span></div></div></div>
         <div className="shrink-0 text-center"><p className="whitespace-nowrap font-display text-3xl text-cvc-deep sm:text-5xl">{awayTotal.toFixed(1)} <span className="text-cvc-accent">:</span> {homeTotal.toFixed(1)}</p><p className="mt-1 text-[10px] font-bold uppercase tracking-[0.15em] text-slate-500">{live.isPolling ? "Live" : selected.resultState}</p></div>
-        <div className="flex min-w-0 items-center justify-end gap-2 sm:gap-3"><p className="min-w-0 truncate text-right font-display text-base uppercase leading-tight text-cvc-deep sm:text-3xl">{selected.home}</p><TeamLogo name={selected.home} logoUrl={selected.homeLogoUrl} size="lg" className="shrink-0 rounded-xl border-cvc-accent/40"/></div>
+        <div className="flex min-w-0 items-center justify-end gap-2 sm:gap-3"><div className="min-w-0 text-right"><p className="min-w-0 truncate text-right font-display text-base uppercase leading-tight text-cvc-deep sm:text-3xl">{selected.home}</p><p className="text-[10px] text-slate-500 sm:text-xs">PROJ {homeStats.projTotal.toFixed(1)}</p><div className="mt-1 flex items-center justify-end gap-2 text-[9px] text-slate-500 sm:text-[10px]"><span title="Played / Playing now / Yet to play">👥 {homeStats.played} {homeStats.playing} {homeStats.yetToPlay}</span><span title="Total minutes remaining across all your starters' games">⏱ {homeStats.minutesRemaining}</span></div></div><TeamLogo name={selected.home} logoUrl={selected.homeLogoUrl} size="lg" className="shrink-0 rounded-xl border-cvc-accent/40"/></div>
       </div>
       <div className="divide-y divide-slate-200">{Array.from({ length: maxRows }).map((_, index) => { const away = selectedAway[index]; const home = selectedHome[index]; const slot = away?.slot ?? home?.slot ?? starterSlots[index] ?? "Open"; return <LineupRow key={`${away?.id ?? "away"}-${home?.id ?? "home"}-${index}`} away={away} home={home} slot={slot} points={points} live={live} profiles={profiles} projections={projections} />; })}</div>
       {maxBenchRows ? <><div className="bg-slate-100 px-4 py-3 text-center text-[11px] font-bold uppercase tracking-[0.18em] text-slate-500">Bench</div>

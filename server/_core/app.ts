@@ -3,6 +3,7 @@ import { createExpressMiddleware } from "@trpc/server/adapters/express";
 import { appRouter } from "../routers";
 import { createContext } from "./context";
 import { proxyTank01Request } from "../tank01Proxy";
+import { proxyEspnScoreboard } from "../espnProxy";
 import { runDstSeasonStatsSync, runNflTeamAssignmentSync, runTank01ScoringSync, runTeamScheduleSync, runWaiverResolution } from "./scheduledHandlers";
 
 /** Builds the CVC Express app: body parsing, REST endpoints, and the tRPC API. No static serving and no `.listen()` — those are the caller's concern (local dev server vs. the Vercel serverless entry). */
@@ -14,6 +15,7 @@ export function createApp(): Express {
   app.use(express.json({ limit: "50mb" }));
   app.use(express.urlencoded({ limit: "50mb", extended: true }));
   app.get("/api/tank01/:endpoint", proxyTank01Request);
+  app.get("/api/espn/scoreboard", proxyEspnScoreboard);
   // Kept here too for local dev / manual re-triggering via fetch with CRON_SECRET.
   // Vercel's actual production cron traffic hits the standalone functions at
   // api/scheduled/*.ts instead (see those files) -- Vercel cron paths need to resolve
