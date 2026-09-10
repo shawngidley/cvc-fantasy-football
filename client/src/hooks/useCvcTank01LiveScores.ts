@@ -71,7 +71,7 @@ export function useCvcTank01LiveScores(week: number | undefined, season: number 
       const next: LiveScoreMap = {};
       const nextStatLines: LiveStatMap = {};
       await Promise.all(activeGames.map(async game => {
-        const response = await fetch(`${TANK01_BASE_URL}/getNFLBoxScore?gameID=${encodeURIComponent(game.gameID ?? "")}`);
+        const response = await fetch(`${TANK01_BASE_URL}/getNFLBoxScore?gameID=${encodeURIComponent(game.gameID ?? "")}&fantasyPoints=true&twoPointConversions=2&passYards=.04&passTD=4&passInterceptions=-3&pointsPerReception=1&carries=0&rushYards=.1&rushTD=6&fumbles=-3&receivingYards=.1&receivingTD=6&targets=0&defTD=6&fgMade=0&fgYards=.1&xpMade=1`);
         if (!response.ok) throw new Error(`Tank01 box-score request failed (${response.status})`);
         const payload = await response.json() as { body?: { playerStats?: Record<string, Record<string, unknown>>; teamStats?: Record<string, Tank01LiveStats> } };
         for (const stat of Object.values(payload.body?.playerStats ?? {})) {
