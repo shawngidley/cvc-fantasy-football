@@ -1,5 +1,5 @@
-import { describe, expect, it } from "vitest";
-import { computeKickoffUtc, getCvcLivePoints } from "./useCvcTank01LiveScores";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { computeKickoffUtc, getCvcLivePoints, isGameActive } from "./useCvcTank01LiveScores";
 
 describe("computeKickoffUtc", () => {
   it("correctly rolls an 8:20pm ET kickoff into the next UTC day (the exact overflow bug)", () => {
@@ -74,3 +74,35 @@ describe("getCvcLivePoints (using the real confirmed NE @ SEA live box-score sha
 });
 
 function normalizeForTest(value: string) { return value.toLowerCase().replace(/[^a-z0-9]/g, ""); }
+
+describe("isGameActive (fetch-worthy window)", () => {
+  afterEach(() => { vi.useRealTimers(); });
+
+  it("is active right at kickoff", () => {
+    const kickoff = computeKickoffUtc("20260913", "1:00p")!;
+    vi.useFakeTimers();
+    vi.setSystemTime(kickoff);
+    expect(isGameActive("20260913", "1:00p")).toBe(true);
+  });
+
+  it("is NOT active before kickoff", () => {
+    const kickoff = computeKickoffUtc("20260913", "1:00p")!;
+    vi.useFakeTimers();
+    vi.setSystemTime(kickoff - 60 * 60 * 1000); // 1 hour before kickoff
+    expect(isGameActive("20260913", "1:00p")).toBe(false);
+  });
+
+  it("is still fetch-worthy several hours after a game has finished (the actual bug: the previous 4-hour window excluded a recently-completed game, so its stats never got fetched on a fresh page load)", () => {
+    const kickoff = computeKickoffUtc("20260913", "1:00p")!;
+    vi.useFakeTimers();
+    vi.setSystemTime(kickoff + 6 * 60 * 60 * 1000); // 6 hours after kickoff -- outside the old 4-hour window
+    expect(isGameActive("20260913", "1:00p")).toBe(true);
+  });
+
+  it("is no longer fetch-worthy more than 24 hours after kickoff", () => {
+    const kickoff = computeKickoffUtc("20260913", "1:00p")!;
+    vi.useFakeTimers();
+    vi.setSystemTime(kickoff + 30 * 60 * 60 * 1000); // 30 hours after kickoff
+    expect(isGameActive("20260913", "1:00p")).toBe(false);
+  });
+});

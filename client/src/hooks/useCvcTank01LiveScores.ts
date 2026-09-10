@@ -29,11 +29,19 @@ export function computeKickoffUtc(gameDate: string | undefined, gameTime: string
   return Date.UTC(Number(gameDate.slice(0, 4)), Number(gameDate.slice(4, 6)) - 1, Number(gameDate.slice(6, 8)), hour + 4, Number(time[2]), 0);
 }
 
-function isGameActive(gameDate?: string, gameTime?: string): boolean {
+// Whether a game's box score is worth fetching: kickoff has passed, and it's been less
+// than 24 hours since (a real NFL game, even with overtime or delays, never runs
+// anywhere close to that long). The previous 4-hour window was too narrow -- a game
+// that ran long, or simply being checked a while after it ended, fell outside that
+// window and its box score was never fetched at all on a fresh page load, meaning a
+// recently-completed game's final stats appeared to vanish. 24 hours comfortably
+// covers "just finished" while still eventually excluding stale games as the week's
+// schedule (already scoped to the current week by the caller) moves on.
+export function isGameActive(gameDate?: string, gameTime?: string): boolean {
   const kickoff = computeKickoffUtc(gameDate, gameTime);
   if (kickoff === null) return false;
   const now = Date.now();
-  return now >= kickoff && now <= kickoff + 4 * 60 * 60 * 1000;
+  return now >= kickoff && now <= kickoff + 24 * 60 * 60 * 1000;
 }
 
 export function useCvcTank01LiveScores(week: number | undefined, season: number | undefined, rules: CvcScoringRule[]) {
