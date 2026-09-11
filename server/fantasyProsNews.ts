@@ -156,7 +156,10 @@ export async function getFantasyProsProjections(year: number, position: string, 
   const data = asRecord(await request<unknown>(`/nfl/${year}/projections?${query.toString()}`, 60 * 60_000));
   return asArray(data.players).map(item => {
     const row = asRecord(item);
-    const stats = asRecord(asArray(row.stats)[0]);
+    // Confirmed live: row.stats is a plain object (e.g. {points, points_ppr,
+    // pass_yds, ...}), not an array -- asArray(row.stats)[0] silently coerced it to
+    // an empty object for every single player, so every parsed field was always null.
+    const stats = asRecord(row.stats);
     return {
       playerId: asNumber(row.fpid) ?? 0,
       name: asString(row.name),
@@ -173,15 +176,3 @@ export async function getFantasyProsProjections(year: number, position: string, 
   }).filter(item => item.name);
 }
 
-/** Fetches the raw, unparsed FantasyPros row for a name-matched player, with no
- * parsing applied -- lets us see the ACTUAL shape FantasyPros returns for row.stats
- * (array? object? something else?) instead of guessing, since getFantasyProsProjections'
- * parsed points/pprPoints/etc. are confirmed null for at least one real player
- * (Matthew Stafford) despite the name match itself succeeding. Debug-only; not used by
- * any real feature. */
-export async function getFantasyProsRawProjectionRow(year: number, position: string, week: number, targetName: string): Promise<unknown> {
-  const query = new URLSearchParams({ position, week: String(week) });
-  const data = asRecord(await request<unknown>(`/nfl/${year}/projections?${query.toString()}`, 60 * 60_000));
-  const normalized = (value: string) => value.toLowerCase().replace(/[^a-z]/g, "");
-  return asArray(data.players).map(item => asRecord(item)).find(row => normalized(asString(row.name)) === normalized(targetName)) ?? null;
-}
