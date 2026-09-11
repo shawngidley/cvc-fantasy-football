@@ -39,21 +39,27 @@ export function computeKickoffUtc(gameDate: string | undefined, gameTime: string
 // in ~3-4 hours. That's more than enough sustained volume to exhaust an API quota that
 // was previously fine.
 //
-// isGameFetchEligible (wide, 24h): which games are worth fetching a box score for at
-// all -- this is what keeps a recently-completed game's final stats populating on a
-// fresh page load (the original bug this 24h window was widened to fix).
-// isGameCurrentlyLive (narrow, ~4.5h from kickoff): whether the RECURRING poll should
-// keep rescheduling itself. The poll still does one fetch for anything fetch-eligible,
-// but only keeps re-scheduling while something is within this narrow window. Once
-// nothing is, it fetches once more and stops -- it does not keep polling for the rest
-// of the wide window.
+// isGameFetchEligible (wide -- effectively the rest of the CVC week): which games are
+// worth fetching a box score for at all. Deliberately has NO upper bound -- the caller
+// already scopes the schedule fetch to just the current week's ~16 games via
+// getNFLGamesForWeek, so there's no risk of pulling in a stale game from a different
+// week. A fixed time-based upper bound here (this previously used 24h) caused a real
+// bug: once a game aged past that window, its stats simply stopped being fetched at
+// all and disappeared from Live Scoring mid-week, even though that game's results
+// still count for the whole CVC week (through Sunday/Monday games and the Friday
+// correction window). Same reasoning already applied server-side in
+// tank01ScoringSync.ts's hasKickedOff, which also has no upper bound for the same
+// reason -- this just brings the client-side check in line with that.
 export function isGameFetchEligible(gameDate?: string, gameTime?: string): boolean {
   const kickoff = computeKickoffUtc(gameDate, gameTime);
   if (kickoff === null) return false;
-  const now = Date.now();
-  return now >= kickoff && now <= kickoff + 24 * 60 * 60 * 1000;
+  return Date.now() >= kickoff;
 }
 
+// isGameCurrentlyLive (narrow, ~4.5h from kickoff): whether the RECURRING poll should
+// keep rescheduling itself. The poll still does one fetch for anything fetch-eligible,
+// but only keeps re-scheduling while something is within this narrow window. Once
+// nothing is, it fetches once more and stops.
 export function isGameCurrentlyLive(gameDate?: string, gameTime?: string): boolean {
   const kickoff = computeKickoffUtc(gameDate, gameTime);
   if (kickoff === null) return false;

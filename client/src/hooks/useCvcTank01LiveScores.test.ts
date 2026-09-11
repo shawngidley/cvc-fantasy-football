@@ -99,11 +99,18 @@ describe("isGameFetchEligible (wide window -- which games are worth fetching a b
     expect(isGameFetchEligible("20260913", "1:00p")).toBe(true);
   });
 
-  it("is no longer eligible more than 24 hours after kickoff", () => {
-    const kickoff = computeKickoffUtc("20260913", "1:00p")!;
+  it("is still eligible even more than 24 hours after kickoff -- THIS IS THE ACTUAL BUG: the previous 24h upper bound caused a Thursday-night game's stats to simply stop being fetched by Friday, even though that game's results still count for the entire CVC week (through Sunday/Monday games and the Friday correction window)", () => {
+    const kickoff = computeKickoffUtc("20260910", "8:20p")!; // a real Thursday night kickoff
     vi.useFakeTimers();
-    vi.setSystemTime(kickoff + 30 * 60 * 60 * 1000); // 30 hours after kickoff
-    expect(isGameFetchEligible("20260913", "1:00p")).toBe(false);
+    vi.setSystemTime(kickoff + 30 * 60 * 60 * 1000); // 30 hours later -- past the old 24h cutoff
+    expect(isGameFetchEligible("20260910", "8:20p")).toBe(true);
+  });
+
+  it("stays eligible for several days after kickoff, matching a real CVC week's length", () => {
+    const kickoff = computeKickoffUtc("20260910", "8:20p")!;
+    vi.useFakeTimers();
+    vi.setSystemTime(kickoff + 4 * 24 * 60 * 60 * 1000); // 4 days later (e.g. checking on Monday)
+    expect(isGameFetchEligible("20260910", "8:20p")).toBe(true);
   });
 });
 
