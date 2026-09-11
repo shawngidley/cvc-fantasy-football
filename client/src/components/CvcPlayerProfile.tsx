@@ -191,6 +191,10 @@ export function CvcPlayerProfile() {
       </div>
     </section> : null}
 
+    <details className="mt-3 rounded-lg border border-amber-400/30 bg-amber-50 px-4 py-3 text-xs text-amber-900"><summary className="cursor-pointer font-bold uppercase tracking-[0.08em]">Debug: FantasyPros outlook data (tap to view, then screenshot for Claude)</summary>
+      <pre className="mt-2 max-h-72 overflow-auto whitespace-pre-wrap break-all rounded bg-white p-2 text-[10px]">{JSON.stringify(outlook.data, null, 2)}</pre>
+    </details>
+
     {expertImpactItem ? <section className="mt-5 rounded-xl border border-[var(--cvc-primary)]/20 bg-[var(--cvc-tint)] p-5">
       <p className="text-xs font-black uppercase tracking-[0.1em] text-[var(--cvc-primary)]">FantasyPros Expert Impact</p>
       <p className="mt-3 text-sm leading-6 text-cvc-deep">{expertImpactItem.description}</p>
