@@ -70,7 +70,7 @@ function Card({ title, children, action, className }: { title?: string; children
 function StatusPill({ state }: { state: string }) { return <span className={cn("cvc-pill", state.toLowerCase())}>{state}</span>; }
 
 function Standings() {
-  const overview = trpc.league.overview.useQuery();
+  const overview = trpc.league.overview.useQuery(undefined, { refetchInterval: 30_000 });
   const { owner } = useCvcOwnerAuth();
   const liveFranchises = overview.data?.franchises ?? [];
   const divisions = new Set(liveFranchises.map(team => team.division_name).filter(Boolean));
