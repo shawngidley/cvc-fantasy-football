@@ -5,6 +5,7 @@ import { Link } from "wouter";
 import { ArrowDownUp, DollarSign, Search, ShieldCheck, Star, Users, X } from "lucide-react";
 import { useMemo, useState } from "react";
 import { teamLogoUrl as scheduleTeamLogoUrl, shortenTeamName } from "@/lib/nflSchedule";
+import { computeKickoffUtc } from "@/hooks/useCvcTank01LiveScores";
 
 const POSITIONS = ["FLEX", "QB", "RB", "WR", "TE", "K", "DST"];
 const FLEX_POSITIONS = new Set(["QB", "RB", "WR", "TE"]);
@@ -144,6 +145,18 @@ export function CvcFreeAgents() {
     return map;
   }, [teamScheduleCache.data]);
 
+  // Client-side-only indicator -- the real enforcement is server-side in
+  // submitFaabBid. Uses the same already-loaded schedule cache (no extra fetch), so
+  // this can be slightly stale if the daily schedule sync hasn't run since kickoff, but
+  // that only affects this UI hint, not the actual block (which the server always
+  // re-verifies against the live schedule at submission time regardless).
+  const teamGameHasStarted = (team) => {
+    const schedule = schedules[normalizeTeam(team)];
+    if (!schedule?.nextGameDate || !schedule?.nextGameTime) return false;
+    const kickoff = computeKickoffUtc(schedule.nextGameDate, schedule.nextGameTime);
+    return kickoff !== null && Date.now() >= kickoff;
+  };
+
   // Matches WRC's formatGameTime exactly: "Sun 1:00p ET", day-of-week derived from the
   // game date since Tank01's schedule doesn't include it directly.
   function formatGameTimeWithDay(dateStr: string | null | undefined, time: string | null | undefined): string {
@@ -215,7 +228,7 @@ export function CvcFreeAgents() {
                 : isError ? <tr><td colSpan={colSpan} className="px-5 py-8 text-center text-sm text-red-700">{activePool.error.message}</td></tr>
                 : players.length ? players.map((player: any) => <tr key={player.id} className="border-t border-slate-200 hover:bg-slate-50">
                     <td className="px-5 py-2.5"><PlayerCell player={player} /></td>
-                    <td className="px-2 py-2.5 text-center">{player.rosteredByFranchiseName ? <span className="text-[10px] font-black uppercase tracking-[.04em] text-slate-500" title={player.rosteredByFranchiseName}>{player.rosteredByFranchiseAbbreviation ?? player.rosteredByFranchiseName.split(/\s+/).map((word: string) => word[0]).join("").slice(0, 3).toUpperCase()}</span> : owner?.franchise && waiver.data?.period ? <button onClick={() => { setSelectedPlayerId(player.id); setDropPlayerId(""); }} className="inline-flex items-center gap-1 rounded-md bg-amber-500 px-2.5 py-1.5 text-xs font-bold text-white hover:bg-amber-600"><DollarSign size={11} /> {isFreePeriod ? "Claim ($1)" : "Bid"}</button> : <span className="text-[10px] font-bold uppercase tracking-[.06em] text-slate-400">{owner ? "Closed" : "Sign in"}</span>}</td>
+                    <td className="px-2 py-2.5 text-center">{player.rosteredByFranchiseName ? <span className="text-[10px] font-black uppercase tracking-[.04em] text-slate-500" title={player.rosteredByFranchiseName}>{player.rosteredByFranchiseAbbreviation ?? player.rosteredByFranchiseName.split(/\s+/).map((word: string) => word[0]).join("").slice(0, 3).toUpperCase()}</span> : teamGameHasStarted(player.nfl_team) ? <span className="inline-flex items-center gap-1 rounded-md bg-slate-100 px-2.5 py-1.5 text-[10px] font-bold uppercase tracking-[.04em] text-slate-500" title="This player's game has started -- they can't be picked up until next week">Game started</span> : owner?.franchise && waiver.data?.period ? <button onClick={() => { setSelectedPlayerId(player.id); setDropPlayerId(""); }} className="inline-flex items-center gap-1 rounded-md bg-amber-500 px-2.5 py-1.5 text-xs font-bold text-white hover:bg-amber-600"><DollarSign size={11} /> {isFreePeriod ? "Claim ($1)" : "Bid"}</button> : <span className="text-[10px] font-bold uppercase tracking-[.06em] text-slate-400">{owner ? "Closed" : "Sign in"}</span>}</td>
                     <td className="px-2 py-2.5 text-center">{owner?.franchise ? <button onClick={() => toggleWatch.mutate({ playerId: player.id })} className="text-slate-300 hover:text-amber-500" aria-label={watchedIds.has(player.id) ? "Remove from watchlist" : "Add to watchlist"}><Star size={15} fill={watchedIds.has(player.id) ? "currentColor" : "none"} className={watchedIds.has(player.id) ? "text-amber-500" : ""} /></button> : null}</td>
                     {(() => { const schedule = schedules[(player.nfl_team ?? "").toUpperCase()]; return <>
                       <td className="whitespace-nowrap px-3 py-2.5 text-center text-xs font-bold text-amber-700">{schedule?.byeWeek ?? "—"}</td>

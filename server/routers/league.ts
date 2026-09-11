@@ -13,6 +13,7 @@ import { computeNextResolutionTime } from "../waiverResolutionTiming";
 import { syncFantasyProsSnapshot, syncFantasyProsActiveFlags, syncFantasyProsRookieFlags } from "../fantasyProsSync";
 import { syncTank01SeasonStats } from "../tank01SeasonStatsSync";
 import { syncTank01Scores } from "../tank01ScoringSync";
+import { isPlayerLockedForGameStart } from "../playerGameLock";
 import { aggregateDstSeasonStats } from "../dstSeasonAggregation";
 import { syncNflTeamSchedules } from "../nflTeamScheduleSync";
 import { syncTank01ActiveRoster } from "../tank01ActiveRosterSync";
@@ -1077,12 +1078,21 @@ export const leagueRouter = router({
       throw new TRPCError({ code: "BAD_REQUEST", message: `This ${isFreePeriod ? "claim" : "bid"} exceeds your remaining CVC FAAB budget. You have $${balance} left this season${otherPendingThisPeriod ? ` ($${otherPendingThisPeriod} already committed to other pending claims this period)` : ""}.` });
     }
     const [player, activeAssignment] = await Promise.all([
-      supabase.from("player").select("id, display_name").eq("id", input.playerId).maybeSingle(),
+      supabase.from("player").select("id, display_name, nfl_team").eq("id", input.playerId).maybeSingle(),
       supabase.from("roster_assignment").select("id").eq("season_id", season.id).eq("player_id", input.playerId).is("released_at", null).limit(1).maybeSingle(),
     ]);
     const playerRow = unwrap(player);
     if (!playerRow) throw new TRPCError({ code: "NOT_FOUND", message: "CVC player was not found." });
     if (unwrap(activeAssignment)) throw new TRPCError({ code: "BAD_REQUEST", message: "Rostered players cannot be claimed through waivers." });
+    // Once a free agent's own game has started this week, they can't be picked up until
+    // next week -- same shared check as the lineup-slot lock (see playerGameLock.ts).
+    // Fails safe: if the check itself can't be completed, isPlayerLockedForGameStart
+    // returns true, blocking the pickup rather than risking one through unverified.
+    const weeks = unwrap(await supabase.from("schedule_week").select("week_number, status").eq("season_id", season.id).order("week_number")) ?? [];
+    const currentWeek = weeks.find(item => item.status === "live") ?? weeks.find(item => item.status === "upcoming") ?? weeks[0];
+    if (currentWeek && await isPlayerLockedForGameStart(playerRow.nfl_team, currentWeek.week_number, season.year)) {
+      throw new TRPCError({ code: "BAD_REQUEST", message: `${playerRow.display_name}'s game has already started -- they can't be picked up until next week.` });
+    }
     if (input.dropPlayerId) {
       const drop = unwrap(await supabase.from("roster_assignment").select("id, locked_until").eq("season_id", season.id).eq("franchise_id", franchise.id).eq("player_id", input.dropPlayerId).is("released_at", null).maybeSingle());
       if (!drop) throw new TRPCError({ code: "BAD_REQUEST", message: "The selected drop player is not on your active CVC roster." });
@@ -1356,11 +1366,22 @@ export const leagueRouter = router({
     const owner = await getOwnerAccess({ openId: ctx.user.openId });
     if (!owner) throw new TRPCError({ code: "FORBIDDEN", message: "A CVC owner session is required to update a lineup." });
     const { league, season } = await getCurrentLeagueAndSeason();
-    const assignment = unwrap(await supabase.from("roster_assignment").select("id, franchise_id, player_id, assigned_slot_code, player:player_id(display_name, position)").eq("id", input.assignmentId).eq("season_id", season.id).is("released_at", null).maybeSingle());
+    const assignment = unwrap(await supabase.from("roster_assignment").select("id, franchise_id, player_id, assigned_slot_code, player:player_id(display_name, position, nfl_team)").eq("id", input.assignmentId).eq("season_id", season.id).is("released_at", null).maybeSingle());
     if (!assignment) throw new TRPCError({ code: "NOT_FOUND", message: "CVC roster assignment was not found." });
     const franchise = unwrap(await supabase.from("franchise").select("id, name, current_owner_id").eq("id", assignment.franchise_id).maybeSingle());
     if (!franchise || (franchise.current_owner_id !== owner.id && !["commissioner", "administrator"].includes(owner.role))) throw new TRPCError({ code: "FORBIDDEN", message: "You may only update your own CVC franchise lineup." });
-    const player = assignment.player?.[0];
+    // Confirmed live (see tank01ScoringSync.ts's snapshot-player fix): this Supabase
+    // relationship can return a single object rather than an array -- [0] silently
+    // produced undefined for every row, meaning nfl_team (needed for the game-started
+    // lock below) was never actually populated.
+    const player = Array.isArray(assignment.player) ? assignment.player[0] : assignment.player;
+    if (!["commissioner", "administrator"].includes(owner.role)) {
+      const weeks = unwrap(await supabase.from("schedule_week").select("week_number, status").eq("season_id", season.id).order("week_number")) ?? [];
+      const currentWeek = weeks.find(item => item.status === "live") ?? weeks.find(item => item.status === "upcoming") ?? weeks[0];
+      if (currentWeek && await isPlayerLockedForGameStart(player?.nfl_team, currentWeek.week_number, season.year)) {
+        throw new TRPCError({ code: "BAD_REQUEST", message: `${player?.display_name ?? "This player"}'s game has already started -- their lineup slot is locked until next week.` });
+      }
+    }
     // BENCH is a real configured roster_slot row (eligible for every position), not
     // represented by a null assigned_slot_code -- confirmed against the actual
     // roster_slot table. It goes through the exact same lookup/eligibility/capacity
