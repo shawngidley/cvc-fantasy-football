@@ -4,7 +4,7 @@ import { protectedProcedure, publicProcedure, router } from "../_core/trpc";
 import { getFantasyProsDataAdapter, getNFLDataAdapter, Tank01NFLDataAdapter } from "../nflDataAdapter";
 import { getCvcPlayerCareerStats, parseCvcGameLog } from "../playerCareerStats";
 import { fantasyProsCacheStatus, getFantasyProsActivePlayerIds, getFantasyProsRookiePlayerIds } from "../fantasyProsCache";
-import { getFantasyProsInjuries, getFantasyProsNews, getFantasyProsProjections, getFantasyProsRanks } from "../fantasyProsNews";
+import { getFantasyProsInjuries, getFantasyProsNews, getFantasyProsProjections, getFantasyProsRanks, getFantasyProsRawProjectionRow } from "../fantasyProsNews";
 import { normalizePlayerName } from "@shared/playerNameMatch";
 import { syncNflTeamAssignments } from "../nflTeamAssignmentSync";
 import { getFaabBalance, MAX_ROSTER_SIZE, STARTING_FAAB } from "../waiverRules";
@@ -918,7 +918,7 @@ export const leagueRouter = router({
   fantasyProsPlayerOutlook: publicProcedure.input(z.object({ playerId: z.string().uuid() })).query(async ({ input }) => {
     const player = unwrap(await supabase.from("player").select("display_name, position").eq("id", input.playerId).maybeSingle());
     if (!player || !player.position || !["QB", "RB", "WR", "TE", "K"].includes(player.position)) {
-      return { positionRank: null, overallRank: null, projection: null, weekNumber: null };
+      return { positionRank: null, overallRank: null, projection: null, weekNumber: null, rawProjectionRow: null };
     }
     const { season } = await getCurrentLeagueAndSeason();
     const weeks = unwrap(await supabase.from("schedule_week").select("week_number, status").eq("season_id", season.id).order("week_number")) ?? [];
@@ -932,7 +932,8 @@ export const leagueRouter = router({
     const positionRank = positionRanks.find(row => normalizePlayerName(row.name) === targetName) ?? null;
     const overallRank = overallRanks.find(row => normalizePlayerName(row.name) === targetName) ?? null;
     const projection = projections.find(row => normalizePlayerName(row.name) === targetName) ?? null;
-    return { positionRank, overallRank, projection, weekNumber: currentWeek || null };
+    const rawProjectionRow = await getFantasyProsRawProjectionRow(season.year, player.position, currentWeek, player.display_name).catch(() => null);
+    return { positionRank, overallRank, projection, weekNumber: currentWeek || null, rawProjectionRow };
   }),
 
   refreshFantasyProsPlayers: protectedProcedure.mutation(async ({ ctx }) => {
