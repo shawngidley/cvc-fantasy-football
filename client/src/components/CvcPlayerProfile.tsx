@@ -108,7 +108,7 @@ export function CvcPlayerProfile() {
   const expertImpactItem = fantasyProsPlayerNews.find(item => item.description);
 
   const outlook = trpc.league.fantasyProsPlayerOutlook.useQuery({ playerId: params?.playerId ?? "" }, { enabled: Boolean(params?.playerId), staleTime: 30 * 60_000 });
-  const { games: schedule, rawResponse: scheduleRawResponse } = useTeamSchedule(detail.data?.nfl_team, valid);
+  const { games: schedule } = useTeamSchedule(detail.data?.nfl_team, valid);
 
   const espnId = firstOf(tank ?? undefined, ["espnID", "espnId"]);
   const tank01PlayerId = firstOf(tank ?? undefined, ["playerID", "playerId"]);
@@ -191,10 +191,6 @@ export function CvcPlayerProfile() {
       </div>
     </section> : null}
 
-    <details className="mt-3 rounded-lg border border-amber-400/30 bg-amber-50 px-4 py-3 text-xs text-amber-900"><summary className="cursor-pointer font-bold uppercase tracking-[0.08em]">Debug: FantasyPros outlook data (tap to view, then screenshot for Claude)</summary>
-      <pre className="mt-2 max-h-72 overflow-auto whitespace-pre-wrap break-all rounded bg-white p-2 text-[10px]">{JSON.stringify(outlook.data, null, 2)}</pre>
-    </details>
-
     {expertImpactItem ? <section className="mt-5 rounded-xl border border-[var(--cvc-primary)]/20 bg-[var(--cvc-tint)] p-5">
       <p className="text-xs font-black uppercase tracking-[0.1em] text-[var(--cvc-primary)]">FantasyPros Expert Impact</p>
       <p className="mt-3 text-sm leading-6 text-cvc-deep">{expertImpactItem.description}</p>
@@ -246,7 +242,7 @@ export function CvcPlayerProfile() {
                 <td className="px-3 py-2.5 text-slate-500">{firstOf(row.game, ["gameTime", "time"]) ?? "—"}</td>
                 <td className="px-3 py-2.5 text-slate-400">—</td>
               </tr>)}</tbody>
-        </table> : <div className="p-5"><p className="text-sm text-slate-500">Schedule data is unavailable for this player right now.</p>{scheduleRawResponse ? <details className="mt-3 rounded-md border border-slate-200 bg-slate-50 p-3 text-xs text-slate-500"><summary className="cursor-pointer font-bold text-slate-600">Debug: raw Tank01 response (tap to view, then screenshot for Claude)</summary><pre className="mt-2 max-h-64 overflow-auto whitespace-pre-wrap break-all text-[10px]">{JSON.stringify(scheduleRawResponse, null, 2)}</pre></details> : null}</div>}
+        </table> : <div className="p-5"><p className="text-sm text-slate-500">Schedule data is unavailable for this player right now.</p></div>}
       </div> : null}
 
       {tab === "gamelog" ? <div>

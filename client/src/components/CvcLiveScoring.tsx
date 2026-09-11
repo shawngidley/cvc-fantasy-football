@@ -152,20 +152,6 @@ export function CvcLiveScoring() {
       <div className="divide-y divide-slate-200 opacity-80">{Array.from({ length: maxBenchRows }).map((_, index) => { const away = benchAway[index]; const home = benchHome[index]; return <LineupRow key={`bn-${away?.id ?? "away"}-${home?.id ?? "home"}-${index}`} away={away} home={home} slot="BN" points={points} live={live} profiles={profiles} projections={projections} gameStatus={gameStatus} />; })}</div></> : null}
     </section>
     {live.error ? <p className="text-center text-xs text-cvc-muted">Tank01 status: {live.error}</p> : null}
-    <details className="rounded-lg border border-amber-400/30 bg-amber-50 px-4 py-3 text-xs text-amber-900"><summary className="cursor-pointer font-bold uppercase tracking-[0.08em]">Debug: live scoring (tap to view, then screenshot for Claude)</summary>
-      <div className="mt-2 space-y-1">
-        <p>Polling active: {String(live.isPolling)}</p>
-        <p>Last updated: {live.lastUpdated ? live.lastUpdated.toISOString() : "never"}</p>
-        <p>Live error: {live.error ?? "none"}</p>
-        <p>Stat lines fetched (this hook instance): {Object.keys(live.statLines).length}</p>
-        <p>Sample stat-line keys: {Object.keys(live.statLines).slice(0, 15).join(", ") || "none"}</p>
-        <p>Selected matchup: {selected.away} @ {selected.home} (id {selected.id})</p>
-        <p>Away starters' NFL teams + live lookup:</p>
-        <ul className="ml-3 list-disc">{selectedAway.map((entry: any, index: number) => <li key={index}>{entry.player?.display_name ?? "empty"} ({entry.player?.position ?? "—"} · {entry.player?.nfl_team ?? "—"}) — livePts: {JSON.stringify(points(entry))}</li>)}</ul>
-        <p>Home starters' NFL teams + live lookup:</p>
-        <ul className="ml-3 list-disc">{selectedHome.map((entry: any, index: number) => <li key={index}>{entry.player?.display_name ?? "empty"} ({entry.player?.position ?? "—"} · {entry.player?.nfl_team ?? "—"}) — livePts: {JSON.stringify(points(entry))}</li>)}</ul>
-      </div>
-    </details>
   </div>;
 }
 

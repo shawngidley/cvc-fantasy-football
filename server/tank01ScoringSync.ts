@@ -30,16 +30,6 @@ export type Tank01SyncSummary = {
   weekLabel?: string;
   matchupsUpdated: number;
   reason?: string;
-  debug?: {
-    weekNumber: number;
-    seasonYear: number;
-    matchupsFound: number;
-    snapshotsFound: number;
-    statLinesFound: number;
-    statLineKeysSample: string[];
-    snapshotPlayersSample: { name: string; position: string | null; nflTeam: string | null; lookupKey: string; matched: boolean }[];
-    franchiseTotalsSample: [string, number][];
-  };
 };
 
 type SnapshotPlayer = { display_name: string; position: string | null; nfl_team: string | null };
@@ -117,10 +107,9 @@ export async function syncTank01Scores(now = new Date()): Promise<Tank01SyncSumm
   const statLines = await tankStatLinesForWeek(adapter, week.week_number, season.year);
   if (!statLines.size) {
     unwrap(await supabase.from("tank01_scoring_sync_state").upsert({ season_id: season.id, last_attempt_at: now.toISOString(), last_error: null, updated_at: now.toISOString() }, { onConflict: "season_id" }).select("id").single());
-    return { status: "skipped", weekLabel: week.label, matchupsUpdated: 0, reason: "Tank01 has not published box-score data for this CVC week.", debug: { weekNumber: week.week_number, seasonYear: season.year, matchupsFound: matchups.length, snapshotsFound: snapshots.length, statLinesFound: 0, statLineKeysSample: [], snapshotPlayersSample: [], franchiseTotalsSample: [] } };
+    return { status: "skipped", weekLabel: week.label, matchupsUpdated: 0, reason: "Tank01 has not published box-score data for this CVC week." };
   }
   const franchiseTotals = new Map<string, number>();
-  const snapshotPlayersSample: NonNullable<Tank01SyncSummary["debug"]>["snapshotPlayersSample"] = [];
   for (const entry of snapshots) {
     // Confirmed live: weekly_lineup_snapshot includes bench players too (assigned_slot_code
     // is 'BENCH', not null, so snapshotLineups' not-null filter above never excluded them) --
@@ -136,7 +125,6 @@ export async function syncTank01Scores(now = new Date()): Promise<Tank01SyncSumm
     const statLine = statLines.get(key);
     const points = statLine ? calculateCvcFantasyPoints(statLine, position, rules) : 0;
     franchiseTotals.set(entry.franchise_id, (franchiseTotals.get(entry.franchise_id) ?? 0) + points);
-    if (snapshotPlayersSample.length < 25) snapshotPlayersSample.push({ name: player.display_name, position: player.position, nflTeam: player.nfl_team, lookupKey: key, matched: Boolean(statLine) });
   }
   const finalizing = correctionWindowClosed(now);
   for (const matchup of matchups) {
@@ -148,5 +136,5 @@ export async function syncTank01Scores(now = new Date()): Promise<Tank01SyncSumm
   unwrap(await supabase.from("schedule_week").update({ status: finalizing ? "final" : "live" }).eq("id", week.id).select("id").single());
   unwrap(await supabase.from("tank01_scoring_sync_state").upsert({ season_id: season.id, last_attempt_at: now.toISOString(), last_success_at: now.toISOString(), last_error: null, updated_at: now.toISOString() }, { onConflict: "season_id" }).select("id").single());
   if (finalizing) unwrap(await supabase.from("audit_event").insert({ league_id: season.league_id, season_id: season.id, entity_type: "schedule_week", entity_id: week.id, action: "tank01_result_finalized", summary: `Tank01 finalized ${week.label} after the CVC correction window.`, payload: { source: "Tank01", matchups: matchups.length } }).select("id").single());
-  return { status: finalizing ? "finalized" : "updated", weekLabel: week.label, matchupsUpdated: matchups.length, debug: { weekNumber: week.week_number, seasonYear: season.year, matchupsFound: matchups.length, snapshotsFound: snapshots.length, statLinesFound: statLines.size, statLineKeysSample: Array.from(statLines.keys()).slice(0, 25), snapshotPlayersSample, franchiseTotalsSample: Array.from(franchiseTotals.entries()) } };
+  return { status: finalizing ? "finalized" : "updated", weekLabel: week.label, matchupsUpdated: matchups.length };
 }

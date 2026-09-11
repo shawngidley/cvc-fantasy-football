@@ -110,7 +110,6 @@ export function useCvcTank01LiveScores(week: number | undefined, season: number 
   const [nflMatchups, setNflMatchups] = useState<Record<string, CvcNflMatchup>>({});
   const [statLines, setStatLines] = useState<LiveStatMap>({});
   const [kickerEvents, setKickerEvents] = useState<KickerPlayEvent[]>([]);
-  const [rawBoxScoreDebug, setRawBoxScoreDebug] = useState<{ url: string; status: number; body: unknown } | null>(null);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   // Guards against the effect re-running (e.g. because `rules` -- an array built with
   // `rules.data ?? []` in the caller -- gets a new reference on every render, which it
@@ -148,7 +147,6 @@ export function useCvcTank01LiveScores(week: number | undefined, season: number 
       setIsPolling(true);
       setError(null);
       const nextStatLines: LiveStatMap = {};
-      let capturedDebug: { url: string; status: number; body: unknown } | null = null;
       await Promise.all(fetchEligibleGames.map(async game => {
         const url = `${TANK01_BASE_URL}/getNFLBoxScore?gameID=${encodeURIComponent(game.gameID ?? "")}&fantasyPoints=true&twoPointConversions=2&passYards=.04&passTD=4&passInterceptions=-3&pointsPerReception=1&carries=0&rushYards=.1&rushTD=6&fumbles=-3&receivingYards=.1&receivingTD=6&targets=0&defTD=6&fgMade=0&fgYards=.1&xpMade=1`;
         const response = await fetch(url);
@@ -165,7 +163,6 @@ export function useCvcTank01LiveScores(week: number | undefined, season: number 
             DST?: Record<string, Record<string, unknown>>;
           };
         };
-        if (!capturedDebug) capturedDebug = { url, status: response.status, body: payload };
         // Confirmed live: Tank01's playerStats entries have no "pos" field at all --
         // position must come from the caller (CVC's own player record) at lookup time,
         // not from this raw stat line. Store the raw stat here; getCvcLivePoints
@@ -180,7 +177,6 @@ export function useCvcTank01LiveScores(week: number | undefined, season: number 
         }
       }));
       setStatLines(nextStatLines);
-      setRawBoxScoreDebug(capturedDebug);
       setLastUpdated(new Date());
       // Override kicker stats with real per-kick ESPN data where available. Tank01's
       // live box score doesn't reliably include FG yardage at all (confirmed: none of
@@ -239,7 +235,7 @@ export function useCvcTank01LiveScores(week: number | undefined, season: number 
     return () => { active = false; if (timer.current) clearTimeout(timer.current); };
   }, [refresh]);
 
-  return { statLines, nflMatchups, isPolling, lastUpdated, error, rawBoxScoreDebug, kickerEvents };
+  return { statLines, nflMatchups, isPolling, lastUpdated, error, kickerEvents };
 }
 
 /** Looks up a player's raw live stat line (for rendering real game stats), using the
