@@ -42,7 +42,8 @@ export type Tank01SyncSummary = {
   };
 };
 
-type SnapshotRow = { franchise_id: string; slot_code: string; player: { display_name: string; position: string | null; nfl_team: string | null }[] | null };
+type SnapshotPlayer = { display_name: string; position: string | null; nfl_team: string | null };
+type SnapshotRow = { franchise_id: string; slot_code: string; player: SnapshotPlayer[] | SnapshotPlayer | null };
 
 async function currentContext() {
   // Prefer the explicitly-flagged current season (see season.is_current migration) --
@@ -128,7 +129,7 @@ export async function syncTank01Scores(now = new Date()): Promise<Tank01SyncSumm
     // just a display-only bug. BENCH is CVC's only non-starter slot_code (confirmed via
     // roster_slot), so this exact exclusion is sufficient.
     if (entry.slot_code?.toUpperCase() === "BENCH") continue;
-    const player = entry.player?.[0];
+    const player = Array.isArray(entry.player) ? entry.player[0] : entry.player;
     if (!player) continue;
     const position = player.position === "DEF" ? "DST" : player.position ?? "";
     const key = position === "DST" ? `dst:${normalizeTeam(player.nfl_team ?? "")}` : normalize(player.display_name);
