@@ -6,6 +6,20 @@ const normalize = (value: string) => value.toLowerCase().replace(/[^a-z0-9]/g, "
 const normalizeTeam = (value: string) => ({ kan: "kc", tam: "tb", arz: "ari", jax: "jac", was: "wsh" }[value.toLowerCase()] ?? value.toLowerCase());
 export const correctionWindowClosed = (now = new Date()) => now.getUTCDay() === 5 && now.getUTCHours() >= 16;
 
+/**
+ * Whether a CVC week should be finalized: it must be Friday 4pm UTC or later on the
+ * calendar (correctionWindowClosed), AND every game actually scheduled for this
+ * specific week must have already kicked off. correctionWindowClosed alone only knows
+ * the calendar day/time -- it has no idea which week is being finalized. Confirmed as
+ * a real bug: on the Friday WITHIN a week's own game window (Thursday night already
+ * played, Sunday/Monday still ahead), correctionWindowClosed(now) alone is already
+ * true, finalizing that week 3-4 days before its games are even done.
+ */
+export function shouldFinalizeWeek(games: { gameDate?: string; gameTime?: string }[], now = new Date()): boolean {
+  if (!correctionWindowClosed(now)) return false;
+  return games.length > 0 && games.every(game => hasKickedOff(game.gameDate, game.gameTime));
+}
+
 /** Whether a game's kickoff has already passed. Same Date.UTC()-based approach as the
  * client-side computeKickoffUtc (see useCvcTank01LiveScores.ts) -- a string-interpolated
  * "...T${hour}:00Z" timestamp silently produces an Invalid Date for any 8pm+ local
@@ -89,7 +103,7 @@ async function tankStatLinesForWeek(adapter: Tank01NFLDataAdapter, nflWeek: numb
       if (teamAbv) statLines.set(`dst:${normalizeTeam(teamAbv)}`, { Defense: entry as unknown as Record<string, string | number> });
     }
   }
-  return statLines;
+  return { statLines, games };
 }
 
 /** Idempotent provider-only score reconciliation. Called by the authenticated Heartbeat callback. */
@@ -104,7 +118,7 @@ export async function syncTank01Scores(now = new Date()): Promise<Tank01SyncSumm
   const franchiseIds = Array.from(new Set(matchups.flatMap(item => [item.home_franchise_id, item.away_franchise_id])));
   await snapshotLineups(season.id, week.id, franchiseIds);
   const snapshots = unwrap(await supabase.from("weekly_lineup_snapshot").select("franchise_id, slot_code, player:player_id(display_name, position, nfl_team)").eq("schedule_week_id", week.id)) as SnapshotRow[] ?? [];
-  const statLines = await tankStatLinesForWeek(adapter, week.week_number, season.year);
+  const { statLines, games } = await tankStatLinesForWeek(adapter, week.week_number, season.year);
   if (!statLines.size) {
     unwrap(await supabase.from("tank01_scoring_sync_state").upsert({ season_id: season.id, last_attempt_at: now.toISOString(), last_error: null, updated_at: now.toISOString() }, { onConflict: "season_id" }).select("id").single());
     return { status: "skipped", weekLabel: week.label, matchupsUpdated: 0, reason: "Tank01 has not published box-score data for this CVC week." };
@@ -126,7 +140,7 @@ export async function syncTank01Scores(now = new Date()): Promise<Tank01SyncSumm
     const points = statLine ? calculateCvcFantasyPoints(statLine, position, rules) : 0;
     franchiseTotals.set(entry.franchise_id, (franchiseTotals.get(entry.franchise_id) ?? 0) + points);
   }
-  const finalizing = correctionWindowClosed(now);
+  const finalizing = shouldFinalizeWeek(games, now);
   for (const matchup of matchups) {
     const homeScore = Math.round((franchiseTotals.get(matchup.home_franchise_id) ?? 0) * 100) / 100;
     const awayScore = Math.round((franchiseTotals.get(matchup.away_franchise_id) ?? 0) * 100) / 100;
