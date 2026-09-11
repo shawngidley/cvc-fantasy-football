@@ -24,7 +24,7 @@ export function CvcPlayerNews() {
   const mine = trpc.league.myFranchise.useQuery(undefined, { enabled: auth.isAuthenticated });
   const roster = trpc.league.franchiseRoster.useQuery({ franchiseId: mine.data?.id ?? "00000000-0000-0000-0000-000000000000" }, { enabled: Boolean(mine.data?.id) });
   const playerIndex = trpc.league.newsPlayerIndex.useQuery();
-  const fantasyPros = trpc.league.fantasyProsNews.useQuery({ limit: 100 }, { staleTime: 0, refetchOnMount: "always" });
+  const fantasyPros = trpc.league.fantasyProsNews.useQuery({ limit: 100 }, { staleTime: 15 * 60_000 });
 
   const [tankItems, setTankItems] = useState<TankNews[]>([]);
   const [tankLoading, setTankLoading] = useState(true);
