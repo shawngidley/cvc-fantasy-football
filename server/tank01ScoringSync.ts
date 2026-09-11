@@ -55,25 +55,40 @@ async function snapshotLineups(seasonId: string, weekId: string, franchiseIds: s
   unwrap(await supabase.from("weekly_lineup_snapshot").insert(assignments.map(item => ({ season_id: seasonId, schedule_week_id: weekId, franchise_id: item.franchise_id, player_id: item.player_id, roster_assignment_id: item.id, slot_code: item.assigned_slot_code }))));
 }
 
-async function tankScoresForWeek(adapter: Tank01NFLDataAdapter, nflWeek: number, seasonYear: number, rules: CvcScoringRule[]) {
+/** Fetches every kicked-off game's box score for the week and returns raw stat lines
+ * (not pre-computed points) keyed by normalized player name, plus "dst:<TEAM>" for
+ * team defenses. Two real bugs fixed here, confirmed against an actual live Tank01 box
+ * score response: (1) playerStats entries have no "pos" field at all -- the previous
+ * code required a truthy position before storing anything, so every single player was
+ * silently skipped, meaning this function had likely never actually contributed a
+ * nonzero player score since it was written. Position is needed to call
+ * calculateCvcFantasyPoints correctly (CVC's scoring rules are position-gated), so
+ * that's deferred to the caller, which has the real position from CVC's own player
+ * record. (2) box.teamStats is general team offense stats (totalYards,
+ * rushingAttempts, etc.), keyed "away"/"home" with no real team code at the top level
+ * -- the actual defensive-scoring data is the separate box.DST object, with the real
+ * team code inside each entry's own teamAbv field. Same two bugs already fixed in the
+ * client-side useCvcTank01LiveScores.ts; this is a separate, duplicate implementation
+ * that was missed at the time. */
+async function tankStatLinesForWeek(adapter: Tank01NFLDataAdapter, nflWeek: number, seasonYear: number) {
   const games = await adapter.listGamesForWeek(nflWeek, seasonYear);
   const kickedOffGames = games.filter(game => game.gameID && hasKickedOff(game.gameDate, game.gameTime));
-  const scoreMap = new Map<string, number>();
+  const statLines = new Map<string, Tank01LiveStats>();
   for (const game of kickedOffGames) {
     if (!game.gameID) continue;
     const box = await adapter.getBoxScore(game.gameID) as Tank01BoxScore;
     for (const raw of Object.values(box.playerStats ?? {})) {
       const player = raw as Record<string, unknown>;
       const name = String(player.longName ?? "");
-      const rawPosition = String(player.pos ?? "");
-      const position = rawPosition.toUpperCase() === "PK" ? "K" : rawPosition;
-      if (name && position) scoreMap.set(normalize(name), calculateCvcFantasyPoints(player as Tank01LiveStats, position, rules));
+      if (name) statLines.set(normalize(name), player as Tank01LiveStats);
     }
-    for (const [team, stats] of Object.entries(box.teamStats ?? {})) {
-      scoreMap.set(`dst:${normalizeTeam(team)}`, calculateCvcFantasyPoints({ Defense: stats as unknown as Record<string, string | number> }, "DST", rules));
+    const dst = (box as unknown as { DST?: Record<string, Record<string, unknown>> }).DST ?? {};
+    for (const entry of Object.values(dst)) {
+      const teamAbv = String(entry.teamAbv ?? "");
+      if (teamAbv) statLines.set(`dst:${normalizeTeam(teamAbv)}`, { Defense: entry as unknown as Record<string, string | number> });
     }
   }
-  return scoreMap;
+  return statLines;
 }
 
 /** Idempotent provider-only score reconciliation. Called by the authenticated Heartbeat callback. */
@@ -88,8 +103,8 @@ export async function syncTank01Scores(now = new Date()): Promise<Tank01SyncSumm
   const franchiseIds = Array.from(new Set(matchups.flatMap(item => [item.home_franchise_id, item.away_franchise_id])));
   await snapshotLineups(season.id, week.id, franchiseIds);
   const snapshots = unwrap(await supabase.from("weekly_lineup_snapshot").select("franchise_id, slot_code, player:player_id(display_name, position, nfl_team)").eq("schedule_week_id", week.id)) as SnapshotRow[] ?? [];
-  const tankScores = await tankScoresForWeek(adapter, week.week_number, season.year, rules);
-  if (!tankScores.size) {
+  const statLines = await tankStatLinesForWeek(adapter, week.week_number, season.year);
+  if (!statLines.size) {
     unwrap(await supabase.from("tank01_scoring_sync_state").upsert({ season_id: season.id, last_attempt_at: now.toISOString(), last_error: null, updated_at: now.toISOString() }, { onConflict: "season_id" }).select("id").single());
     return { status: "skipped", weekLabel: week.label, matchupsUpdated: 0, reason: "Tank01 has not published box-score data for this CVC week." };
   }
@@ -106,7 +121,9 @@ export async function syncTank01Scores(now = new Date()): Promise<Tank01SyncSumm
     if (!player) continue;
     const position = player.position === "DEF" ? "DST" : player.position ?? "";
     const key = position === "DST" ? `dst:${normalizeTeam(player.nfl_team ?? "")}` : normalize(player.display_name);
-    franchiseTotals.set(entry.franchise_id, (franchiseTotals.get(entry.franchise_id) ?? 0) + (tankScores.get(key) ?? 0));
+    const statLine = statLines.get(key);
+    const points = statLine ? calculateCvcFantasyPoints(statLine, position, rules) : 0;
+    franchiseTotals.set(entry.franchise_id, (franchiseTotals.get(entry.franchise_id) ?? 0) + points);
   }
   const finalizing = correctionWindowClosed(now);
   for (const matchup of matchups) {
