@@ -12,6 +12,7 @@ import { resolveOpenWaiverPeriod } from "../waiverResolution";
 import { computeNextResolutionTime } from "../waiverResolutionTiming";
 import { syncFantasyProsSnapshot, syncFantasyProsActiveFlags, syncFantasyProsRookieFlags } from "../fantasyProsSync";
 import { syncTank01SeasonStats } from "../tank01SeasonStatsSync";
+import { syncTank01Scores } from "../tank01ScoringSync";
 import { aggregateDstSeasonStats } from "../dstSeasonAggregation";
 import { syncNflTeamSchedules } from "../nflTeamScheduleSync";
 import { syncTank01ActiveRoster } from "../tank01ActiveRosterSync";
@@ -992,6 +993,11 @@ export const leagueRouter = router({
   syncTeamSchedules: protectedProcedure.input(z.object({ year: z.number().int().min(2000).max(2100) })).mutation(async ({ ctx, input }) => {
     await requireCommissioner({ openId: ctx.user.openId });
     return syncNflTeamSchedules(input.year);
+  }),
+
+  syncMatchupScores: protectedProcedure.mutation(async ({ ctx }) => {
+    await requireCommissioner({ openId: ctx.user.openId });
+    return syncTank01Scores();
   }),
 
   syncSeasonStats: protectedProcedure.input(z.object({ limit: z.number().int().min(1).max(100).optional() }).optional()).mutation(async ({ ctx, input }) => {

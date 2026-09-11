@@ -227,6 +227,14 @@ function SeasonStatsSyncModule() {
     setPeriodClosesAt(toLocalInputValue(easternWallClockToUtc(2026, 9, 17, 9)));
   };
 
+  const syncMatchupScores = trpc.league.syncMatchupScores.useMutation({
+    onSuccess: data => {
+      if (data.status === "skipped") { toast.error(data.reason ?? "Matchup score sync is unavailable."); return; }
+      toast.success(`${data.status === "finalized" ? "Finalized" : "Updated"} ${data.weekLabel ?? "this week"} -- ${data.matchupsUpdated} matchup(s).`);
+    },
+    onError: error => toast.error(error.message),
+  });
+
   const [dstYear, setDstYear] = useState(new Date().getFullYear());
   const [dstThroughWeek, setDstThroughWeek] = useState(18);
   const syncDst = trpc.league.syncDstSeasonStats.useMutation({
@@ -254,6 +262,13 @@ function SeasonStatsSyncModule() {
         <label className="text-xs font-bold uppercase tracking-[0.06em] text-slate-600">Closes<input type="datetime-local" value={periodClosesAt} onChange={event => setPeriodClosesAt(event.target.value)} className="ml-2 rounded-md border border-slate-300 px-2 py-1.5 text-sm"/></label>
         <button type="button" className="cvc-button-secondary" onClick={quickFillFirstPeriod}>Quick fill: opens now, closes Thu Sep 17 9am ET</button>
         <button type="button" className="cvc-button-compact" disabled={createPeriod.isPending || !periodLabel || !periodOpensAt || !periodClosesAt} onClick={() => createPeriod.mutate({ label: periodLabel, opensAt: new Date(periodOpensAt).toISOString(), closesAt: new Date(periodClosesAt).toISOString(), periodType: "bid" })}><Save size={14} /> {createPeriod.isPending ? "Opening…" : "Open bidding"}</button>
+      </div>
+    </div>
+    <div className="rounded-lg border border-dashed border-cvc-deep/20 bg-cvc-tint p-4">
+      <p className="text-sm font-semibold text-cvc-deep">Matchup score sync (Tank01)</p>
+      <p className="mt-1 text-xs leading-5 text-slate-500">Recomputes every current-week matchup's score from Tank01 and writes it to the database -- this is the same sync the 5-minute cron runs automatically. Use this to force an immediate update, or to see the exact result/error directly instead of waiting on the next scheduled run.</p>
+      <div className="mt-3">
+        <button type="button" className="cvc-button-compact" disabled={syncMatchupScores.isPending} onClick={() => syncMatchupScores.mutate()}><Save size={14} /> {syncMatchupScores.isPending ? "Syncing…" : "Sync matchup scores now"}</button>
       </div>
     </div>
     <div className="rounded-lg border border-dashed border-cvc-deep/20 bg-cvc-tint p-4">
