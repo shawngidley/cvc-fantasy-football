@@ -270,6 +270,15 @@ function SeasonStatsSyncModule() {
       <div className="mt-3">
         <button type="button" className="cvc-button-compact" disabled={syncMatchupScores.isPending} onClick={() => syncMatchupScores.mutate()}><Save size={14} /> {syncMatchupScores.isPending ? "Syncing…" : "Sync matchup scores now"}</button>
       </div>
+      {syncMatchupScores.data?.debug ? <div className="mt-3 rounded-lg border border-amber-400/30 bg-amber-50 px-3 py-2 text-[11px] text-amber-900">
+        <p className="font-bold uppercase tracking-[0.06em]">Last sync debug</p>
+        <p>Week {syncMatchupScores.data.debug.weekNumber}, season {syncMatchupScores.data.debug.seasonYear} — matchups: {syncMatchupScores.data.debug.matchupsFound}, snapshot rows (non-bench): {syncMatchupScores.data.debug.snapshotsFound}, Tank01 stat lines fetched: {syncMatchupScores.data.debug.statLinesFound}</p>
+        <p className="mt-1">Sample stat line keys (Tank01 side): {syncMatchupScores.data.debug.statLineKeysSample.join(", ") || "none"}</p>
+        <p className="mt-1 font-bold">Snapshot players (CVC side) — lookup key + matched?:</p>
+        <ul className="ml-3 list-disc">{syncMatchupScores.data.debug.snapshotPlayersSample.map((row, index) => <li key={index}>{row.name} ({row.position} · {row.nflTeam}) — key "{row.lookupKey}" — {row.matched ? "MATCHED" : "no match"}</li>)}</ul>
+        <p className="mt-1 font-bold">Franchise totals computed:</p>
+        <ul className="ml-3 list-disc">{syncMatchupScores.data.debug.franchiseTotalsSample.map(([franchiseId, total], index) => <li key={index}>{franchiseId}: {total.toFixed(2)}</li>)}</ul>
+      </div> : null}
     </div>
     <div className="rounded-lg border border-dashed border-cvc-deep/20 bg-cvc-tint p-4">
       <p className="text-sm font-semibold text-cvc-deep">Team bye week / schedule cache</p>
