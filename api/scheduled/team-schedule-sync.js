@@ -151,7 +151,7 @@ var NFL_TEAMS = [
   "TEN",
   "WSH"
 ];
-function normalizeTeam(team) {
+function normalizeTeam2(team) {
   return (TEAM_CODE_ALIASES[(team ?? "").toLowerCase()] ?? (team ?? "").toLowerCase()).toUpperCase();
 }
 function firstOf(source, keys) {
@@ -162,7 +162,7 @@ function firstOf(source, keys) {
   return null;
 }
 function summarizeTeamSchedule(games, team) {
-  const abv = normalizeTeam(team);
+  const abv = normalizeTeam2(team);
   const rows = games.filter((game) => {
     const seasonType = firstOf(game, ["seasonType", "season_type"]);
     return !seasonType || seasonType === "Regular Season";

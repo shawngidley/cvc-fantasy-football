@@ -1,9 +1,10 @@
 import { calculateCvcFantasyPoints, type CvcScoringRule, type Tank01LiveStats } from "@shared/cvcScoring";
 import { getNFLDataAdapter, Tank01NFLDataAdapter, type Tank01BoxScore } from "./nflDataAdapter";
 import { supabase, unwrap } from "./supabase";
+import { resolveSkinForWeek } from "./cvcSkins";
+import { normalize, normalizeTeam, type SnapshotRow } from "./cvcScoringShared";
 
-const normalize = (value: string) => value.toLowerCase().replace(/[^a-z0-9]/g, "");
-const normalizeTeam = (value: string) => ({ kan: "kc", tam: "tb", arz: "ari", jax: "jac", was: "wsh" }[value.toLowerCase()] ?? value.toLowerCase());
+export { normalize, normalizeTeam };
 export const correctionWindowClosed = (now = new Date()) => now.getUTCDay() === 5 && now.getUTCHours() >= 16;
 
 /**
@@ -46,8 +47,8 @@ export type Tank01SyncSummary = {
   reason?: string;
 };
 
-type SnapshotPlayer = { display_name: string; position: string | null; nfl_team: string | null };
-type SnapshotRow = { franchise_id: string; slot_code: string; player: SnapshotPlayer[] | SnapshotPlayer | null };
+
+
 
 async function currentContext() {
   // Prefer the explicitly-flagged current season (see season.is_current migration) --
@@ -59,7 +60,7 @@ async function currentContext() {
   if (!season) throw new Error("No CVC season is available for Tank01 scoring synchronization.");
   const weeks = unwrap(await supabase.from("schedule_week").select("id, week_number, label, status").eq("season_id", season.id).order("week_number")) ?? [];
   const week = weeks.find(item => item.status === "live") ?? weeks.find(item => item.status === "upcoming") ?? null;
-  return { season, week };
+  return { season, week, weeks };
 }
 
 async function snapshotLineups(seasonId: string, weekId: string, franchiseIds: string[]) {
@@ -108,7 +109,7 @@ async function tankStatLinesForWeek(adapter: Tank01NFLDataAdapter, nflWeek: numb
 
 /** Idempotent provider-only score reconciliation. Called by the authenticated Heartbeat callback. */
 export async function syncTank01Scores(now = new Date()): Promise<Tank01SyncSummary> {
-  const { season, week } = await currentContext();
+  const { season, week, weeks } = await currentContext();
   if (!week) return { status: "skipped", matchupsUpdated: 0, reason: "No live or upcoming CVC week." };
   const adapter = getNFLDataAdapter();
   if (!(adapter instanceof Tank01NFLDataAdapter)) return { status: "skipped", matchupsUpdated: 0, reason: "Tank01 is not configured." };
@@ -117,7 +118,7 @@ export async function syncTank01Scores(now = new Date()): Promise<Tank01SyncSumm
   if (!matchups.length) return { status: "skipped", matchupsUpdated: 0, reason: "The CVC week has no matchups." };
   const franchiseIds = Array.from(new Set(matchups.flatMap(item => [item.home_franchise_id, item.away_franchise_id])));
   await snapshotLineups(season.id, week.id, franchiseIds);
-  const snapshots = unwrap(await supabase.from("weekly_lineup_snapshot").select("franchise_id, slot_code, player:player_id(display_name, position, nfl_team)").eq("schedule_week_id", week.id)) as SnapshotRow[] ?? [];
+  const snapshots = unwrap(await supabase.from("weekly_lineup_snapshot").select("franchise_id, slot_code, player:player_id(id, display_name, position, nfl_team)").eq("schedule_week_id", week.id)) as SnapshotRow[] ?? [];
   const { statLines, games } = await tankStatLinesForWeek(adapter, week.week_number, season.year);
   if (!statLines.size) {
     unwrap(await supabase.from("tank01_scoring_sync_state").upsert({ season_id: season.id, last_attempt_at: now.toISOString(), last_error: null, updated_at: now.toISOString() }, { onConflict: "season_id" }).select("id").single());
@@ -149,6 +150,10 @@ export async function syncTank01Scores(now = new Date()): Promise<Tank01SyncSumm
   }
   unwrap(await supabase.from("schedule_week").update({ status: finalizing ? "final" : "live" }).eq("id", week.id).select("id").single());
   unwrap(await supabase.from("tank01_scoring_sync_state").upsert({ season_id: season.id, last_attempt_at: now.toISOString(), last_success_at: now.toISOString(), last_error: null, updated_at: now.toISOString() }, { onConflict: "season_id" }).select("id").single());
-  if (finalizing) unwrap(await supabase.from("audit_event").insert({ league_id: season.league_id, season_id: season.id, entity_type: "schedule_week", entity_id: week.id, action: "tank01_result_finalized", summary: `Tank01 finalized ${week.label} after the CVC correction window.`, payload: { source: "Tank01", matchups: matchups.length } }).select("id").single());
+  if (finalizing) {
+    const isLastWeek = week.week_number === Math.max(...weeks.map(item => item.week_number));
+    await resolveSkinForWeek({ seasonId: season.id, weekNumber: week.week_number, isLastWeek, matchups, franchiseTotals, snapshots, statLines, rules });
+    unwrap(await supabase.from("audit_event").insert({ league_id: season.league_id, season_id: season.id, entity_type: "schedule_week", entity_id: week.id, action: "tank01_result_finalized", summary: `Tank01 finalized ${week.label} after the CVC correction window.`, payload: { source: "Tank01", matchups: matchups.length } }).select("id").single());
+  }
   return { status: finalizing ? "finalized" : "updated", weekLabel: week.label, matchupsUpdated: matchups.length };
 }

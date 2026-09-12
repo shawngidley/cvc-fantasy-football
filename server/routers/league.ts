@@ -235,6 +235,12 @@ export const leagueRouter = router({
     };
   }),
 
+  skinsHistory: publicProcedure.query(async () => {
+    const season = unwrap(await supabase.from("season").select("id").eq("is_current", true).limit(1).maybeSingle()) ?? unwrap(await supabase.from("season").select("id").order("year", { ascending: false }).limit(1).maybeSingle());
+    if (!season) return [];
+    return unwrap(await supabase.from("cvc_skin").select("week_number, pot_amount, status, winner_franchise_id, winning_score, tiebreaker_used, tiebreaker_player_name, resolved_at").eq("season_id", season.id).order("week_number")) ?? [];
+  }),
+
   setupSummary: publicProcedure.query(async () => {
     const tableNames = ["league", "season", "franchise", "owner", "roster_slot", "scoring_rule", "schedule_week", "matchup", "player", "roster_assignment", "transaction", "draft", "draft_pick", "waiver_period", "faab_bid", "rule_document", "league_financial_entry"];
     const [league, season, owners, franchises, slots, scoring, weeks, matchups, players, assignments, transactions, drafts, picks, waivers, bids, rules, financialEntries] = await Promise.all([
