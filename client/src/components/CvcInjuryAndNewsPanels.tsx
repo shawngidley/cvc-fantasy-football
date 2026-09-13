@@ -21,13 +21,16 @@ function useMyRosterNames() {
 
 /** Ported from WRC's Standings.tsx InjuryReport -- same card layout, same "always
  * roster-scoped, no toggle" behavior (WRC shows a disabled 'My Roster' pill here,
- * unlike the full News page's togglable My Team filter). */
+ * unlike the full News page's togglable My Team filter). Tank01 is the default/
+ * preferred source here (shown first; FantasyPros fills in anything Tank01 doesn't
+ * have, deduped by player+headline). */
 export function CvcInjuryReport() {
   const roster = useMyRosterNames();
   const injuries = trpc.league.fantasyProsInjuries.useQuery(undefined, { enabled: roster.isAuthenticated, staleTime: 20 * 60_000 });
   const tank01 = useTank01MappedNews();
 
   const items = useMemo<CvcNewsItem[]>(() => {
+    const tank01Items = tank01.items.filter(item => item.isInjury && roster.names.has(normalizeName(item.playerName)));
     const fantasyProsItems = (injuries.data?.items ?? [])
       .filter(item => roster.names.has(normalizeName(item.playerName)))
       .map((item): CvcNewsItem => ({
@@ -35,10 +38,9 @@ export function CvcInjuryReport() {
         headline: item.headline, description: item.description, published: item.published,
         isInjury: true, source: "FantasyPros" as const, playerId: item.playerId,
       }));
-    const tank01Items = tank01.items.filter(item => item.isInjury && roster.names.has(normalizeName(item.playerName)));
-    const seen = new Set(fantasyProsItems.map(item => `${normalizeName(item.playerName)}|${item.headline}`));
-    const dedupedTank01 = tank01Items.filter(item => !seen.has(`${normalizeName(item.playerName)}|${item.headline}`));
-    return [...fantasyProsItems, ...dedupedTank01];
+    const seen = new Set(tank01Items.map(item => `${normalizeName(item.playerName)}|${item.headline}`));
+    const dedupedFantasyPros = fantasyProsItems.filter(item => !seen.has(`${normalizeName(item.playerName)}|${item.headline}`));
+    return [...tank01Items, ...dedupedFantasyPros];
   }, [injuries.data, tank01.items, roster.names]);
 
   const loading = roster.isLoading || injuries.isLoading || tank01.loading;
@@ -62,8 +64,10 @@ export function CvcInjuryReport() {
   </section>;
 }
 
-/** Ported from WRC's Standings.tsx MyTeamNews -- FantasyPros only (no Tank01) to match
- * WRC's actual scope for this specific panel, with the same "preview 8, show all" pattern. */
+/** Ported from WRC's Standings.tsx MyTeamNews -- same card layout and "preview 8, show
+ * all" pattern. Combines FantasyPros and Tank01 (unlike WRC's own FantasyPros-only
+ * version of this panel), with Tank01 as the default/preferred source: shown first,
+ * FantasyPros fills in anything Tank01 doesn't have, deduped by player+headline. */
 export function CvcMyTeamNews() {
   const roster = useMyRosterNames();
   const news = trpc.league.fantasyProsNews.useQuery({ limit: 100 }, { enabled: roster.isAuthenticated, staleTime: 15 * 60_000 });
@@ -71,6 +75,7 @@ export function CvcMyTeamNews() {
   const [showAll, setShowAll] = useState(false);
 
   const items = useMemo<CvcNewsItem[]>(() => {
+    const tank01Items = tank01.items.filter(item => roster.names.has(normalizeName(item.playerName)));
     const fantasyProsItems = (news.data?.items ?? [])
       .filter(item => roster.names.has(normalizeName(item.playerName)))
       .map((item): CvcNewsItem => ({
@@ -79,10 +84,9 @@ export function CvcMyTeamNews() {
         published: item.published, url: item.link, isInjury: item.isInjury,
         source: "FantasyPros" as const, playerId: item.playerId,
       }));
-    const tank01Items = tank01.items.filter(item => roster.names.has(normalizeName(item.playerName)));
-    const seen = new Set(fantasyProsItems.map(item => `${normalizeName(item.playerName)}|${item.headline}`));
-    const dedupedTank01 = tank01Items.filter(item => !seen.has(`${normalizeName(item.playerName)}|${item.headline}`));
-    return [...fantasyProsItems, ...dedupedTank01];
+    const seen = new Set(tank01Items.map(item => `${normalizeName(item.playerName)}|${item.headline}`));
+    const dedupedFantasyPros = fantasyProsItems.filter(item => !seen.has(`${normalizeName(item.playerName)}|${item.headline}`));
+    return [...tank01Items, ...dedupedFantasyPros];
   }, [news.data, tank01.items, roster.names]);
 
   const loading = roster.isLoading || news.isLoading || tank01.loading;
