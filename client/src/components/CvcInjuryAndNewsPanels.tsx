@@ -116,6 +116,7 @@ export function CvcMyTeamNews() {
         <p>FantasyPros news error: {news.error?.message ?? "none"}</p>
         <p>FantasyPros news raw items: {news.data?.items?.length ?? "no data"}</p>
         <p>FantasyPros news sample names: {(news.data?.items ?? []).slice(0, 5).map(item => item.playerName).join(", ") || "none"}</p>
+        <pre className="mt-1 max-h-64 overflow-auto whitespace-pre-wrap break-all rounded bg-white p-1.5 text-[9px]">{JSON.stringify((news.data as any)?.rawResponseSample, null, 2)}</pre>
         <p>Tank01 news loading: {String(tank01.loading)}</p>
         <p>Tank01 raw items: {tank01.items.length}</p>
         <p>Tank01 sample names: {tank01.items.slice(0, 5).map(item => item.playerName).join(", ") || "none"}</p>

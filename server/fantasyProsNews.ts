@@ -106,6 +106,17 @@ export async function getFantasyProsNews(limit = 50): Promise<FantasyProsNewsIte
   }).filter(item => item.title);
 }
 
+/** Debug-only: fetches the raw, unparsed FantasyPros news response with no processing
+ * applied -- getFantasyProsNews is confirmed returning 0 items with no error, which
+ * could mean an empty upstream response, OR the same "guessed field name" issue
+ * already confirmed elsewhere in this file (row.stats being a plain object, not an
+ * array) -- data.items might not be the real top-level key FantasyPros uses for news.
+ * Not used by any real feature. */
+export async function getFantasyProsRawNewsResponse(limit = 10): Promise<unknown> {
+  const query = new URLSearchParams({ limit: String(Math.min(Math.max(limit, 1), 100)), order_by: "updated" });
+  return request<unknown>(`/nfl/news?${query.toString()}`, 15 * 60_000);
+}
+
 export type FantasyProsRank = {
   playerId: number;
   name: string;

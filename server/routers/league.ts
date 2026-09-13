@@ -4,7 +4,7 @@ import { protectedProcedure, publicProcedure, router } from "../_core/trpc";
 import { getFantasyProsDataAdapter, getNFLDataAdapter, Tank01NFLDataAdapter } from "../nflDataAdapter";
 import { getCvcPlayerCareerStats, parseCvcGameLog } from "../playerCareerStats";
 import { fantasyProsCacheStatus, getFantasyProsActivePlayerIds, getFantasyProsRookiePlayerIds } from "../fantasyProsCache";
-import { getFantasyProsInjuries, getFantasyProsNews, getFantasyProsProjections, getFantasyProsRanks } from "../fantasyProsNews";
+import { getFantasyProsInjuries, getFantasyProsNews, getFantasyProsProjections, getFantasyProsRanks, getFantasyProsRawNewsResponse } from "../fantasyProsNews";
 import { normalizePlayerName } from "@shared/playerNameMatch";
 import { syncNflTeamAssignments } from "../nflTeamAssignmentSync";
 import { getFaabBalance, MAX_ROSTER_SIZE, STARTING_FAAB } from "../waiverRules";
@@ -848,7 +848,8 @@ export const leagueRouter = router({
         };
       })
       .filter(item => item.position && eligible.has(item.position));
-    return { items };
+    const rawResponseSample = await getFantasyProsRawNewsResponse(input?.limit ?? 100).catch(cause => ({ error: cause instanceof Error ? cause.message : String(cause) }));
+    return { items, rawResponseSample };
   }),
 
   // Powers the Standings page's Injuries panel. Resolves "current week" the same way
