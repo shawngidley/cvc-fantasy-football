@@ -4,6 +4,9 @@ import { syncNflTeamAssignments } from "../nflTeamAssignmentSync";
 import { resolveOpenWaiverPeriod } from "../waiverResolution";
 import { aggregateDstSeasonStats } from "../dstSeasonAggregation";
 import { syncNflTeamSchedules } from "../nflTeamScheduleSync";
+import { archiveFantasyProsNews } from "../fantasyProsArchive";
+import { attachFantasyProsPlayerNames } from "../fantasyProsNewsNames";
+import { getFantasyProsNews, getFantasyProsRanks } from "../fantasyProsNews";
 import { supabase, unwrap } from "../supabase";
 
 function checkCronAuth(req: Request, res: Response): boolean {
@@ -106,6 +109,30 @@ export async function runTeamScheduleSync(req: Request, res: Response) {
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     console.error("NFL team schedule sync failed", error);
+    res.status(500).json({ error: message, timestamp: new Date().toISOString() });
+  }
+}
+
+/** Daily snapshot of the live FantasyPros news feed into the 30-day rolling archive,
+ * matching WRC's collectFantasyProsArchive -- FantasyPros' live /nfl/news endpoint
+ * only returns its most recent ~100 items league-wide with no date-range guarantee, so
+ * a lower-profile player's news can fall off the window entirely between checks.
+ * Running this daily builds up a reliable history the live feed alone can't provide. */
+export async function runFantasyProsArchiveCollection(req: Request, res: Response) {
+  if (!checkCronAuth(req, res)) return;
+  try {
+    const season = await getCurrentSeason();
+    if (!season) { res.json({ ok: true, status: "skipped", reason: "No current season found." }); return; }
+    const eligible = ["QB", "RB", "WR", "TE", "K"];
+    const [news, ...rankGroups] = await Promise.all([
+      getFantasyProsNews(100),
+      ...eligible.map(position => getFantasyProsRanks(season.year, position, 1)),
+    ]);
+    const result = await archiveFantasyProsNews(attachFantasyProsPlayerNames(news, rankGroups.flat()));
+    res.json({ ok: true, fetched: news.length, ...result });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.error("FantasyPros archive collection failed", error);
     res.status(500).json({ error: message, timestamp: new Date().toISOString() });
   }
 }

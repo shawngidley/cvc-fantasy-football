@@ -5,6 +5,8 @@ import { getFantasyProsDataAdapter, getNFLDataAdapter, Tank01NFLDataAdapter } fr
 import { getCvcPlayerCareerStats, parseCvcGameLog } from "../playerCareerStats";
 import { fantasyProsCacheStatus, getFantasyProsActivePlayerIds, getFantasyProsRookiePlayerIds } from "../fantasyProsCache";
 import { getFantasyProsInjuries, getFantasyProsNews, getFantasyProsProjections, getFantasyProsRanks, matchPlayerNameFromTitle } from "../fantasyProsNews";
+import { archiveFantasyProsNews, getArchivedFantasyProsNews, mergeFantasyProsNews } from "../fantasyProsArchive";
+import { attachFantasyProsPlayerNames } from "../fantasyProsNewsNames";
 import { normalizePlayerName } from "@shared/playerNameMatch";
 import { syncNflTeamAssignments } from "../nflTeamAssignmentSync";
 import { getFaabBalance, MAX_ROSTER_SIZE, STARTING_FAAB } from "../waiverRules";
@@ -828,31 +830,47 @@ export const leagueRouter = router({
   // single name-matched lookup against `player` fills in position/team more simply, and
   // also gives us the exact display_name/nfl_team CVC already uses everywhere else.
   fantasyProsNews: publicProcedure.input(z.object({ limit: z.number().int().min(1).max(100).optional() }).optional()).query(async ({ input }) => {
-    const rawItems = await getFantasyProsNews(input?.limit ?? 100);
+    const { season } = await getCurrentLeagueAndSeason();
     const eligible = new Set(["QB", "RB", "WR", "TE", "K"]);
+    const weeks = unwrap(await supabase.from("schedule_week").select("week_number, status").eq("season_id", season.id).order("week_number")) ?? [];
+    const currentWeek = weeks.find(item => item.status === "live") ?? weeks.find(item => item.status === "upcoming") ?? weeks[0];
+    // Matches WRC's approach: the raw /nfl/news response has no player_name/name field
+    // at all, only player_id -- fill it in by matching that ID against FantasyPros'
+    // own ranks data (a reliable playerId -> name/team/position mapping), rather than
+    // parsing the name out of the title text.
+    const [rawNews, ...rankGroups] = await Promise.all([
+      getFantasyProsNews(input?.limit ?? 100),
+      ...Array.from(eligible).map(position => getFantasyProsRanks(season.year, position, currentWeek?.week_number ?? 1)),
+    ]);
+    const enrichedCurrent = attachFantasyProsPlayerNames(rawNews, rankGroups.flat());
+    // 30-day rolling archive, matching WRC: FantasyPros' live feed only returns its
+    // most recent ~100 items league-wide with no date-range guarantee, so a
+    // lower-profile player's news can fall off the window entirely during a busy news
+    // cycle. Merging in the archive guarantees at least daily-granularity coverage for
+    // a full 30 days. Archiving the current feed is fire-and-forget -- a failure here
+    // shouldn't break the live response.
+    const [archived] = await Promise.all([
+      getArchivedFantasyProsNews(),
+      archiveFantasyProsNews(enrichedCurrent).catch(error => console.warn("[FantasyPros archive] Current-feed archive failed:", error)),
+    ]);
+    const merged = mergeFantasyProsNews(enrichedCurrent, archived);
     const players = unwrap(await supabase.from("player").select("id, display_name, position, nfl_team").in("position", Array.from(eligible))) ?? [];
-    // Confirmed live: FantasyPros' /nfl/news response has no player_name or name field
-    // at all (only player_id, title, desc, impact) -- getFantasyProsNews's
-    // playerName: row.player_name ?? row.name was always empty, so no title ever
-    // matched a known player by name lookup, and (unlike fantasyProsInjuries, which has
-    // a raw-position fallback) nothing here ever fell back to a real position --
-    // meaning literally every item was filtered out regardless of real content. The
-    // player's name only actually exists embedded in the title text (e.g.
-    // "De'Zhaun Stribling (ankle) out at least one month"), so match by finding which
-    // known CVC player's display name the title starts with -- prefers the longest
-    // match, in case one player's name happens to be a prefix of another's.
+    const normalize = (name: string) => name.toLowerCase().replace(/\./g, "").replace(/\b(jr|sr|ii|iii|iv)\b/g, "").replace(/\s+/g, " ").trim();
+    const byName = new Map(players.map(row => [normalize(row.display_name), row]));
+    // Secondary fallback (see matchPlayerNameFromTitle) for any item ranks enrichment
+    // didn't cover (e.g. a deep-roster player with no current rank) -- matches by
+    // finding which known CVC player's display name the title starts with.
     const playersByLength = [...players].sort((a, b) => b.display_name.length - a.display_name.length);
-    function matchPlayerFromTitle(title: string) { return matchPlayerNameFromTitle(title, playersByLength); }
     const injuryKeywords = ["injured", "injury", "questionable", "doubtful", "out", " ir ", "placed on", "ruled out", "limited", "missed", "surgery", "knee", "hamstring", "ankle", "shoulder", "concussion", "rib", "back", "wrist", "hip", "illness"];
-    const items = rawItems
+    const items = merged
       .map(item => {
-        const match = matchPlayerFromTitle(item.title);
+        const match = byName.get(normalize(item.playerName)) ?? matchPlayerNameFromTitle(item.title, playersByLength);
         const text = `${item.title} ${item.description} ${item.impact}`.toLowerCase();
         return {
           ...item,
           playerId: match?.id ?? null,
           playerName: match?.display_name || item.playerName,
-          position: match?.position ?? null,
+          position: match?.position ?? item.position ?? null,
           team: match?.nfl_team || item.team,
           isInjury: injuryKeywords.some(keyword => text.includes(keyword)),
         };
