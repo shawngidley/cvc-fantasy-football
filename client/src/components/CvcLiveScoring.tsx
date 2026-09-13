@@ -97,8 +97,10 @@ export function CvcLiveScoring() {
   // Bench players (assigned_slot_code = 'BENCH') were previously mixed into the same
   // alphabetically-sorted list as starters instead of appearing as their own section
   // below, same as WRC's build.
-  const benchAway = useMemo(() => [...(selected?.awayLineup ?? [])].filter(entry => !isStarterSlot(entry.slot)), [selected]);
-  const benchHome = useMemo(() => [...(selected?.homeLineup ?? [])].filter(entry => !isStarterSlot(entry.slot)), [selected]);
+  const benchPositionOrder = ["QB", "RB", "WR", "TE", "K", "DST", "DEF"];
+  const benchSortKey = (entry: any) => { const index = benchPositionOrder.indexOf((entry.player?.position ?? "").toUpperCase()); return index === -1 ? benchPositionOrder.length : index; };
+  const benchAway = useMemo(() => [...(selected?.awayLineup ?? [])].filter(entry => !isStarterSlot(entry.slot)).sort((a, b) => benchSortKey(a) - benchSortKey(b)), [selected]);
+  const benchHome = useMemo(() => [...(selected?.homeLineup ?? [])].filter(entry => !isStarterSlot(entry.slot)).sort((a, b) => benchSortKey(a) - benchSortKey(b)), [selected]);
   const visiblePlayers = useMemo(() => [...selectedAway, ...selectedHome, ...benchAway, ...benchHome].flatMap(entry => entry.player && !isDst(entry.player.position) ? [entry.player] : []), [selectedAway, selectedHome, benchAway, benchHome]);
   const profiles = useCvcTank01PlayerProfiles(visiblePlayers, 40);
   const starterSlots = (slots.data ?? []).filter(slot => !["BENCH", "BN", "IR", "TAXI"].includes(slot.code.toUpperCase())).flatMap(slot => Array.from({ length: Math.max(1, Number(slot.maximum_count ?? 1)) }, () => slot.code)).sort((a, b) => slotRank(a) - slotRank(b));
