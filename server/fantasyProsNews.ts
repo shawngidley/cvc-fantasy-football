@@ -106,16 +106,6 @@ export async function getFantasyProsNews(limit = 50): Promise<FantasyProsNewsIte
   }).filter(item => item.title);
 }
 
-/** Debug-only: fetches the raw, unparsed FantasyPros news response with no processing
- * applied -- getFantasyProsNews is confirmed returning 0 items with no error, which
- * could mean an empty upstream response, OR the same "guessed field name" issue
- * already confirmed elsewhere in this file (row.stats being a plain object, not an
- * array) -- data.items might not be the real top-level key FantasyPros uses for news.
- * Not used by any real feature. */
-export async function getFantasyProsRawNewsResponse(limit = 10): Promise<unknown> {
-  const query = new URLSearchParams({ limit: String(Math.min(Math.max(limit, 1), 100)), order_by: "updated" });
-  return request<unknown>(`/nfl/news?${query.toString()}`, 15 * 60_000);
-}
 
 export type FantasyProsRank = {
   playerId: number;
@@ -187,3 +177,24 @@ export async function getFantasyProsProjections(year: number, position: string, 
   }).filter(item => item.name);
 }
 
+/**
+ * Finds which known CVC player (from candidates, sorted longest-name-first by the
+ * caller to avoid a short name false-matching as a prefix of a longer one) a
+ * FantasyPros news title starts with. Confirmed necessary: the raw /nfl/news response
+ * has no player_name or name field at all -- the player's identity only exists
+ * embedded in the title text (e.g. "De'Zhaun Stribling (ankle) out at least one
+ * month"), so lookup-by-name-field never worked. Periods are stripped from both sides
+ * before comparing, since a title can use "A.J. Brown" while CVC's own player record
+ * stores "AJ Brown" (or vice versa).
+ */
+export function matchPlayerNameFromTitle<T extends { display_name: string }>(title: string, candidatesLongestFirst: T[]): T | undefined {
+  const stripPeriods = (value: string) => value.replace(/\./g, "");
+  const lowerTitle = stripPeriods(title.toLowerCase());
+  for (const candidate of candidatesLongestFirst) {
+    const name = stripPeriods(candidate.display_name.toLowerCase());
+    if (!lowerTitle.startsWith(name)) continue;
+    const next = lowerTitle.charAt(name.length);
+    if (next === "" || next === " " || next === "(") return candidate;
+  }
+  return undefined;
+}

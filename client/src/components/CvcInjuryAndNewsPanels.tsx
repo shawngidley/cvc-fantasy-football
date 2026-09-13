@@ -52,18 +52,6 @@ export function CvcInjuryReport() {
       <span className="ml-auto rounded-full border border-slate-200 bg-white px-3 py-1 text-[11px] font-bold text-slate-500">My Roster</span>
       <button onClick={() => { injuries.refetch(); tank01.refresh(); }} className="rounded p-1 text-slate-500 hover:text-cvc-accent" aria-label="Refresh injuries"><RefreshCw size={13} className={loading ? "animate-spin" : ""} /></button>
     </div>
-    <details className="mx-4 mb-3 rounded-lg border border-amber-400/30 bg-amber-50 px-3 py-2 text-[11px] text-amber-900"><summary className="cursor-pointer font-bold uppercase tracking-[0.06em]">Debug (tap, then screenshot for Claude)</summary>
-      <div className="mt-1 space-y-0.5">
-        <p>Roster names loaded: {roster.names.size} — {Array.from(roster.names).slice(0, 10).join(", ") || "none"}</p>
-        <p>FantasyPros injuries error: {injuries.error?.message ?? "none"}</p>
-        <p>FantasyPros injuries raw items: {injuries.data?.items?.length ?? "no data"}</p>
-        <p>FantasyPros injuries sample names: {(injuries.data?.items ?? []).slice(0, 5).map(item => item.playerName).join(", ") || "none"}</p>
-        <p>Tank01 news loading: {String(tank01.loading)}</p>
-        <p>Tank01 raw items: {tank01.items.length}</p>
-        <p>Tank01 injury items: {tank01.items.filter(item => item.isInjury).length}</p>
-        <p>Tank01 sample names: {tank01.items.slice(0, 5).map(item => item.playerName).join(", ") || "none"}</p>
-      </div>
-    </details>
     {loading ? (
       <div className="space-y-2 px-5 pb-4">{[1, 2, 3].map(index => <div key={index} className="h-11 animate-pulse rounded-lg bg-slate-100" />)}</div>
     ) : items.length === 0 ? (
@@ -110,18 +98,6 @@ export function CvcMyTeamNews() {
       <span className="ml-auto rounded-full border border-slate-200 bg-white px-3 py-1 text-[11px] font-bold text-slate-500">My Roster</span>
       <button onClick={() => { news.refetch(); tank01.refresh(); }} className="rounded p-1 text-slate-500 hover:text-cvc-accent" aria-label="Refresh player news"><RefreshCw size={13} className={loading ? "animate-spin" : ""} /></button>
     </div>
-    <details className="mx-4 mb-3 rounded-lg border border-amber-400/30 bg-amber-50 px-3 py-2 text-[11px] text-amber-900"><summary className="cursor-pointer font-bold uppercase tracking-[0.06em]">Debug (tap, then screenshot for Claude)</summary>
-      <div className="mt-1 space-y-0.5">
-        <p>Roster names loaded: {roster.names.size} — {Array.from(roster.names).slice(0, 10).join(", ") || "none"}</p>
-        <p>FantasyPros news error: {news.error?.message ?? "none"}</p>
-        <p>FantasyPros news raw items: {news.data?.items?.length ?? "no data"}</p>
-        <p>FantasyPros news sample names: {(news.data?.items ?? []).slice(0, 5).map(item => item.playerName).join(", ") || "none"}</p>
-        <pre className="mt-1 max-h-64 overflow-auto whitespace-pre-wrap break-all rounded bg-white p-1.5 text-[9px]">{JSON.stringify((news.data as any)?.rawResponseSample, null, 2)}</pre>
-        <p>Tank01 news loading: {String(tank01.loading)}</p>
-        <p>Tank01 raw items: {tank01.items.length}</p>
-        <p>Tank01 sample names: {tank01.items.slice(0, 5).map(item => item.playerName).join(", ") || "none"}</p>
-      </div>
-    </details>
     {loading ? (
       <div className="space-y-2 px-5 pb-4">{[1, 2, 3, 4, 5].map(index => <div key={index} className="h-12 animate-pulse rounded-lg bg-slate-100" />)}</div>
     ) : displayed.length === 0 ? (

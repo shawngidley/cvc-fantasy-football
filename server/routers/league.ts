@@ -4,7 +4,7 @@ import { protectedProcedure, publicProcedure, router } from "../_core/trpc";
 import { getFantasyProsDataAdapter, getNFLDataAdapter, Tank01NFLDataAdapter } from "../nflDataAdapter";
 import { getCvcPlayerCareerStats, parseCvcGameLog } from "../playerCareerStats";
 import { fantasyProsCacheStatus, getFantasyProsActivePlayerIds, getFantasyProsRookiePlayerIds } from "../fantasyProsCache";
-import { getFantasyProsInjuries, getFantasyProsNews, getFantasyProsProjections, getFantasyProsRanks, getFantasyProsRawNewsResponse } from "../fantasyProsNews";
+import { getFantasyProsInjuries, getFantasyProsNews, getFantasyProsProjections, getFantasyProsRanks, matchPlayerNameFromTitle } from "../fantasyProsNews";
 import { normalizePlayerName } from "@shared/playerNameMatch";
 import { syncNflTeamAssignments } from "../nflTeamAssignmentSync";
 import { getFaabBalance, MAX_ROSTER_SIZE, STARTING_FAAB } from "../waiverRules";
@@ -831,12 +831,22 @@ export const leagueRouter = router({
     const rawItems = await getFantasyProsNews(input?.limit ?? 100);
     const eligible = new Set(["QB", "RB", "WR", "TE", "K"]);
     const players = unwrap(await supabase.from("player").select("id, display_name, position, nfl_team").in("position", Array.from(eligible))) ?? [];
-    const normalize = (name: string) => name.toLowerCase().replace(/\./g, "").replace(/\b(jr|sr|ii|iii|iv)\b/g, "").replace(/\s+/g, " ").trim();
-    const byName = new Map(players.map(row => [normalize(row.display_name), row]));
+    // Confirmed live: FantasyPros' /nfl/news response has no player_name or name field
+    // at all (only player_id, title, desc, impact) -- getFantasyProsNews's
+    // playerName: row.player_name ?? row.name was always empty, so no title ever
+    // matched a known player by name lookup, and (unlike fantasyProsInjuries, which has
+    // a raw-position fallback) nothing here ever fell back to a real position --
+    // meaning literally every item was filtered out regardless of real content. The
+    // player's name only actually exists embedded in the title text (e.g.
+    // "De'Zhaun Stribling (ankle) out at least one month"), so match by finding which
+    // known CVC player's display name the title starts with -- prefers the longest
+    // match, in case one player's name happens to be a prefix of another's.
+    const playersByLength = [...players].sort((a, b) => b.display_name.length - a.display_name.length);
+    function matchPlayerFromTitle(title: string) { return matchPlayerNameFromTitle(title, playersByLength); }
     const injuryKeywords = ["injured", "injury", "questionable", "doubtful", "out", " ir ", "placed on", "ruled out", "limited", "missed", "surgery", "knee", "hamstring", "ankle", "shoulder", "concussion", "rib", "back", "wrist", "hip", "illness"];
     const items = rawItems
       .map(item => {
-        const match = byName.get(normalize(item.playerName));
+        const match = matchPlayerFromTitle(item.title);
         const text = `${item.title} ${item.description} ${item.impact}`.toLowerCase();
         return {
           ...item,
@@ -848,8 +858,7 @@ export const leagueRouter = router({
         };
       })
       .filter(item => item.position && eligible.has(item.position));
-    const rawResponseSample = await getFantasyProsRawNewsResponse(input?.limit ?? 100).catch(cause => ({ error: cause instanceof Error ? cause.message : String(cause) }));
-    return { items, rawResponseSample };
+    return { items };
   }),
 
   // Powers the Standings page's Injuries panel. Resolves "current week" the same way
