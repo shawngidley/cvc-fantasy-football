@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { calculateCvcFantasyPoints, type CvcScoringRule, type Tank01LiveStats } from "@shared/cvcScoring";
+import { normalizePlayerName } from "@shared/playerNameMatch";
 import { getKickerEventsForPlayer, parseEspnKickerEvents, sumMadeFieldGoalYards, countMadeExtraPoints, type KickerPlayEvent } from "@/lib/espnKickerEvents";
 
 const TANK01_BASE_URL = "/api/tank01";
@@ -9,7 +10,6 @@ type TankGame = { gameID?: string; away?: string; home?: string; gameDate?: stri
 export type LiveStatMap = Record<string, Tank01LiveStats>;
 export type CvcNflMatchup = { opponent: string; isHome: boolean; gameTime: string; gameDate: string; gameId: string };
 
-const normalize = (value: string) => value.toLowerCase().replace(/[^a-z0-9]/g, "");
 const normalizeTeam = (value: string) => ({ kan: "kc", tam: "tb", arz: "ari", jax: "jac", was: "wsh" }[value.toLowerCase()] ?? value.toLowerCase());
 
 /** Parses a Tank01 gameDate (YYYYMMDD) + gameTime ("8:20p" style, assumed ET) into a
@@ -169,7 +169,7 @@ export function useCvcTank01LiveScores(week: number | undefined, season: number 
         // computes fantasy points lazily once it has the real position.
         for (const stat of Object.values(payload.body?.playerStats ?? {})) {
           const name = String(stat.longName ?? "");
-          if (name) nextStatLines[normalize(name)] = stat as Tank01LiveStats;
+          if (name) nextStatLines[normalizePlayerName(name)] = stat as Tank01LiveStats;
         }
         for (const stat of Object.values(payload.body?.DST ?? {})) {
           const teamAbv = String(stat.teamAbv ?? "");
@@ -241,7 +241,7 @@ export function useCvcTank01LiveScores(week: number | undefined, season: number 
 /** Looks up a player's raw live stat line (for rendering real game stats), using the
  * exact same key logic as getCvcLivePoints. */
 export function getCvcLiveStatLine(statLines: LiveStatMap, playerName: string, position: string, nflTeam: string | null | undefined): Tank01LiveStats | null {
-  const key = position === "DST" ? `dst:${normalizeTeam(nflTeam ?? "")}` : normalize(playerName);
+  const key = position === "DST" ? `dst:${normalizeTeam(nflTeam ?? "")}` : normalizePlayerName(playerName);
   return statLines[key] ?? null;
 }
 
@@ -251,7 +251,7 @@ export function getCvcLiveStatLine(statLines: LiveStatMap, playerName: string, p
  * advance, and CVC's scoring rules are position-gated (ruleValue only matches a rule
  * when applies_to_positions includes the given position). */
 export function getCvcLivePoints(statLines: LiveStatMap, playerName: string, position: string, nflTeam: string | null | undefined, rules: CvcScoringRule[]): number | null {
-  const key = position === "DST" ? `dst:${normalizeTeam(nflTeam ?? "")}` : normalize(playerName);
+  const key = position === "DST" ? `dst:${normalizeTeam(nflTeam ?? "")}` : normalizePlayerName(playerName);
   const stat = statLines[key];
   if (!stat) return null;
   return calculateCvcFantasyPoints(stat, position, rules);

@@ -855,8 +855,7 @@ export const leagueRouter = router({
     ]);
     const merged = mergeFantasyProsNews(enrichedCurrent, archived);
     const players = unwrap(await supabase.from("player").select("id, display_name, position, nfl_team").in("position", Array.from(eligible))) ?? [];
-    const normalize = (name: string) => name.toLowerCase().replace(/\./g, "").replace(/\b(jr|sr|ii|iii|iv)\b/g, "").replace(/\s+/g, " ").trim();
-    const byName = new Map(players.map(row => [normalize(row.display_name), row]));
+    const byName = new Map(players.map(row => [normalizePlayerName(row.display_name), row]));
     // Secondary fallback (see matchPlayerNameFromTitle) for any item ranks enrichment
     // didn't cover (e.g. a deep-roster player with no current rank) -- matches by
     // finding which known CVC player's display name the title starts with.
@@ -864,7 +863,7 @@ export const leagueRouter = router({
     const injuryKeywords = ["injured", "injury", "questionable", "doubtful", "out", " ir ", "placed on", "ruled out", "limited", "missed", "surgery", "knee", "hamstring", "ankle", "shoulder", "concussion", "rib", "back", "wrist", "hip", "illness"];
     const items = merged
       .map(item => {
-        const match = byName.get(normalize(item.playerName)) ?? matchPlayerNameFromTitle(item.title, playersByLength);
+        const match = byName.get(normalizePlayerName(item.playerName)) ?? matchPlayerNameFromTitle(item.title, playersByLength);
         const text = `${item.title} ${item.description} ${item.impact}`.toLowerCase();
         return {
           ...item,
@@ -891,11 +890,10 @@ export const leagueRouter = router({
     const rawInjuries = await getFantasyProsInjuries(season.year, currentWeek.week_number);
     const eligible = new Set(["QB", "RB", "WR", "TE", "K"]);
     const players = unwrap(await supabase.from("player").select("id, display_name, position, nfl_team").in("position", Array.from(eligible))) ?? [];
-    const normalize = (name: string) => name.toLowerCase().replace(/\./g, "").replace(/\b(jr|sr|ii|iii|iv)\b/g, "").replace(/\s+/g, " ").trim();
-    const byName = new Map(players.map(row => [normalize(row.display_name), row]));
+    const byName = new Map(players.map(row => [normalizePlayerName(row.display_name), row]));
     const items = rawInjuries
       .map(injury => {
-        const match = byName.get(normalize(injury.name));
+        const match = byName.get(normalizePlayerName(injury.name));
         const status = injury.shortStatus || injury.status || "Injury update";
         const description = [
           injury.comment || `${injury.name} is currently listed as ${status}.`,

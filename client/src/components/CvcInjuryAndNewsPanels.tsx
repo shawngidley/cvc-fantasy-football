@@ -4,12 +4,7 @@ import { trpc } from "@/lib/trpc";
 import { useCvcOwnerAuth } from "@/hooks/useCvcOwnerAuth";
 import { CvcNewsRow, type CvcNewsItem } from "@/components/CvcNewsRow";
 import { useTank01MappedNews } from "@/hooks/useTank01MappedNews";
-
-// Same normalization used elsewhere (fantasyProsNews procedure, CvcPlayerNews) for
-// matching against CVC's own player records.
-function normalizeName(name: string) {
-  return name.toLowerCase().replace(/\./g, "").replace(/\b(jr|sr|ii|iii|iv)\b/g, "").replace(/\s+/g, " ").trim();
-}
+import { normalizePlayerName as normalizeName } from "@shared/playerNameMatch";
 
 function useMyRosterNames() {
   const auth = useCvcOwnerAuth();

@@ -1,13 +1,6 @@
 import { getNFLDataAdapter, Tank01NFLDataAdapter } from "./nflDataAdapter";
 import { supabase, unwrap } from "./supabase";
-
-// Strips common trailing name suffixes (Jr/Sr/II/III/IV) before the full alphanumeric
-// strip below -- confirmed via a live Tank01 sample that longName is correctly
-// populated (e.g. "Chad Ryland"), so the low 12.5% match rate on the first live run is
-// much more likely explained by systematic suffix mismatches between sources (e.g.
-// Tank01's "Patrick Mahomes" vs CVC's "Patrick Mahomes II") than a wrong field.
-const SUFFIX_PATTERN = /\s+(jr\.?|sr\.?|ii|iii|iv|v)$/i;
-const canonical = (value: string | null | undefined) => (value ?? "").trim().replace(SUFFIX_PATTERN, "").toLowerCase().replace(/[^a-z0-9]/g, "");
+import { normalizePlayerName } from "@shared/playerNameMatch";
 
 // Standard 32 NFL team abbreviations, used only as a fallback if Tank01's own team list
 // can't be parsed -- the sync prefers fetching the live list first (below) so it isn't
@@ -53,7 +46,7 @@ export async function syncTank01ActiveRoster(): Promise<Tank01ActiveRosterSyncSu
   }
 
   const errors: Record<string, string> = {};
-  const rosterIdsByName = new Map<string, string>(); // canonical(longName) -> tank01 playerID
+  const rosterIdsByName = new Map<string, string>(); // normalizePlayerName(longName) -> tank01 playerID
   const rosterPlayerIds = new Set<string>();
   let totalRosterPlayers = 0;
   let sampleRosterPlayer: unknown;
@@ -67,7 +60,7 @@ export async function syncTank01ActiveRoster(): Promise<Tank01ActiveRosterSyncSu
         if (!sampleRosterPlayer && roster.length) sampleRosterPlayer = roster[0];
         for (const player of roster) {
           if (player.playerID) rosterPlayerIds.add(player.playerID);
-          if (player.longName && player.playerID) rosterIdsByName.set(canonical(player.longName), player.playerID);
+          if (player.longName && player.playerID) rosterIdsByName.set(normalizePlayerName(player.longName), player.playerID);
         }
       } catch (error) {
         errors[abv] = error instanceof Error ? error.message : "Request failed";
@@ -89,7 +82,7 @@ export async function syncTank01ActiveRoster(): Promise<Tank01ActiveRosterSyncSu
       if (rosterPlayerIds.has(storedTank01Id)) { activeIds.push(player.id); matchedByStoredId += 1; }
       continue;
     }
-    const foundId = rosterIdsByName.get(canonical(player.display_name));
+    const foundId = rosterIdsByName.get(normalizePlayerName(player.display_name));
     if (foundId) {
       activeIds.push(player.id);
       newlyLinked.push({ id: player.id, metadata: { ...(player.metadata ?? {}), tank01_id: foundId } });

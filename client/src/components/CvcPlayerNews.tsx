@@ -3,6 +3,7 @@ import { Newspaper, RefreshCw, ShieldAlert } from "lucide-react";
 import { trpc } from "@/lib/trpc";
 import { useCvcOwnerAuth } from "@/hooks/useCvcOwnerAuth";
 import { CvcNewsRow, type CvcNewsItem } from "@/components/CvcNewsRow";
+import { normalizePlayerName as normalizeName } from "@shared/playerNameMatch";
 
 type TankNews = { title?: string; link?: string; image?: string; playerIDs?: string[] };
 type NewsSource = "FANTASYPROS" | "TANK01" | "ALL";
@@ -10,14 +11,6 @@ const CACHE_KEY = "cvc_tank01_news_v1";
 const TTL_MS = 15 * 60_000;
 const ELIGIBLE_POSITIONS = ["QB", "RB", "WR", "TE", "K"];
 const INJURY_KEYWORDS = ["injur", "questionable", "doubtful", " ruled out", "out for", " ir ", "surgery", "concussion", "hamstring", "ankle", "knee", "illness"];
-
-// Same normalization used server-side (fantasyProsNews procedure in league.ts) for
-// matching news headlines against CVC's own player records -- kept in sync manually,
-// same as the existing convention elsewhere in this codebase (rosterNewsMapping-style
-// per-file normalizers) rather than introducing a shared import for one small function.
-function normalizeName(name: string) {
-  return name.toLowerCase().replace(/\./g, "").replace(/\b(jr|sr|ii|iii|iv)\b/g, "").replace(/\s+/g, " ").trim();
-}
 
 export function CvcPlayerNews() {
   const auth = useCvcOwnerAuth();

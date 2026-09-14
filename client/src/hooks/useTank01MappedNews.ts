@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { trpc } from "@/lib/trpc";
 import type { CvcNewsItem } from "@/components/CvcNewsRow";
+import { normalizePlayerName as normalizeName } from "@shared/playerNameMatch";
 
 type TankNews = { title?: string; link?: string; image?: string; playerIDs?: string[] };
 const CACHE_KEY = "cvc_tank01_news_v1";
@@ -10,10 +11,6 @@ const INJURY_KEYWORDS = ["injur", "questionable", "doubtful", " ruled out", "out
 // Same normalization used server-side (fantasyProsNews procedure in league.ts) and in
 // CvcPlayerNews.tsx, kept in sync manually per the existing per-file-normalizer
 // convention in this codebase rather than a shared import for one small function.
-function normalizeName(name: string) {
-  return name.toLowerCase().replace(/\./g, "").replace(/\b(jr|sr|ii|iii|iv)\b/g, "").replace(/\s+/g, " ").trim();
-}
-
 /** Fetches Tank01's news feed and maps each item to a CVC player record, exactly the
  * same way CvcPlayerNews.tsx's full News page already does: match on the item's own
  * Tank01 playerIDs against player.metadata.tank01_id first (reliable, structured),

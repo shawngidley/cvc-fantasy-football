@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { computeKickoffUtc, getCvcLivePoints, isGameCurrentlyLive, isGameFetchEligible } from "./useCvcTank01LiveScores";
+import { normalizePlayerName } from "@shared/playerNameMatch";
 
 describe("computeKickoffUtc", () => {
   it("correctly rolls an 8:20pm ET kickoff into the next UTC day (the exact overflow bug)", () => {
@@ -53,7 +54,7 @@ describe("getCvcLivePoints (using the real confirmed NE @ SEA live box-score sha
       Passing: { passAttempts: "4", passTD: "0", passYds: "21", int: "0", passCompletions: "3" },
       teamID: "22", team: "NE", teamAbv: "NE", playerID: "4431452", longName: "Drake Maye",
     };
-    const statLines = { [normalizeForTest("Drake Maye")]: drakeMayeStat as any };
+    const statLines = { [normalizePlayerName("Drake Maye")]: drakeMayeStat as any };
     const points = getCvcLivePoints(statLines, "Drake Maye", "QB", "NE", rules as any);
     // 21 passing yards * 0.04 + 14 rushing yards * 0.1 = 0.84 + 1.4 = 2.24
     expect(points).toBeCloseTo(2.24, 2);
@@ -71,10 +72,26 @@ describe("getCvcLivePoints (using the real confirmed NE @ SEA live box-score sha
     // 1 sack * 2 = 2
     expect(points).toBeCloseTo(2, 2);
   });
+
+  it("finds a player's live stats when Tank01 returns their name WITH a generational suffix but CVC's own roster stores it WITHOUT one (e.g. Tank01's 'James Cook III' vs CVC's roster 'James Cook') -- confirms the write side (keyed by Tank01's longName) and the read side (looked up by CVC's own display_name) both go through the same suffix-aware normalizer, so they still match despite disagreeing on the suffix", () => {
+    const jamesCookStat = {
+      Rushing: { rushAvg: "5.0", rushYds: "80", carries: "16", longRush: "20", rushTD: "1" },
+      teamID: "2", team: "BUF", teamAbv: "BUF", playerID: "12345", longName: "James Cook III",
+    };
+    // Write side: stored under Tank01's own (suffixed) name, exactly as the live poll does.
+    const statLines = { [normalizePlayerName("James Cook III")]: jamesCookStat as any };
+    // Read side: looked up by CVC's own roster name, which has no suffix at all.
+    const points = getCvcLivePoints(statLines, "James Cook", "RB", "BUF", rules as any);
+    // 80 rushing yards * 0.1 + 1 rushing TD (no rushing_touchdown rule configured here,
+    // so only the yardage counts) = 8.0
+    expect(points).toBeCloseTo(8.0, 2);
+  });
+
+  it("still returns null (not a false-positive match) for a player who genuinely has no live stat line, even with a suffix in their own name", () => {
+    const statLines = { [normalizePlayerName("James Cook III")]: { Rushing: { rushYds: "80" } } as any };
+    expect(getCvcLivePoints(statLines, "Someone Else Entirely", "RB", "BUF", rules as any)).toBeNull();
+  });
 });
-
-function normalizeForTest(value: string) { return value.toLowerCase().replace(/[^a-z0-9]/g, ""); }
-
 describe("isGameFetchEligible (wide window -- which games are worth fetching a box score for at all)", () => {
   afterEach(() => { vi.useRealTimers(); });
 

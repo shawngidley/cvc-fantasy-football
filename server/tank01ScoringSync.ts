@@ -2,9 +2,10 @@ import { calculateCvcFantasyPoints, type CvcScoringRule, type Tank01LiveStats } 
 import { getNFLDataAdapter, Tank01NFLDataAdapter, type Tank01BoxScore } from "./nflDataAdapter";
 import { supabase, unwrap } from "./supabase";
 import { resolveSkinForWeek } from "./cvcSkins";
-import { normalize, normalizeTeam, type SnapshotRow } from "./cvcScoringShared";
+import { normalizeTeam, type SnapshotRow } from "./cvcScoringShared";
+import { normalizePlayerName } from "@shared/playerNameMatch";
 
-export { normalize, normalizeTeam };
+export { normalizeTeam };
 export const correctionWindowClosed = (now = new Date()) => now.getUTCDay() === 5 && now.getUTCHours() >= 16;
 
 /**
@@ -96,7 +97,7 @@ async function tankStatLinesForWeek(adapter: Tank01NFLDataAdapter, nflWeek: numb
     for (const raw of Object.values(box.playerStats ?? {})) {
       const player = raw as Record<string, unknown>;
       const name = String(player.longName ?? "");
-      if (name) statLines.set(normalize(name), player as Tank01LiveStats);
+      if (name) statLines.set(normalizePlayerName(name), player as Tank01LiveStats);
     }
     const dst = (box as unknown as { DST?: Record<string, Record<string, unknown>> }).DST ?? {};
     for (const entry of Object.values(dst)) {
@@ -136,7 +137,7 @@ export async function syncTank01Scores(now = new Date()): Promise<Tank01SyncSumm
     const player = Array.isArray(entry.player) ? entry.player[0] : entry.player;
     if (!player) continue;
     const position = player.position === "DEF" ? "DST" : player.position ?? "";
-    const key = position === "DST" ? `dst:${normalizeTeam(player.nfl_team ?? "")}` : normalize(player.display_name);
+    const key = position === "DST" ? `dst:${normalizeTeam(player.nfl_team ?? "")}` : normalizePlayerName(player.display_name);
     const statLine = statLines.get(key);
     const points = statLine ? calculateCvcFantasyPoints(statLine, position, rules) : 0;
     franchiseTotals.set(entry.franchise_id, (franchiseTotals.get(entry.franchise_id) ?? 0) + points);
