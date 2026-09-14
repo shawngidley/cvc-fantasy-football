@@ -46,6 +46,9 @@ export function statChips(stat: any): { label: string; value: string }[] {
   if (defense && Number(defense.totalTackles) > 0) chips.push({ label: "TKL", value: String(defense.totalTackles ?? 0) });
   if (defense && Number(defense.sacks) > 0) chips.push({ label: "SACK", value: String(defense.sacks) });
   if (defense && Number(defense.defensiveInterceptions) > 0) chips.push({ label: "INT", value: String(defense.defensiveInterceptions) });
+  if (defense && Number(defense.fumblesRecovered) > 0) chips.push({ label: "FR", value: String(defense.fumblesRecovered) });
+  if (defense && Number(defense.defensiveOrSpecialTeamsTds ?? defense.defTD) > 0) chips.push({ label: "DEF TD", value: String(defense.defensiveOrSpecialTeamsTds ?? defense.defTD) });
+  if (defense && Number(defense.safeties) > 0) chips.push({ label: "SFTY", value: String(defense.safeties) });
   return chips;
 }
 

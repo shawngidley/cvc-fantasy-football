@@ -38,4 +38,25 @@ describe("statChips (using the real confirmed live Drake Maye stat line)", () =>
     expect(chips.some(chip => chip.label === "SACK")).toBe(false);
     expect(chips.some(chip => chip.label === "INT")).toBe(false);
   });
+
+  it("shows a fumble-recovery chip for DST -- the actual confirmed bug: the real Week 1 CLE@JAX box score had Jacksonville's DST at fumblesRecovered: 1, sacks: 5, defensiveInterceptions: 1, but the live UI only ever showed SACK and INT, with no FR chip at all, even though the raw data (and the points total) had it", () => {
+    const jaxDst = { Defense: { teamAbv: "JAX", defTD: "0", defensiveInterceptions: "1", sacks: "5", ydsAllowed: "272", fumblesRecovered: "1", ptsAllowed: "10", safeties: "0" } };
+    const chips = statChips(jaxDst);
+    expect(chips).toContainEqual({ label: "SACK", value: "5" });
+    expect(chips).toContainEqual({ label: "INT", value: "1" });
+    expect(chips).toContainEqual({ label: "FR", value: "1" });
+  });
+
+  it("shows a defensive-TD chip and a safety chip for DST when nonzero, also previously missing entirely", () => {
+    const bigPlayDst = { Defense: { defTD: "1", safeties: "1", sacks: "0", defensiveInterceptions: "0", fumblesRecovered: "0" } };
+    const chips = statChips(bigPlayDst);
+    expect(chips).toContainEqual({ label: "DEF TD", value: "1" });
+    expect(chips).toContainEqual({ label: "SFTY", value: "1" });
+  });
+
+  it("omits fumble-recovery/def-TD/safety chips when they're zero, matching the existing sack/int behavior", () => {
+    const quietDst = { Defense: { sacks: "0", defensiveInterceptions: "0", fumblesRecovered: "0", defTD: "0", safeties: "0" } };
+    const chips = statChips(quietDst);
+    expect(chips).toEqual([]);
+  });
 });
