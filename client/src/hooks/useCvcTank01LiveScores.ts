@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { attributeCvcDstFumblesRecovered, calculateCvcFantasyPoints, type CvcScoringRule, type Tank01LiveStats } from "@shared/cvcScoring";
+import { calculateCvcFantasyPoints, type CvcScoringRule, type Tank01LiveStats } from "@shared/cvcScoring";
 import { normalizePlayerName } from "@shared/playerNameMatch";
 import { getKickerEventsForPlayer, parseEspnKickerEvents, sumMadeFieldGoalYards, countMadeExtraPoints, type KickerPlayEvent } from "@/lib/espnKickerEvents";
 
@@ -160,7 +160,7 @@ export function useCvcTank01LiveScores(week: number | undefined, season: number 
             // Confirmed live: the actual DST scoring source, keyed "away"/"home" with
             // the real team code inside each entry's own teamAbv field (not the outer
             // key itself, which is just the literal string "away"/"home").
-            DST?: { away?: Record<string, unknown>; home?: Record<string, unknown> };
+            DST?: Record<string, Record<string, unknown>>;
           };
         };
         // Confirmed live: Tank01's playerStats entries have no "pos" field at all --
@@ -171,11 +171,9 @@ export function useCvcTank01LiveScores(week: number | undefined, season: number 
           const name = String(stat.longName ?? "");
           if (name) nextStatLines[normalizePlayerName(name)] = stat as Tank01LiveStats;
         }
-        for (const side of ["away", "home"] as const) {
-          const stat = payload.body?.DST?.[side];
-          if (!stat) continue;
+        for (const stat of Object.values(payload.body?.DST ?? {})) {
           const teamAbv = String(stat.teamAbv ?? "");
-          if (teamAbv) nextStatLines[`dst:${normalizeTeam(teamAbv)}`] = { Defense: attributeCvcDstFumblesRecovered(side, payload.body?.DST ?? {}) as unknown as Record<string, string | number> };
+          if (teamAbv) nextStatLines[`dst:${normalizeTeam(teamAbv)}`] = { Defense: stat as unknown as Record<string, string | number> };
         }
       }));
       setStatLines(nextStatLines);

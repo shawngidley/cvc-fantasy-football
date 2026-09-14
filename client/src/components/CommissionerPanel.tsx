@@ -227,7 +227,6 @@ function SeasonStatsSyncModule() {
     setPeriodClosesAt(toLocalInputValue(easternWallClockToUtc(2026, 9, 17, 9)));
   };
 
-  const rawDstDebug = trpc.league.debugRawDstBoxScore.useQuery();
   const syncMatchupScores = trpc.league.syncMatchupScores.useMutation({
     onSuccess: data => {
       if (data.status === "skipped") { toast.error(data.reason ?? "Matchup score sync is unavailable."); return; }
@@ -271,12 +270,6 @@ function SeasonStatsSyncModule() {
       <div className="mt-3">
         <button type="button" className="cvc-button-compact" disabled={syncMatchupScores.isPending} onClick={() => syncMatchupScores.mutate()}><Save size={14} /> {syncMatchupScores.isPending ? "Syncing…" : "Sync matchup scores now"}</button>
       </div>
-    </div>
-    <div className="rounded-lg border border-dashed border-amber-400/40 bg-amber-50 p-4">
-      <p className="text-sm font-semibold text-cvc-deep">Debug: raw + fixed box.DST shape for CLE/JAX (tap, screenshot for Claude)</p>
-      <details><summary className="mt-1 cursor-pointer text-xs font-bold uppercase tracking-[0.06em] text-amber-700">Show raw DST data</summary>
-        <pre className="mt-2 max-h-80 overflow-auto whitespace-pre-wrap break-all rounded bg-white p-2 text-[10px]">{JSON.stringify(rawDstDebug.data, null, 2)}</pre>
-      </details>
     </div>
     <div className="rounded-lg border border-dashed border-cvc-deep/20 bg-cvc-tint p-4">
       <p className="text-sm font-semibold text-cvc-deep">Team bye week / schedule cache</p>

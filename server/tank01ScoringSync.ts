@@ -1,4 +1,4 @@
-import { attributeCvcDstFumblesRecovered, calculateCvcFantasyPoints, type CvcScoringRule, type Tank01LiveStats } from "@shared/cvcScoring";
+import { calculateCvcFantasyPoints, type CvcScoringRule, type Tank01LiveStats } from "@shared/cvcScoring";
 import { getNFLDataAdapter, Tank01NFLDataAdapter, type Tank01BoxScore } from "./nflDataAdapter";
 import { supabase, unwrap } from "./supabase";
 import { resolveSkinForWeek } from "./cvcSkins";
@@ -100,12 +100,10 @@ async function tankStatLinesForWeek(adapter: Tank01NFLDataAdapter, nflWeek: numb
       const name = String(player.longName ?? "");
       if (name) statLines.set(normalizePlayerName(name), player as Tank01LiveStats);
     }
-    const dst = (box as unknown as { DST?: { away?: Record<string, unknown>; home?: Record<string, unknown> } }).DST ?? {};
-    for (const side of ["away", "home"] as const) {
-      const entry = dst[side];
-      if (!entry) continue;
+    const dst = (box as unknown as { DST?: Record<string, Record<string, unknown>> }).DST ?? {};
+    for (const entry of Object.values(dst)) {
       const teamAbv = String(entry.teamAbv ?? "");
-      if (teamAbv) statLines.set(`dst:${normalizeTeam(teamAbv)}`, { Defense: attributeCvcDstFumblesRecovered(side, dst) as unknown as Record<string, string | number> });
+      if (teamAbv) statLines.set(`dst:${normalizeTeam(teamAbv)}`, { Defense: entry as unknown as Record<string, string | number> });
     }
   }
   return { statLines, games };

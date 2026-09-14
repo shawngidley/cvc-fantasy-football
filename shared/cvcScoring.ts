@@ -60,27 +60,3 @@ export function calculateCvcFantasyPoints(stats: Tank01LiveStats, position: stri
 
   return Math.round(points * 100) / 100;
 }
-
-/**
- * Tank01's box.DST fumblesRecovered field is mislabeled -- confirmed against a real,
- * known event (Week 1 NO@DET: New Orleans fumbled, Detroit recovered it): both teams'
- * OWN fumblesRecovered field independently showed "1" -- New Orleans's own offense
- * losing a fumble, and a separate, unrelated Detroit fumble -- neither reflecting the
- * actual cross-team recovery. The field actually reports each team's own OFFENSE's
- * fumbles lost, not fumbles their DEFENSE recovered. This mirrors the exact
- * offense-framed pattern already confirmed and fixed for sacks/fumbles in WRC's
- * equivalent code: a team's real defensive fumble-recovery credit has to come from the
- * OPPONENT side's own fumblesRecovered value instead of this team's own.
- */
-export function attributeCvcDstFumblesRecovered(
-  homeAway: "away" | "home",
-  dst: { away?: Record<string, unknown>; home?: Record<string, unknown> },
-): Record<string, unknown> {
-  const own = dst[homeAway] ?? {};
-  const opponent = dst[homeAway === "away" ? "home" : "away"];
-  const { fumblesRecovered: _ownFumblesRecovered, ...ownWithoutFumbles } = own;
-  return {
-    ...ownWithoutFumbles,
-    ...(opponent?.fumblesRecovered !== undefined ? { fumblesRecovered: opponent.fumblesRecovered } : {}),
-  };
-}
