@@ -45,6 +45,8 @@ describe("statChips (using the real confirmed live Drake Maye stat line)", () =>
     expect(chips).toContainEqual({ label: "SACK", value: "5" });
     expect(chips).toContainEqual({ label: "INT", value: "1" });
     expect(chips).toContainEqual({ label: "FR", value: "1" });
+    // Also confirms the new points-allowed chip, using this same real confirmed value.
+    expect(chips).toContainEqual({ label: "PTS AGST", value: "10" });
   });
 
   it("shows a defensive-TD chip and a safety chip for DST when nonzero, also previously missing entirely", () => {
@@ -58,5 +60,22 @@ describe("statChips (using the real confirmed live Drake Maye stat line)", () =>
     const quietDst = { Defense: { sacks: "0", defensiveInterceptions: "0", fumblesRecovered: "0", defTD: "0", safeties: "0" } };
     const chips = statChips(quietDst);
     expect(chips).toEqual([]);
+  });
+
+  it("shows the points-allowed chip at exactly 20 (the top of CVC's bonus tiers), but not at 21", () => {
+    const twenty = { Defense: { ptsAllowed: "20" } };
+    expect(statChips(twenty)).toContainEqual({ label: "PTS AGST", value: "20" });
+    const twentyOne = { Defense: { ptsAllowed: "21" } };
+    expect(statChips(twentyOne).some(chip => chip.label === "PTS AGST")).toBe(false);
+  });
+
+  it("shows the points-allowed chip at 0 (a shutout), unlike the other chips which hide at zero", () => {
+    const shutout = { Defense: { ptsAllowed: "0" } };
+    expect(statChips(shutout)).toContainEqual({ label: "PTS AGST", value: "0" });
+  });
+
+  it("falls back to ptsAgainst if ptsAllowed isn't present, matching the scoring formula's own field fallback", () => {
+    const usingPtsAgainst = { Defense: { ptsAgainst: "13" } };
+    expect(statChips(usingPtsAgainst)).toContainEqual({ label: "PTS AGST", value: "13" });
   });
 });

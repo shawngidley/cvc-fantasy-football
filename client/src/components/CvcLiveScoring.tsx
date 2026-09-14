@@ -49,6 +49,10 @@ export function statChips(stat: any): { label: string; value: string }[] {
   if (defense && Number(defense.fumblesRecovered) > 0) chips.push({ label: "FR", value: String(defense.fumblesRecovered) });
   if (defense && Number(defense.defensiveOrSpecialTeamsTds ?? defense.defTD) > 0) chips.push({ label: "DEF TD", value: String(defense.defensiveOrSpecialTeamsTds ?? defense.defTD) });
   if (defense && Number(defense.safeties) > 0) chips.push({ label: "SFTY", value: String(defense.safeties) });
+  if (defense) {
+    const pointsAllowed = defense.ptsAgainst ?? defense.ptsAllowed;
+    if (pointsAllowed !== undefined && Number(pointsAllowed) <= 20) chips.push({ label: "PTS AGST", value: String(pointsAllowed) });
+  }
   return chips;
 }
 
