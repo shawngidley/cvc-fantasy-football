@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { calculateCvcFantasyPoints, type CvcScoringRule } from "../shared/cvcScoring";
+import { attributeCvcDstFumblesRecovered, calculateCvcFantasyPoints, type CvcScoringRule } from "../shared/cvcScoring";
 
 const rules: CvcScoringRule[] = [
   { stat_key: "passing_yards", value: 0.05, applies_to_positions: ["QB", "RB", "WR", "TE"] },
@@ -58,5 +58,37 @@ describe("CVC scoring engine", () => {
   it("can award multiple bonuses at once for a dual-threat stat line (e.g. 350+ passing and 100+ rushing in the same game)", () => {
     const points = calculateCvcFantasyPoints({ Passing: { passYds: 380 }, Rushing: { rushYds: 110 } }, "QB", rules);
     expect(points).toBe(380 * 0.05 + 5 + 110 * 0.1 + 5);
+  });
+});
+
+describe("attributeCvcDstFumblesRecovered (using the exact real confirmed Week 1 NO@DET box.DST data)", () => {
+  // The real confirmed event: New Orleans fumbled, Detroit recovered it. Tank01's raw
+  // response showed BOTH teams' own fumblesRecovered field as "1" independently --
+  // proving the field actually reports each team's own OFFENSE's fumbles lost, not
+  // their DEFENSE's recoveries.
+  const realNoDetDst = {
+    away: { teamAbv: "NO", fumblesRecovered: "1", sacks: "1", defensiveInterceptions: "0" },
+    home: { teamAbv: "DET", fumblesRecovered: "1", sacks: "5", defensiveInterceptions: "2" },
+  };
+
+  it("gives Detroit's DEFENSE credit for New Orleans's fumble (the confirmed real recovery), not Detroit's own mislabeled field", () => {
+    const detroitCorrected = attributeCvcDstFumblesRecovered("home", realNoDetDst);
+    expect(detroitCorrected.fumblesRecovered).toBe("1"); // correct: comes from NO's own value (the real fumble DET recovered)
+  });
+
+  it("gives New Orleans's DEFENSE credit for whatever Detroit's own offense fumbled (a separate, unrelated event), not New Orleans's own mislabeled field", () => {
+    const neworleansCorrected = attributeCvcDstFumblesRecovered("away", realNoDetDst);
+    expect(neworleansCorrected.fumblesRecovered).toBe("1"); // comes from DET's own value, a different fumble entirely
+  });
+
+  it("leaves every other field (sacks, interceptions, teamAbv) untouched -- only fumblesRecovered is swapped", () => {
+    const detroitCorrected = attributeCvcDstFumblesRecovered("home", realNoDetDst);
+    expect(detroitCorrected).toMatchObject({ teamAbv: "DET", sacks: "5", defensiveInterceptions: "2" });
+  });
+
+  it("falls back to no fumblesRecovered field at all if the opponent side is missing entirely", () => {
+    const oneSided = { home: { teamAbv: "DET", fumblesRecovered: "1" } };
+    const result = attributeCvcDstFumblesRecovered("home", oneSided);
+    expect(result.fumblesRecovered).toBeUndefined();
   });
 });
