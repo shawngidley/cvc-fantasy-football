@@ -1048,17 +1048,21 @@ export const leagueRouter = router({
     const currentWeek = weeks.find(item => item.status === "live") ?? weeks.find(item => item.status === "upcoming") ?? weeks[0];
     if (!currentWeek) return { error: "No current CVC week." };
     const games = await adapter.listGamesForWeek(currentWeek.week_number, season.year);
+    // Confirmed real event to check against: New Orleans fumbled, Detroit recovered
+    // it, in Week 1's DET/NO game -- look for that specific matchup first.
+    const targetGame = games.find(game => (game.away === "DET" || game.home === "DET") && (game.away === "NO" || game.home === "NO"));
     const kickedOff = games.filter(game => game.gameID);
-    for (const game of kickedOff) {
+    const orderedGames = targetGame ? [targetGame, ...kickedOff.filter(game => game !== targetGame)] : kickedOff;
+    for (const game of orderedGames) {
       if (!game.gameID) continue;
       try {
         const box = await adapter.getBoxScore(game.gameID) as any;
         if (box?.DST && Object.keys(box.DST).length) {
-          return { gameId: game.gameID, away: game.away, home: game.home, rawDst: box.DST };
+          return { gameId: game.gameID, away: game.away, home: game.home, isTargetDetNoGame: game === targetGame, rawDst: box.DST };
         }
       } catch { continue; }
     }
-    return { error: "No box score with a populated DST object was found among this week's games yet." };
+    return { error: "No box score with a populated DST object was found among this week's games yet.", foundDetNoGame: Boolean(targetGame) };
   }),
 
   syncSeasonStats: protectedProcedure.input(z.object({ limit: z.number().int().min(1).max(100).optional() }).optional()).mutation(async ({ ctx, input }) => {
