@@ -3,6 +3,7 @@ import { z } from "zod";
 import { protectedProcedure, publicProcedure, router } from "../_core/trpc";
 import { getFantasyProsDataAdapter, getNFLDataAdapter, Tank01NFLDataAdapter } from "../nflDataAdapter";
 import { getCvcPlayerCareerStats, parseCvcGameLog } from "../playerCareerStats";
+import { attributeCvcDstFumblesRecovered } from "@shared/cvcScoring";
 import { fantasyProsCacheStatus, getFantasyProsActivePlayerIds, getFantasyProsRookiePlayerIds } from "../fantasyProsCache";
 import { getFantasyProsInjuries, getFantasyProsNews, getFantasyProsProjections, getFantasyProsRanks, matchPlayerNameFromTitle } from "../fantasyProsNews";
 import { archiveFantasyProsNews, getArchivedFantasyProsNews, mergeFantasyProsNews } from "../fantasyProsArchive";
@@ -1032,6 +1033,34 @@ export const leagueRouter = router({
   syncMatchupScores: protectedProcedure.mutation(async ({ ctx }) => {
     await requireCommissioner({ openId: ctx.user.openId });
     return syncTank01Scores();
+  }),
+
+  // Debug-only: same pattern as the earlier DET/NO check -- targets the Browns/
+  // Jaguars game specifically, both to show the raw (pre-fix) data and to confirm
+  // what the now-deployed fix actually produces for this game. Not used by any real
+  // feature.
+  debugRawDstBoxScore: publicProcedure.query(async () => {
+    const { season } = await getCurrentLeagueAndSeason();
+    const adapter = getNFLDataAdapter();
+    if (!(adapter instanceof Tank01NFLDataAdapter)) return { error: "Tank01 is not configured." };
+    const weeks = unwrap(await supabase.from("schedule_week").select("week_number, status").eq("season_id", season.id).order("week_number")) ?? [];
+    const currentWeek = weeks.find(item => item.status === "live") ?? weeks.find(item => item.status === "upcoming") ?? weeks[0];
+    if (!currentWeek) return { error: "No current CVC week." };
+    const games = await adapter.listGamesForWeek(currentWeek.week_number, season.year);
+    const targetGame = games.find(game => (game.away === "CLE" || game.home === "CLE") && (game.away === "JAX" || game.home === "JAX" || game.away === "JAC" || game.home === "JAC"));
+    const kickedOff = games.filter(game => game.gameID);
+    const orderedGames = targetGame ? [targetGame, ...kickedOff.filter(game => game !== targetGame)] : kickedOff;
+    for (const game of orderedGames) {
+      if (!game.gameID) continue;
+      try {
+        const box = await adapter.getBoxScore(game.gameID) as any;
+        if (box?.DST && Object.keys(box.DST).length) {
+          const fixed = { away: attributeCvcDstFumblesRecovered("away", box.DST), home: attributeCvcDstFumblesRecovered("home", box.DST) };
+          return { gameId: game.gameID, away: game.away, home: game.home, isTargetClevJaxGame: game === targetGame, rawDst: box.DST, afterFix: fixed };
+        }
+      } catch { continue; }
+    }
+    return { error: "No box score with a populated DST object was found among this week's games yet.", foundClevJaxGame: Boolean(targetGame) };
   }),
 
   // Debug-only: captures the raw, unprocessed box.DST object from a currently-active
