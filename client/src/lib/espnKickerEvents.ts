@@ -105,3 +105,33 @@ export function formatKickerEvent(event: KickerPlayEvent): string {
   const distance = `${event.yards ?? "?"} yd`;
   return event.outcome === "made" ? `${distance} FG made` : `${distance} FG missed`;
 }
+
+/** Groups multiple made-FG events into a single display chip listing all their
+ * yardages together (e.g. "47, 40 yd FG made") instead of a separate "X yd FG made"
+ * chip per kick -- ported from WRC's same grouping, minus the hardcoded point value
+ * WRC bakes into its chip text (see formatKickerEvent above for why CVC leaves that to
+ * its own configured scoring rules). XP events and missed FGs stay as individual
+ * chips, one each, same as before -- unlike WRC, CVC doesn't drop long misses from
+ * display, since that omission was specific to WRC's own scoring formula (a 50+ yard
+ * miss costing no points there), not a general display convention. */
+export function groupKickerEventsForDisplay(events: KickerPlayEvent[]): { key: string; text: string; outcome: "made" | "missed" }[] {
+  const madeFGs = events.filter(event => event.type === "fg" && event.outcome === "made");
+  const others = events.filter(event => !(event.type === "fg" && event.outcome === "made"));
+
+  const chips: { key: string; text: string; outcome: "made" | "missed" }[] = others.map((event, index) => ({
+    key: `${event.text}-${index}`,
+    text: formatKickerEvent(event),
+    outcome: event.outcome,
+  }));
+
+  if (madeFGs.length > 0) {
+    const yardages = madeFGs.map(event => event.yards ?? 0);
+    chips.push({
+      key: "made-fgs-combined",
+      text: `${yardages.join(", ")} yd FG made`,
+      outcome: "made",
+    });
+  }
+
+  return chips;
+}
