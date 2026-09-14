@@ -81,17 +81,36 @@ export function CvcOwnerLineup() {
   const isCommissioner = ["commissioner", "administrator"].includes(owner?.role ?? "");
   const routeFranchiseId = params?.franchiseId && /^[0-9a-f]{8}-[0-9a-f-]{27}$/i.test(params.franchiseId) ? params.franchiseId : null;
   const viewedFranchiseId = routeFranchiseId ?? mine.data?.id ?? "";
-  const canEdit = Boolean(viewedFranchiseId) && (isCommissioner || viewedFranchiseId === mine.data?.id);
   const viewedFranchise = overview.data?.franchises.find(team => team.id === viewedFranchiseId);
   const roster = trpc.league.franchiseRoster.useQuery({ franchiseId: viewedFranchiseId || "00000000-0000-0000-0000-000000000000" }, { enabled: Boolean(viewedFranchiseId) });
   const board = trpc.league.liveScoringBoard.useQuery();
+  const weeksList = trpc.league.scheduleWeeksList.useQuery();
   const rules = trpc.league.scoringRules.useQuery();
   const slots = trpc.league.rosterSlots.useQuery();
-  const live = useCvcTank01LiveScores(board.data?.week?.weekNumber, 2026, rules.data ?? []);
-  const { projections } = useCvcNFLProjections(board.data?.week?.weekNumber, 2026, rules.data ?? []);
+  // Matches Live Scoring's existing week-picker pattern exactly: real component state
+  // (not derived fresh from the URL every render), defaulting to the actual current
+  // week when nothing's been explicitly picked yet.
+  const [selectedWeekNumber, setSelectedWeekNumber] = useState<number | null>(null);
+  const effectiveWeekNumber = selectedWeekNumber ?? board.data?.week?.weekNumber ?? null;
+  const isCurrentWeek = effectiveWeekNumber != null && board.data?.week?.weekNumber === effectiveWeekNumber;
+  const isFutureWeek = effectiveWeekNumber != null && board.data?.week?.weekNumber != null && effectiveWeekNumber > board.data.week.weekNumber;
+  const isPastWeek = effectiveWeekNumber != null && board.data?.week?.weekNumber != null && effectiveWeekNumber < board.data.week.weekNumber;
+  const weekLineup = trpc.league.lineupForWeek.useQuery({ franchiseId: viewedFranchiseId || "00000000-0000-0000-0000-000000000000", weekNumber: effectiveWeekNumber ?? 0 }, { enabled: Boolean(viewedFranchiseId) && effectiveWeekNumber != null && !isCurrentWeek });
+  const live = useCvcTank01LiveScores(effectiveWeekNumber ?? board.data?.week?.weekNumber, 2026, rules.data ?? []);
+  const { projections } = useCvcNFLProjections(effectiveWeekNumber ?? board.data?.week?.weekNumber, 2026, rules.data ?? []);
   const utils = trpc.useUtils();
   const updateSlot = trpc.league.setLineupSlot.useMutation();
-  const players = (roster.data?.players ?? []) as CvcLineupAssignment[];
+  const updatePlannedSlot = trpc.league.setPlannedLineupSlot.useMutation();
+  const baseRosterPlayers = (roster.data?.players ?? []) as CvcLineupAssignment[];
+  // For a non-current week, the slot each player is shown in comes from lineupForWeek
+  // (future: the effective carried-forward plan; past: the frozen snapshot) instead of
+  // roster_assignment's own (current-week-only) assigned_slot_code.
+  const players = useMemo(() => {
+    if (isCurrentWeek || !weekLineup.data) return baseRosterPlayers;
+    return baseRosterPlayers.map(assignment => assignment.player ? { ...assignment, assigned_slot_code: weekLineup.data.slotsByPlayerId[assignment.player.id] ?? assignment.assigned_slot_code } : assignment);
+  }, [baseRosterPlayers, isCurrentWeek, weekLineup.data]);
+  const canEditThisWeek = !isPastWeek;
+  const canEdit = Boolean(viewedFranchiseId) && (isCommissioner || viewedFranchiseId === mine.data?.id) && canEditThisWeek;
   const groups = useMemo(() => groupCvcLineup(players), [players]);
   const starterCount = groups.reduce((count, group) => count + group.starters.length, 0);
   const projectedTotal = groups.flatMap(group => group.starters).reduce((total, assignment) => total + (assignment.player ? getCvcProjectedPoints(projections, assignment.player.display_name, isDst(assignment.player.position) ? "DST" : assignment.player.position, assignment.player.nfl_team) ?? 0 : 0), 0);
@@ -102,7 +121,7 @@ export function CvcOwnerLineup() {
   // dropdown change saved instantly.
   const [pendingSlots, setPendingSlots] = useState<Record<string, string>>({});
   const [saveError, setSaveError] = useState<string | null>(null);
-  useEffect(() => { setPendingSlots({}); setSaveError(null); }, [viewedFranchiseId]);
+  useEffect(() => { setPendingSlots({}); setSaveError(null); }, [viewedFranchiseId, effectiveWeekNumber]);
   const stageSlot = (assignmentId: string, slotCode: string) => setPendingSlots(current => ({ ...current, [assignmentId]: slotCode }));
 
 
@@ -110,23 +129,31 @@ export function CvcOwnerLineup() {
     setSaveError(null);
     const entries = Object.entries(pendingSlots);
     if (!entries.length) return;
+    if (isPastWeek) { setSaveError("That week is already final and can't be edited."); return; }
     // Two-phase order matters for swaps (A -> BN, B -> the slot A just vacated): moves
     // TO bench go first to free up starter slots before moves that fill them, since the
     // server checks slot capacity against already-committed state one change at a time.
     const toBench = entries.filter(([, slotCode]) => slotCode === "BENCH");
     const fillSlot = entries.filter(([, slotCode]) => slotCode !== "BENCH");
+    const assignmentIdToPlayerId = new Map(players.filter(assignment => assignment.player).map(assignment => [assignment.id, assignment.player!.id]));
     try {
       for (const [assignmentId, slotCode] of [...toBench, ...fillSlot]) {
-        await updateSlot.mutateAsync({ assignmentId, slotCode });
+        if (isFutureWeek && effectiveWeekNumber != null) {
+          const playerId = assignmentIdToPlayerId.get(assignmentId);
+          if (!playerId) continue;
+          await updatePlannedSlot.mutateAsync({ franchiseId: viewedFranchiseId, playerId, weekNumber: effectiveWeekNumber, slotCode });
+        } else {
+          await updateSlot.mutateAsync({ assignmentId, slotCode });
+        }
       }
       setPendingSlots({});
-      await Promise.all([utils.league.franchiseRoster.invalidate(), utils.league.liveScoringBoard.invalidate()]);
+      await Promise.all([utils.league.franchiseRoster.invalidate(), utils.league.liveScoringBoard.invalidate(), utils.league.lineupForWeek.invalidate()]);
     } catch (error) {
       setSaveError(error instanceof Error ? error.message : "The CVC lineup could not be saved.");
     }
   };
 
-  if (mine.isLoading || overview.isLoading || roster.isLoading || board.isLoading || rules.isLoading || slots.isLoading) return <div className="cvc-card"><div className="cvc-card-title"><span>Lineup</span></div><div className="cvc-card-body text-sm text-slate-500">Loading CVC roster, current week, and Tank01 game context…</div></div>;
+  if (mine.isLoading || overview.isLoading || roster.isLoading || board.isLoading || weeksList.isLoading || rules.isLoading || slots.isLoading) return <div className="cvc-card"><div className="cvc-card-title"><span>Lineup</span></div><div className="cvc-card-body text-sm text-slate-500">Loading CVC roster, current week, and Tank01 game context…</div></div>;
   if (!viewedFranchiseId) return <div className="cvc-card"><div className="cvc-card-title"><span>Lineup</span></div><div className="cvc-card-body text-sm text-slate-600">Sign in with a CVC owner account, or choose a franchise, to view a lineup.</div></div>;
   if (roster.error || board.error || rules.error || slots.error) return <div className="cvc-card"><div className="cvc-card-title"><span>Lineup</span></div><div className="cvc-card-body text-sm text-red-700">{(roster.error ?? board.error ?? rules.error ?? slots.error)?.message}</div></div>;
 
@@ -135,11 +162,11 @@ export function CvcOwnerLineup() {
   const hasPending = Object.keys(pendingSlots).length > 0;
 
   return <div className="space-y-5">
-    <div className="rounded-xl border border-white/20 bg-black/25 px-4 py-3"><label className="flex flex-wrap items-center gap-2 text-xs font-black uppercase tracking-[0.1em] text-cvc-accent">View lineup<select value={viewedFranchiseId} onChange={event => setLocation(mine.data?.id === event.target.value ? "/lineup" : `/lineup/${event.target.value}`)} className="rounded-md border border-white/20 bg-cvc-deep px-3 py-2 text-sm font-bold text-white">{mine.data ? <option value={mine.data.id}>{mine.data.name} (my team)</option> : null}{overview.data?.franchises.filter(team => team.id !== mine.data?.id).map(team => <option key={team.id} value={team.id}>{team.name}</option>)}</select></label></div>
-    <div><div className="flex flex-wrap items-center gap-3"><TeamLogo name={displayName} abbreviation={viewedFranchise?.abbreviation} logoUrl={viewedFranchise?.logo_url} size="lg" className="rounded-xl border-cvc-accent/50"/><div><p className="font-display text-4xl uppercase tracking-[0.04em] text-white">{isMine ? "My lineup" : `${displayName} lineup`}</p><p className="mt-1 text-sm text-cvc-muted">{displayName} · {board.data?.week?.label ?? "Current week"} · Players lock at NFL kickoff</p></div><div className="ml-auto rounded-lg border border-cvc-accent/30 bg-black/25 px-4 py-2 text-right"><p className="text-[10px] font-bold uppercase tracking-[0.14em] text-cvc-muted">Projected</p><p className="font-display text-2xl text-cvc-accent">{projectedTotal.toFixed(1)}</p></div></div>
+    <div className="flex flex-wrap items-center gap-3 rounded-xl border border-white/20 bg-black/25 px-4 py-3"><label className="flex flex-wrap items-center gap-2 text-xs font-black uppercase tracking-[0.1em] text-cvc-accent">View lineup<select value={viewedFranchiseId} onChange={event => setLocation(mine.data?.id === event.target.value ? "/lineup" : `/lineup/${event.target.value}`)} className="rounded-md border border-white/20 bg-cvc-deep px-3 py-2 text-sm font-bold text-white">{mine.data ? <option value={mine.data.id}>{mine.data.name} (my team)</option> : null}{overview.data?.franchises.filter(team => team.id !== mine.data?.id).map(team => <option key={team.id} value={team.id}>{team.name}</option>)}</select></label><label className="flex items-center gap-2 text-[10px] font-bold uppercase tracking-[0.1em] text-cvc-accent">Week<select value={effectiveWeekNumber ?? ""} onChange={event => setSelectedWeekNumber(Number(event.target.value))} className="rounded-md border border-cvc-accent/40 bg-cvc-accent/10 px-3 py-1.5 text-xs font-bold text-white">{(weeksList.data ?? []).map(week => <option key={week.id} value={week.week_number} className="text-cvc-deep">{week.label}</option>)}</select></label></div>
+    <div><div className="flex flex-wrap items-center gap-3"><TeamLogo name={displayName} abbreviation={viewedFranchise?.abbreviation} logoUrl={viewedFranchise?.logo_url} size="lg" className="rounded-xl border-cvc-accent/50"/><div><p className="font-display text-4xl uppercase tracking-[0.04em] text-white">{isMine ? "My lineup" : `${displayName} lineup`}</p><p className="mt-1 text-sm text-cvc-muted">{displayName} · {(weeksList.data ?? []).find(week => week.week_number === effectiveWeekNumber)?.label ?? "Current week"}{isFutureWeek ? " · Planning ahead — carries over to later weeks until changed" : isPastWeek ? " · Final — view only" : " · Players lock at NFL kickoff"}</p></div><div className="ml-auto rounded-lg border border-cvc-accent/30 bg-black/25 px-4 py-2 text-right"><p className="text-[10px] font-bold uppercase tracking-[0.14em] text-cvc-muted">Projected</p><p className="font-display text-2xl text-cvc-accent">{projectedTotal.toFixed(1)}</p></div></div>
 
       <div className="mt-5 flex flex-wrap items-center gap-3">
-        {canEdit ? <button type="button" onClick={saveLineup} disabled={!hasPending || updateSlot.isPending} className="cvc-button-compact disabled:cursor-not-allowed disabled:opacity-40">{updateSlot.isPending ? "Saving…" : hasPending ? `Save lineup (${Object.keys(pendingSlots).length} change${Object.keys(pendingSlots).length === 1 ? "" : "s"})` : "Save lineup"}</button> : <span className="cvc-button-secondary opacity-70">View only — {isCommissioner ? "not your franchise" : "commissioner can edit any lineup"}</span>}
+        {canEdit ? <button type="button" onClick={saveLineup} disabled={!hasPending || updateSlot.isPending || updatePlannedSlot.isPending} className="cvc-button-compact disabled:cursor-not-allowed disabled:opacity-40">{updateSlot.isPending || updatePlannedSlot.isPending ? "Saving…" : hasPending ? `Save lineup (${Object.keys(pendingSlots).length} change${Object.keys(pendingSlots).length === 1 ? "" : "s"})` : "Save lineup"}</button> : <span className="cvc-button-secondary opacity-70">View only — {isPastWeek ? "that week is final" : isCommissioner ? "not your franchise" : "commissioner can edit any lineup"}</span>}
         {hasPending ? <span className="text-xs font-bold uppercase tracking-[0.08em] text-amber-300">Unsaved changes</span> : null}
       </div>
       {saveError ? <p className="mt-2 text-sm font-medium text-red-300">{saveError}</p> : null}

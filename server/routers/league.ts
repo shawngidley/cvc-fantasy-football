@@ -16,6 +16,7 @@ import { syncFantasyProsSnapshot, syncFantasyProsActiveFlags, syncFantasyProsRoo
 import { syncTank01SeasonStats } from "../tank01SeasonStatsSync";
 import { syncTank01Scores } from "../tank01ScoringSync";
 import { isPlayerLockedForGameStart } from "../playerGameLock";
+import { loadEffectiveFutureLineup } from "../plannedLineup";
 import { aggregateDstSeasonStats } from "../dstSeasonAggregation";
 import { syncNflTeamSchedules } from "../nflTeamScheduleSync";
 import { syncTank01ActiveRoster } from "../tank01ActiveRosterSync";
@@ -1427,6 +1428,57 @@ export const leagueRouter = router({
     unwrap(await supabase.from("transaction").insert({ season_id: season.id, franchise_id: franchise.id, actor_owner_id: owner.id, transaction_type: "lineup_move", status: "final", summary: `${franchise.name} assigned ${player?.display_name ?? "a player"} to ${slot.label}.`, details: { roster_assignment_id: assignment.id, previous_slot: assignment.assigned_slot_code, slot_code: slot.code } }).select("id").single());
     await createAuditEvent(league.id, season.id, owner.id, "roster_assignment", assignment.id, "lineup_slot_updated", `${franchise.name} assigned ${player?.display_name ?? "a player"} to ${slot.label}.`);
     return { assignmentId: assignment.id, slotCode: slot.code };
+  }),
+
+  /** Saves a slot assignment for a FUTURE week (not the current live/upcoming-and-
+   * about-to-go-live week, which still goes through setLineupSlot directly). Carries
+   * forward: this becomes the effective lineup for this week AND every later week,
+   * until overridden by an even later explicit planned save (see
+   * resolveEffectiveLineupForWeek in plannedLineup.ts) -- promoted into
+   * roster_assignment automatically once this week actually goes live. */
+  setPlannedLineupSlot: protectedProcedure.input(z.object({ franchiseId: z.string().uuid(), playerId: z.string().uuid(), weekNumber: z.number().int().positive(), slotCode: z.string().trim().min(1).max(40) })).mutation(async ({ ctx, input }) => {
+    const owner = await getOwnerAccess({ openId: ctx.user.openId });
+    if (!owner) throw new TRPCError({ code: "FORBIDDEN", message: "A CVC owner session is required to update a lineup." });
+    const { season } = await getCurrentLeagueAndSeason();
+    const franchise = unwrap(await supabase.from("franchise").select("id, name, current_owner_id").eq("id", input.franchiseId).maybeSingle());
+    if (!franchise || (franchise.current_owner_id !== owner.id && !["commissioner", "administrator"].includes(owner.role))) throw new TRPCError({ code: "FORBIDDEN", message: "You may only update your own CVC franchise lineup." });
+    const weeks = unwrap(await supabase.from("schedule_week").select("id, week_number, status").eq("season_id", season.id).order("week_number")) ?? [];
+    const currentWeek = weeks.find(item => item.status === "live") ?? weeks.find(item => item.status === "upcoming") ?? weeks[0];
+    const targetWeek = weeks.find(item => item.week_number === input.weekNumber);
+    if (!targetWeek) throw new TRPCError({ code: "NOT_FOUND", message: "That CVC week was not found." });
+    if (currentWeek && targetWeek.week_number <= currentWeek.week_number) throw new TRPCError({ code: "BAD_REQUEST", message: "Only a future week can be planned ahead -- use the regular lineup save for the current week." });
+    const assignment = unwrap(await supabase.from("roster_assignment").select("id, player_id, player:player_id(display_name, position)").eq("season_id", season.id).eq("franchise_id", input.franchiseId).eq("player_id", input.playerId).is("released_at", null).maybeSingle());
+    if (!assignment) throw new TRPCError({ code: "NOT_FOUND", message: "That player is not on this CVC roster." });
+    const player = Array.isArray(assignment.player) ? assignment.player[0] : assignment.player;
+    const slot = unwrap(await supabase.from("roster_slot").select("code, label, eligible_positions, maximum_count").eq("season_id", season.id).eq("code", input.slotCode).maybeSingle());
+    if (!slot) throw new TRPCError({ code: "BAD_REQUEST", message: "That CVC roster slot is not configured for this season." });
+    if (slot.eligible_positions?.length && player?.position && !slot.eligible_positions.includes(player.position)) throw new TRPCError({ code: "BAD_REQUEST", message: `${player.position} is not eligible for the ${slot.label} CVC roster slot.` });
+    const effective = await loadEffectiveFutureLineup(season.id, input.franchiseId, targetWeek.week_number);
+    const occupiedCount = Array.from(effective.entries()).filter(([playerId, slotCode]) => slotCode === slot.code && playerId !== input.playerId).length;
+    if (occupiedCount >= slot.maximum_count) throw new TRPCError({ code: "BAD_REQUEST", message: `The ${slot.label} CVC roster slot is already at capacity for that week.` });
+    unwrap(await supabase.from("planned_lineup_assignment").upsert({ season_id: season.id, schedule_week_id: targetWeek.id, franchise_id: input.franchiseId, player_id: input.playerId, slot_code: slot.code, updated_at: new Date().toISOString() }, { onConflict: "schedule_week_id, franchise_id, player_id" }).select("id").single());
+    return { weekNumber: targetWeek.week_number, playerId: input.playerId, slotCode: slot.code };
+  }),
+
+  /** Loads the lineup for any week -- current (live roster_assignment), future
+   * (effective planned lineup, carried forward), or past (the frozen
+   * weekly_lineup_snapshot from when that week went live). */
+  lineupForWeek: publicProcedure.input(z.object({ franchiseId: z.string().uuid(), weekNumber: z.number().int().positive() })).query(async ({ input }) => {
+    const { season } = await getCurrentLeagueAndSeason();
+    const weeks = unwrap(await supabase.from("schedule_week").select("id, week_number, status").eq("season_id", season.id).order("week_number")) ?? [];
+    const currentWeek = weeks.find(item => item.status === "live") ?? weeks.find(item => item.status === "upcoming") ?? weeks[0];
+    const targetWeek = weeks.find(item => item.week_number === input.weekNumber);
+    if (!targetWeek) return { weekNumber: input.weekNumber, status: "unknown" as const, slotsByPlayerId: {} };
+    if (currentWeek && targetWeek.week_number === currentWeek.week_number) {
+      const assignments = unwrap(await supabase.from("roster_assignment").select("player_id, assigned_slot_code").eq("season_id", season.id).eq("franchise_id", input.franchiseId).is("released_at", null)) ?? [];
+      return { weekNumber: targetWeek.week_number, status: "current" as const, slotsByPlayerId: Object.fromEntries(assignments.map(row => [row.player_id, row.assigned_slot_code ?? "BENCH"])) };
+    }
+    if (currentWeek && targetWeek.week_number > currentWeek.week_number) {
+      const effective = await loadEffectiveFutureLineup(season.id, input.franchiseId, targetWeek.week_number);
+      return { weekNumber: targetWeek.week_number, status: "future" as const, slotsByPlayerId: Object.fromEntries(effective) };
+    }
+    const snapshotRows = unwrap(await supabase.from("weekly_lineup_snapshot").select("player_id, slot_code").eq("schedule_week_id", targetWeek.id).eq("franchise_id", input.franchiseId)) ?? [];
+    return { weekNumber: targetWeek.week_number, status: "past" as const, slotsByPlayerId: Object.fromEntries(snapshotRows.map(row => [row.player_id, row.slot_code])) };
   }),
 
   cutContractPlayer: protectedProcedure.input(z.object({

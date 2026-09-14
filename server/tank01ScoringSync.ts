@@ -2,6 +2,7 @@ import { calculateCvcFantasyPoints, type CvcScoringRule, type Tank01LiveStats } 
 import { getNFLDataAdapter, Tank01NFLDataAdapter, type Tank01BoxScore } from "./nflDataAdapter";
 import { supabase, unwrap } from "./supabase";
 import { resolveSkinForWeek } from "./cvcSkins";
+import { promotePlannedLineupForWeek } from "./plannedLineup";
 import { normalizeTeam, type SnapshotRow } from "./cvcScoringShared";
 import { normalizePlayerName } from "@shared/playerNameMatch";
 
@@ -118,6 +119,8 @@ export async function syncTank01Scores(now = new Date()): Promise<Tank01SyncSumm
   const matchups = unwrap(await supabase.from("matchup").select("id, home_franchise_id, away_franchise_id").eq("schedule_week_id", week.id)) ?? [];
   if (!matchups.length) return { status: "skipped", matchupsUpdated: 0, reason: "The CVC week has no matchups." };
   const franchiseIds = Array.from(new Set(matchups.flatMap(item => [item.home_franchise_id, item.away_franchise_id])));
+  const alreadySnapshotted = unwrap(await supabase.from("weekly_lineup_snapshot").select("id").eq("schedule_week_id", week.id).limit(1)) ?? [];
+  if (!alreadySnapshotted.length) await promotePlannedLineupForWeek(season.id, week.id, week.week_number, franchiseIds);
   await snapshotLineups(season.id, week.id, franchiseIds);
   const snapshots = unwrap(await supabase.from("weekly_lineup_snapshot").select("franchise_id, slot_code, player:player_id(id, display_name, position, nfl_team)").eq("schedule_week_id", week.id)) as SnapshotRow[] ?? [];
   const { statLines, games } = await tankStatLinesForWeek(adapter, week.week_number, season.year);
