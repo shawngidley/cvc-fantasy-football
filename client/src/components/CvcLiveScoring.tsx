@@ -72,6 +72,7 @@ const opponentLabel = (team: string | null | undefined, matchups: ReturnType<typ
 const SLOT_ORDER = ["QB", "RB", "WR", "TE", "FLEX", "K", "DST"];
 const slotRank = (code: unknown) => { const rank = SLOT_ORDER.indexOf(String(code ?? "").toUpperCase()); return rank === -1 ? SLOT_ORDER.length : rank; };
 const isStarterSlot = (code: unknown) => SLOT_ORDER.includes(String(code ?? "").toUpperCase());
+export { isStarterSlot };
 
 export function CvcLiveScoring() {
   const [selectedWeekNumber, setSelectedWeekNumber] = useState<number | null>(null);

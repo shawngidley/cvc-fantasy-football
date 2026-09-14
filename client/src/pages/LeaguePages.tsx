@@ -5,7 +5,7 @@ import { trpc } from "@/lib/trpc";
 import { useCvcOwnerAuth } from "@/hooks/useCvcOwnerAuth";
 import { computeKickoffUtc, getCvcLivePoints, useCvcTank01LiveScores } from "@/hooks/useCvcTank01LiveScores";
 import { CommissionerPanel } from "@/components/CommissionerPanel";
-import { CvcLiveScoring } from "@/components/CvcLiveScoring";
+import { CvcLiveScoring, isStarterSlot } from "@/components/CvcLiveScoring";
 import { CvcOwnerLineup } from "@/components/CvcOwnerLineup";
 import { CvcFreeAgents } from "@/components/CvcFreeAgents";
 import { CvcRosters } from "@/components/CvcRosters";
@@ -76,7 +76,7 @@ function Standings() {
   const skins = trpc.league.skinsHistory.useQuery();
   const live = useCvcTank01LiveScores(board.data?.week?.weekNumber, 2026, rules.data ?? []);
   const hasLiveData = Object.keys(live.statLines).length > 0;
-  const lineupTotal = (lineup: any[]) => lineup.reduce((total, entry) => total + (getCvcLivePoints(live.statLines, entry.player.display_name, entry.player.position, entry.player.nfl_team, rules.data ?? []) ?? 0), 0);
+  const lineupTotal = (lineup: any[]) => lineup.filter((entry) => isStarterSlot(entry.slot)).reduce((total, entry) => total + (getCvcLivePoints(live.statLines, entry.player.display_name, entry.player.position, entry.player.nfl_team, rules.data ?? []) ?? 0), 0);
   const { owner } = useCvcOwnerAuth();
   const liveFranchises = overview.data?.franchises ?? [];
   // The banner announces the most recently won skin, shown only for the week right
@@ -113,7 +113,7 @@ function Tank01LiveScoring() {
   const board = trpc.league.liveScoringBoard.useQuery();
   const rules = trpc.league.scoringRules.useQuery();
   const live = useCvcTank01LiveScores(board.data?.week?.weekNumber, 2026, rules.data ?? []);
-  const lineupTotal = (lineup: any[]) => lineup.reduce((total, entry) => total + (getCvcLivePoints(live.statLines, entry.player.display_name, entry.player.position, entry.player.nfl_team, rules.data ?? []) ?? 0), 0);
+  const lineupTotal = (lineup: any[]) => lineup.filter((entry) => isStarterSlot(entry.slot)).reduce((total, entry) => total + (getCvcLivePoints(live.statLines, entry.player.display_name, entry.player.position, entry.player.nfl_team, rules.data ?? []) ?? 0), 0);
   const hasLiveData = Object.keys(live.statLines).length > 0;
   return <div className="space-y-6"><Card title="Tank01 live scoreboard" action={<span className="text-[10px] font-bold uppercase tracking-[0.14em] text-cvc-accent">{live.isPolling ? "Live · 30s refresh" : "Awaiting active NFL games"}</span>}>{board.isLoading || rules.isLoading ? <ModuleState label="Loading CVC lineups and scoring rules…" /> : board.error || rules.error ? <ModuleState label={`CVC live scoring could not load: ${(board.error ?? rules.error)?.message}`} /> : !board.data?.week ? <ModuleState label="No CVC live or upcoming scoring week is configured." /> : <><p className="mb-4 text-sm text-slate-500">{board.data.week.label} uses Tank01 game schedules and box scores. Active games refresh every 30 seconds; Tank01 remains the only score source.</p><div className="grid gap-4 md:grid-cols-2">{board.data.matchups.map(matchup => { const away = hasLiveData ? lineupTotal(matchup.awayLineup) : Number(matchup.awayScore); const home = hasLiveData ? lineupTotal(matchup.homeLineup) : Number(matchup.homeScore); return <div className="cvc-matchup" key={matchup.id}><div className="flex items-center justify-between text-[10px] font-bold uppercase tracking-[0.13em] text-slate-500"><span>{board.data.week?.label}</span><StatusPill state={live.isPolling ? "live" : matchup.resultState} /></div><div className="mt-5 grid grid-cols-[1fr_auto_1fr] items-center gap-3"><div><p className="font-display text-xl uppercase text-cvc-deep">{matchup.away}</p><p className="mt-1 text-xs text-slate-500">{matchup.awayLineup.length} configured starters</p></div><strong className="font-display text-3xl text-cvc-deep">{away.toFixed(1)}<span className="mx-1 text-cvc-accent">:</span>{home.toFixed(1)}</strong><div className="text-right"><p className="font-display text-xl uppercase text-cvc-deep">{matchup.home}</p><p className="mt-1 text-xs text-slate-500">{matchup.homeLineup.length} configured starters</p></div></div></div>; })}</div><div className="mt-6 rounded-lg border border-dashed border-cvc-deep/20 bg-cvc-tint p-4 text-sm text-slate-600"><strong className="text-cvc-deep">Tank01 status:</strong> {live.error ? live.error : live.lastUpdated ? `updated ${live.lastUpdated.toLocaleTimeString()}` : "Monitoring the NFL schedule for an active game window."}</div></>}</Card><div className="grid gap-6 lg:grid-cols-3"><Card title="Live data status"><Metric value={live.isPolling ? "Polling" : "Standby"} label="Tank01 game feed" /></Card><Card title="Scoring status"><Metric value={`${rules.data?.length ?? 0} rules`} label="CVC scoring system" /></Card><Card title="Finalization"><Metric value="Tank01 only" label="No commissioner entry" /></Card></div></div>;
 }
