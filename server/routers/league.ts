@@ -1034,6 +1034,33 @@ export const leagueRouter = router({
     return syncTank01Scores();
   }),
 
+  // Debug-only: captures the raw, unprocessed box.DST object from a currently-active
+  // game, to confirm exactly which fields Tank01 actually provides for defensive
+  // scoring (specifically: does fumblesRecovered exist as a real field, or -- like the
+  // confirmed WRC finding for teamStats -- does it need to be derived from the
+  // opponent's own fumblesLost?) before touching any scoring logic. Not used by any
+  // real feature.
+  debugRawDstBoxScore: publicProcedure.query(async () => {
+    const { season } = await getCurrentLeagueAndSeason();
+    const adapter = getNFLDataAdapter();
+    if (!(adapter instanceof Tank01NFLDataAdapter)) return { error: "Tank01 is not configured." };
+    const weeks = unwrap(await supabase.from("schedule_week").select("week_number, status").eq("season_id", season.id).order("week_number")) ?? [];
+    const currentWeek = weeks.find(item => item.status === "live") ?? weeks.find(item => item.status === "upcoming") ?? weeks[0];
+    if (!currentWeek) return { error: "No current CVC week." };
+    const games = await adapter.listGamesForWeek(currentWeek.week_number, season.year);
+    const kickedOff = games.filter(game => game.gameID);
+    for (const game of kickedOff) {
+      if (!game.gameID) continue;
+      try {
+        const box = await adapter.getBoxScore(game.gameID) as any;
+        if (box?.DST && Object.keys(box.DST).length) {
+          return { gameId: game.gameID, away: game.away, home: game.home, rawDst: box.DST };
+        }
+      } catch { continue; }
+    }
+    return { error: "No box score with a populated DST object was found among this week's games yet." };
+  }),
+
   syncSeasonStats: protectedProcedure.input(z.object({ limit: z.number().int().min(1).max(100).optional() }).optional()).mutation(async ({ ctx, input }) => {
     await requireCommissioner({ openId: ctx.user.openId });
     const { season } = await getCurrentLeagueAndSeason();
