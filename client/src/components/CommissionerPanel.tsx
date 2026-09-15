@@ -292,7 +292,7 @@ function SeasonStatsSyncModule() {
     <div className="rounded-lg border border-dashed border-amber-400/40 bg-amber-50 p-4">
       <p className="text-sm font-semibold text-cvc-deep">Debug: snapshot vs current lineup (week {forceWeekNumber})</p>
       <details><summary className="mt-1 cursor-pointer text-xs font-bold uppercase tracking-[0.06em] text-amber-700">Show comparison</summary>
-        <pre className="mt-2 max-h-96 overflow-auto whitespace-pre-wrap break-all rounded bg-white p-2 text-[10px]">{JSON.stringify(snapshotVsCurrent.data, null, 2)}</pre>
+        <pre className="mt-2 max-h-96 overflow-auto whitespace-pre-wrap break-all rounded bg-white p-2 text-[10px]">{snapshotVsCurrent.isLoading ? "Loading…" : snapshotVsCurrent.isError ? `ERROR: ${snapshotVsCurrent.error?.message ?? "unknown error"}` : JSON.stringify(snapshotVsCurrent.data, null, 2) || "(empty result)"}</pre>
       </details>
     </div>
     <div className="rounded-lg border border-dashed border-cvc-deep/20 bg-cvc-tint p-4">
