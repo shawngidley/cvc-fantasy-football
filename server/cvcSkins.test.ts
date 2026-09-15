@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { decideSkinOutcome, SKIN_THRESHOLD } from "./cvcSkins";
+import { decideSkinOutcome, shouldSkipSkinResolution, SKIN_THRESHOLD } from "./cvcSkins";
 
 describe("decideSkinOutcome", () => {
   it("a unique score at or above 150 wins a normal week", () => {
@@ -45,5 +45,31 @@ describe("decideSkinOutcome", () => {
 
   it("SKIN_THRESHOLD is exported as 150, matching the confirmed rule", () => {
     expect(SKIN_THRESHOLD).toBe(150);
+  });
+});
+
+describe("shouldSkipSkinResolution (fix for a real confirmed discrepancy: a skin recorded a winning score of 154.05, but the matchup table's own score for the same team had since been corrected to 154.1 by a later fix, because the skin's idempotency guard had no way to be overridden for a commissioner-triggered forced recompute)", () => {
+  it("skips (does not re-resolve) an already-won skin under normal operation", () => {
+    expect(shouldSkipSkinResolution("won", false)).toBe(true);
+  });
+
+  it("skips an already-pushed skin under normal operation", () => {
+    expect(shouldSkipSkinResolution("pushed", false)).toBe(true);
+  });
+
+  it("does NOT skip a still-pending skin, even without force", () => {
+    expect(shouldSkipSkinResolution("pending", false)).toBe(false);
+  });
+
+  it("does NOT skip when there's no existing skin record at all", () => {
+    expect(shouldSkipSkinResolution(null, false)).toBe(false);
+  });
+
+  it("re-resolves an already-won skin when force is true -- this is the actual fix", () => {
+    expect(shouldSkipSkinResolution("won", true)).toBe(false);
+  });
+
+  it("re-resolves an already-pushed skin when force is true", () => {
+    expect(shouldSkipSkinResolution("pushed", true)).toBe(false);
   });
 });

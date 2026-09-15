@@ -263,7 +263,7 @@ export async function syncTank01Scores(now = new Date(), forceWeekNumber?: numbe
   unwrap(await supabase.from("tank01_scoring_sync_state").upsert({ season_id: season.id, last_attempt_at: now.toISOString(), last_success_at: now.toISOString(), last_error: null, updated_at: now.toISOString() }, { onConflict: "season_id" }).select("id").single());
   if (finalizing) {
     const isLastWeek = week.week_number === Math.max(...weeks.map(item => item.week_number));
-    await resolveSkinForWeek({ seasonId: season.id, weekNumber: week.week_number, isLastWeek, matchups, franchiseTotals, snapshots, statLines, rules });
+    await resolveSkinForWeek({ seasonId: season.id, weekNumber: week.week_number, isLastWeek, matchups, franchiseTotals, snapshots, statLines, rules, force: forceWeekNumber !== undefined });
     unwrap(await supabase.from("audit_event").insert({ league_id: season.league_id, season_id: season.id, entity_type: "schedule_week", entity_id: week.id, action: "tank01_result_finalized", summary: `Tank01 finalized ${week.label} after the CVC correction window.`, payload: { source: "Tank01", matchups: matchups.length } }).select("id").single());
   }
   return { status: finalizing ? "finalized" : "updated", weekLabel: week.label, matchupsUpdated: matchups.length };

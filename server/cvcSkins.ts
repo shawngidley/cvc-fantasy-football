@@ -63,11 +63,28 @@ export function decideSkinOutcome(
   };
 }
 
+/** Whether an already-resolved skin should be left alone rather than re-evaluated.
+ * Skipped (returns false, i.e. proceed with resolution) when there's no existing
+ * record yet, when it's still "pending", or when force is explicitly set -- the
+ * commissioner-triggered forced-recompute case, where a score correction needs to
+ * reach the skin too, not just the matchup table. */
+export function shouldSkipSkinResolution(existingStatus: "pending" | "won" | "pushed" | null, force: boolean): boolean {
+  if (force) return false;
+  return existingStatus !== null && existingStatus !== "pending";
+}
+
 /**
  * Resolves (or re-resolves, if it's still "pending") the skin for a finalized CVC week.
- * Idempotent: a week already resolved as "won" or "pushed" is left alone -- this only
- * ever runs once a week transitions to final, and finalization itself doesn't repeat
- * for an already-final week.
+ * Idempotent by default: a week already resolved as "won" or "pushed" is left alone --
+ * this only ever runs once a week transitions to final, and finalization itself
+ * doesn't repeat for an already-final week during normal operation. Pass force: true
+ * to re-evaluate regardless of the existing status -- needed for a commissioner-
+ * triggered forced recompute (server/routers/league.ts's forceRecomputeWeek) to fully
+ * apply a scoring fix retroactively: without this, the matchup table's score updates
+ * on every sync run with no idempotency guard of its own, but the skin's winning_score
+ * would otherwise stay frozen at whatever was computed the first time the week
+ * finalized -- confirmed as a real discrepancy (a skin recorded at 154.05 when the
+ * matchup's own score had since been corrected to 154.1 by a later fix).
  */
 export async function resolveSkinForWeek(params: {
   seasonId: string;
@@ -78,11 +95,12 @@ export async function resolveSkinForWeek(params: {
   snapshots: SnapshotRow[];
   statLines: Map<string, Tank01LiveStats>;
   rules: CvcScoringRule[];
+  force?: boolean;
 }): Promise<void> {
-  const { seasonId, weekNumber, isLastWeek, matchups, franchiseTotals, snapshots, statLines, rules } = params;
+  const { seasonId, weekNumber, isLastWeek, matchups, franchiseTotals, snapshots, statLines, rules, force } = params;
 
   const existing = unwrap(await supabase.from("cvc_skin").select("id, status").eq("season_id", seasonId).eq("week_number", weekNumber).maybeSingle());
-  if (existing && existing.status !== "pending") return;
+  if (shouldSkipSkinResolution(existing?.status ?? null, force ?? false)) return;
 
   const priorSkin = unwrap(await supabase.from("cvc_skin").select("pot_amount, status").eq("season_id", seasonId).lt("week_number", weekNumber).order("week_number", { ascending: false }).limit(1).maybeSingle());
   const potAmount = priorSkin?.status === "pushed" ? Number(priorSkin.pot_amount) + SKIN_BASE_AMOUNT : SKIN_BASE_AMOUNT;
