@@ -1,20 +1,6 @@
-import { applyEspnKickerOverrides, correctionWindowClosed, hasKickedOff, selectWeekForSync, shouldFinalizeWeek } from "./tank01ScoringSync";
+import { applyEspnKickerOverrides, hasKickedOff, isGameFinal, selectWeekForSync, shouldFinalizeWeek } from "./tank01ScoringSync";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Tank01LiveStats } from "@shared/cvcScoring";
-
-describe("CVC Tank01 finalizer correction window", () => {
-  it("keeps provider results provisional before Friday 16:00 UTC", () => {
-    expect(correctionWindowClosed(new Date("2026-08-21T15:59:59.000Z"))).toBe(false);
-  });
-
-  it("finalizes only when the Friday 16:00 UTC correction window has closed", () => {
-    expect(correctionWindowClosed(new Date("2026-08-21T16:00:00.000Z"))).toBe(true);
-  });
-
-  it("does not finalize automatically on other weekdays", () => {
-    expect(correctionWindowClosed(new Date("2026-08-22T18:00:00.000Z"))).toBe(false);
-  });
-});
 
 describe("hasKickedOff (gates which games this cron -- running every 5 minutes for the whole CVC week -- actually fetches a box score for)", () => {
   afterEach(() => { vi.useRealTimers(); });
@@ -38,34 +24,54 @@ describe("hasKickedOff (gates which games this cron -- running every 5 minutes f
   });
 });
 
-describe("shouldFinalizeWeek", () => {
-  afterEach(() => { vi.useRealTimers(); });
-
-  const week1Games = [
-    { gameDate: "20260909", gameTime: "8:20p" }, // Thursday night
-    { gameDate: "20260913", gameTime: "1:00p" }, // Sunday early
-    { gameDate: "20260914", gameTime: "8:15p" }, // Monday night, the week's last game
-  ];
-
-  it("does NOT finalize on the Friday WITHIN the week's own game window -- THIS IS THE ACTUAL BUG: correctionWindowClosed(now) alone is already true here (it's Friday 4pm+ UTC), but Sunday and Monday's games haven't happened yet, so finalizing here would lock in a week 3-4 days before it's actually done", () => {
-    const fridayWithinWeek = new Date("2026-09-11T17:00:00.000Z"); // Friday, but Thu already played, Sun/Mon still ahead
-    expect(correctionWindowClosed(fridayWithinWeek)).toBe(true); // confirms the old, insufficient check alone says "go"
-    expect(shouldFinalizeWeek(week1Games, fridayWithinWeek)).toBe(false); // the fixed check correctly blocks it
+describe("isGameFinal (ported from WRC's confirmed approach, at the commissioner's explicit request: CVC should finalize a week as soon as its games are actually done, the same way WRC does, not on a fixed calendar delay)", () => {
+  it("is true for gameStatusCode 2 (final/completed)", () => {
+    expect(isGameFinal({ gameStatusCode: 2 })).toBe(true);
+    expect(isGameFinal({ gameStatusCode: "2" })).toBe(true); // checked as a string since the wire type isn't confirmed
   });
 
-  it("DOES finalize on the following Friday, once every game in the week has actually kicked off", () => {
-    const followingFriday = new Date("2026-09-18T17:00:00.000Z");
-    expect(shouldFinalizeWeek(week1Games, followingFriday)).toBe(true);
+  it("is false for gameStatusCode 0 (not started) or 1 (in progress)", () => {
+    expect(isGameFinal({ gameStatusCode: 0 })).toBe(false);
+    expect(isGameFinal({ gameStatusCode: 1 })).toBe(false);
   });
 
-  it("does not finalize before Friday 4pm UTC even if every game has already kicked off", () => {
-    const earlyMonday = new Date("2026-09-14T21:00:00.000Z"); // after Monday night kickoff, but not yet Friday
-    expect(shouldFinalizeWeek(week1Games, earlyMonday)).toBe(false);
+  it("is false for a postponed (3) or suspended (4) game -- not actually done, even though it won't progress further on its own", () => {
+    expect(isGameFinal({ gameStatusCode: 3 })).toBe(false);
+    expect(isGameFinal({ gameStatusCode: 4 })).toBe(false);
+  });
+
+  it("falls back to the gameStatus text when gameStatusCode is missing", () => {
+    expect(isGameFinal({ gameStatus: "Final" })).toBe(true);
+    expect(isGameFinal({ gameStatus: "Final/OT" })).toBe(true);
+    expect(isGameFinal({ gameStatus: "In Progress" })).toBe(false);
+  });
+
+  it("is false for a completely empty or missing body", () => {
+    expect(isGameFinal(null)).toBe(false);
+    expect(isGameFinal(undefined)).toBe(false);
+    expect(isGameFinal({})).toBe(false);
+  });
+});
+
+describe("shouldFinalizeWeek (no longer time-based at all -- finalizes purely once every one of the week's games is confirmed final)", () => {
+  it("finalizes once every scheduled game is confirmed final", () => {
+    expect(shouldFinalizeWeek(3, [true, true, true])).toBe(true);
+  });
+
+  it("does not finalize while any game is still not final, even if the rest are done", () => {
+    expect(shouldFinalizeWeek(3, [true, true, false])).toBe(false); // e.g. Monday night still playing
+  });
+
+  it("does not finalize if not every scheduled game has even kicked off yet -- the exact bug this signature exists to prevent: gameStatuses only has an entry per game that's already started, so a week where only 2 of 3 games have kicked off (and those 2 happen to be done) must NOT be read as \"all final\"", () => {
+    expect(shouldFinalizeWeek(3, [true, true])).toBe(false); // only 2 statuses for 3 scheduled games
   });
 
   it("does not finalize a week with no games scheduled at all", () => {
-    const followingFriday = new Date("2026-09-18T17:00:00.000Z");
-    expect(shouldFinalizeWeek([], followingFriday)).toBe(false);
+    expect(shouldFinalizeWeek(0, [])).toBe(false);
+  });
+
+  it("does not finalize on an empty gameStatuses list when games were actually scheduled", () => {
+    expect(shouldFinalizeWeek(3, [])).toBe(false);
   });
 });
 

@@ -8,20 +8,39 @@ import { normalizePlayerName } from "@shared/playerNameMatch";
 import { getKickerEventsForPlayer, parseEspnKickerEvents, sumMadeFieldGoalYards, countMadeExtraPoints, type KickerPlayEvent } from "@shared/espnKickerEvents";
 
 export { normalizeTeam };
-export const correctionWindowClosed = (now = new Date()) => now.getUTCDay() === 5 && now.getUTCHours() >= 16;
 
-/**
- * Whether a CVC week should be finalized: it must be Friday 4pm UTC or later on the
- * calendar (correctionWindowClosed), AND every game actually scheduled for this
- * specific week must have already kicked off. correctionWindowClosed alone only knows
- * the calendar day/time -- it has no idea which week is being finalized. Confirmed as
- * a real bug: on the Friday WITHIN a week's own game window (Thursday night already
- * played, Sunday/Monday still ahead), correctionWindowClosed(now) alone is already
- * true, finalizing that week 3-4 days before its games are even done.
- */
-export function shouldFinalizeWeek(games: { gameDate?: string; gameTime?: string }[], now = new Date()): boolean {
-  if (!correctionWindowClosed(now)) return false;
-  return games.length > 0 && games.every(game => hasKickedOff(game.gameDate, game.gameTime));
+/** Whether a single game is actually done, based on its own box score's
+ * gameStatusCode -- confirmed directly with Tank01 (same finding already applied in
+ * WRC): getNFLBoxScore's gameStatus/gameStatusCode fields ARE genuinely live, unlike
+ * getNFLGamesForWeek's stale, once-daily-refreshed schedule endpoint. gameStatusCode
+ * is a clean numeric enum (0=not started, 1=in progress, 2=final/completed,
+ * 3=postponed, 4=suspended), checked as a string here since its exact wire type isn't
+ * confirmed; falls back to the gameStatus text itself for defense-in-depth in case
+ * that field is ever missing or an unexpected type. */
+export function isGameFinal(body: { gameStatus?: unknown; gameStatusCode?: unknown } | null | undefined): boolean {
+  const code = body?.gameStatusCode !== undefined ? String(body.gameStatusCode) : undefined;
+  if (code !== undefined) return code === "2";
+  return /final|completed/i.test(String(body?.gameStatus ?? ""));
+}
+
+/** Whether a CVC week should be finalized: every game scheduled for this week must
+ * have actually kicked off AND genuinely finished (per isGameFinal on each one's own
+ * box score) -- no time-based cutoff at all. This replaces an earlier calendar-based
+ * approach (a hardcoded "Friday 4pm UTC" correction window) that wasn't actually
+ * checking whether the games were done, only whether enough calendar time had passed
+ * that they probably were -- resulting in a multi-day gap where a week's games were
+ * long over but the week still showed as "live" and didn't count toward standings.
+ * Confirmed with the commissioner that CVC should behave like WRC here: finalize as
+ * soon as every game is actually final, not on a fixed calendar delay.
+ *
+ * totalScheduledGames must equal gameStatuses.length -- gameStatuses only ever has an
+ * entry per game that's already kicked off (a box score for a game that hasn't started
+ * doesn't exist to check), so without this check, a week where only some games have
+ * even started yet -- and those few happen to already be done -- would incorrectly
+ * finalize while games that haven't begun are still ahead. */
+export function shouldFinalizeWeek(totalScheduledGames: number, gameStatuses: boolean[]): boolean {
+  if (totalScheduledGames === 0 || gameStatuses.length !== totalScheduledGames) return false;
+  return gameStatuses.every(isFinal => isFinal);
 }
 
 /** Whether a game's kickoff has already passed. Same Date.UTC()-based approach as the
@@ -173,8 +192,8 @@ async function tankStatLinesForWeek(adapter: Tank01NFLDataAdapter, nflWeek: numb
   const games = await adapter.listGamesForWeek(nflWeek, seasonYear);
   const kickedOffGames = games.filter(game => game.gameID && hasKickedOff(game.gameDate, game.gameTime));
   const statLines = new Map<string, Tank01LiveStats>();
-  await mapWithConcurrencyLimit(kickedOffGames, 5, async game => {
-    if (!game.gameID) return;
+  const gameStatuses = await mapWithConcurrencyLimit(kickedOffGames, 5, async game => {
+    if (!game.gameID) return false;
     const box = await adapter.getBoxScore(game.gameID) as Tank01BoxScore;
     for (const raw of Object.values(box.playerStats ?? {})) {
       const player = raw as Record<string, unknown>;
@@ -186,10 +205,11 @@ async function tankStatLinesForWeek(adapter: Tank01NFLDataAdapter, nflWeek: numb
       const teamAbv = String(entry.teamAbv ?? "");
       if (teamAbv) statLines.set(`dst:${normalizeTeam(teamAbv)}`, { Defense: entry as unknown as Record<string, string | number> });
     }
+    return isGameFinal(box as unknown as { gameStatus?: unknown; gameStatusCode?: unknown });
   });
   const kickerEvents = await fetchEspnKickerEventsForWeek(kickedOffGames);
   applyEspnKickerOverrides(statLines, kickerEvents);
-  return { statLines, games };
+  return { statLines, games, gameStatuses };
 }
 
 /** Idempotent provider-only score reconciliation. Called by the authenticated Heartbeat
@@ -210,7 +230,7 @@ export async function syncTank01Scores(now = new Date(), forceWeekNumber?: numbe
   if (!alreadySnapshotted.length) await promotePlannedLineupForWeek(season.id, week.id, week.week_number, franchiseIds);
   await snapshotLineups(season.id, week.id, franchiseIds);
   const snapshots = unwrap(await supabase.from("weekly_lineup_snapshot").select("franchise_id, slot_code, player:player_id(id, display_name, position, nfl_team)").eq("schedule_week_id", week.id)) as SnapshotRow[] ?? [];
-  const { statLines, games } = await tankStatLinesForWeek(adapter, week.week_number, season.year);
+  const { statLines, games, gameStatuses } = await tankStatLinesForWeek(adapter, week.week_number, season.year);
   if (!statLines.size) {
     unwrap(await supabase.from("tank01_scoring_sync_state").upsert({ season_id: season.id, last_attempt_at: now.toISOString(), last_error: null, updated_at: now.toISOString() }, { onConflict: "season_id" }).select("id").single());
     return { status: "skipped", weekLabel: week.label, matchupsUpdated: 0, reason: "Tank01 has not published box-score data for this CVC week." };
@@ -232,7 +252,7 @@ export async function syncTank01Scores(now = new Date(), forceWeekNumber?: numbe
     const points = statLine ? calculateCvcFantasyPoints(statLine, position, rules) : 0;
     franchiseTotals.set(entry.franchise_id, (franchiseTotals.get(entry.franchise_id) ?? 0) + points);
   }
-  const finalizing = shouldFinalizeWeek(games, now);
+  const finalizing = shouldFinalizeWeek(games.length, gameStatuses);
   for (const matchup of matchups) {
     const homeScore = Math.round((franchiseTotals.get(matchup.home_franchise_id) ?? 0) * 100) / 100;
     const awayScore = Math.round((franchiseTotals.get(matchup.away_franchise_id) ?? 0) * 100) / 100;
