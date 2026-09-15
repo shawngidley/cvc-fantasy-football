@@ -7,38 +7,60 @@ var ruleValue = (rules, statKey, position) => {
   const rule = rules.find((candidate) => candidate.stat_key === statKey && (!candidate.applies_to_positions?.length || candidate.applies_to_positions.includes(position)));
   return rule ? numeric(rule.value) : 0;
 };
-function calculateCvcFantasyPoints(stats, position, rules) {
+function calculateCvcFantasyPointsBreakdown(stats, position, rules) {
   const passing = stats.Passing ?? {};
   const rushing = stats.Rushing ?? {};
   const receiving = stats.Receiving ?? {};
   const kicking = stats.Kicking ?? {};
   const defense = stats.Defense ?? {};
-  let points = 0;
-  points += numeric(passing.passYds) * ruleValue(rules, "passing_yards", position);
-  points += numeric(passing.passTD) * ruleValue(rules, "passing_touchdown", position);
-  points += numeric(passing.int) * ruleValue(rules, "interception", position);
-  if (numeric(passing.passYds) >= 350) points += ruleValue(rules, "passing_350_bonus", position);
-  points += numeric(rushing.rushYds) * ruleValue(rules, "rushing_yards", position);
-  points += numeric(rushing.rushTD) * ruleValue(rules, "rushing_touchdown", position);
-  if (numeric(rushing.rushYds) >= 100) points += ruleValue(rules, "rushing_100_bonus", position);
-  points += numeric(receiving.recYds) * ruleValue(rules, "receiving_yards", position);
-  points += numeric(receiving.recTD) * ruleValue(rules, "receiving_touchdown", position);
-  points += numeric(receiving.receptions) * ruleValue(rules, "reception", position);
-  if (numeric(receiving.recYds) >= 100) points += ruleValue(rules, "receiving_100_bonus", position);
-  points += numeric(kicking.xpMade) * ruleValue(rules, "extra_point", position);
-  points += numeric(kicking.fgYds ?? kicking.kickYards) * ruleValue(rules, "field_goal_yard", position);
+  const items = [];
+  const add = (label, points) => {
+    if (points !== 0) items.push({ label, points });
+  };
+  const passYds = numeric(passing.passYds);
+  add(`${passYds} passing yds`, passYds * ruleValue(rules, "passing_yards", position));
+  const passTD = numeric(passing.passTD);
+  add(`${passTD} passing TD${passTD === 1 ? "" : "s"}`, passTD * ruleValue(rules, "passing_touchdown", position));
+  const int = numeric(passing.int);
+  add(`${int} INT thrown`, int * ruleValue(rules, "interception", position));
+  if (passYds >= 350) add("350+ passing yd bonus", ruleValue(rules, "passing_350_bonus", position));
+  const rushYds = numeric(rushing.rushYds);
+  add(`${rushYds} rushing yds`, rushYds * ruleValue(rules, "rushing_yards", position));
+  const rushTD = numeric(rushing.rushTD);
+  add(`${rushTD} rushing TD${rushTD === 1 ? "" : "s"}`, rushTD * ruleValue(rules, "rushing_touchdown", position));
+  if (rushYds >= 100) add("100+ rushing yd bonus", ruleValue(rules, "rushing_100_bonus", position));
+  const recYds = numeric(receiving.recYds);
+  add(`${recYds} receiving yds`, recYds * ruleValue(rules, "receiving_yards", position));
+  const recTD = numeric(receiving.recTD);
+  add(`${recTD} receiving TD${recTD === 1 ? "" : "s"}`, recTD * ruleValue(rules, "receiving_touchdown", position));
+  const receptions = numeric(receiving.receptions);
+  add(`${receptions} reception${receptions === 1 ? "" : "s"}`, receptions * ruleValue(rules, "reception", position));
+  if (recYds >= 100) add("100+ receiving yd bonus", ruleValue(rules, "receiving_100_bonus", position));
+  const xpMade = numeric(kicking.xpMade);
+  add(`${xpMade} extra point${xpMade === 1 ? "" : "s"} made`, xpMade * ruleValue(rules, "extra_point", position));
+  const fgYds = numeric(kicking.fgYds ?? kicking.kickYards);
+  add(`${fgYds} field goal yds`, fgYds * ruleValue(rules, "field_goal_yard", position));
   if (position === "DST") {
-    points += numeric(defense.fumblesRecovered) * ruleValue(rules, "fumble_recovery", position);
-    points += numeric(defense.defensiveInterceptions) * ruleValue(rules, "defensive_interception", position);
-    points += numeric(defense.sacks) * ruleValue(rules, "sack", position);
-    points += numeric(defense.defensiveOrSpecialTeamsTds ?? defense.defTD) * ruleValue(rules, "defensive_touchdown", position);
-    points += numeric(defense.safeties) * ruleValue(rules, "safety", position);
+    const fumblesRecovered = numeric(defense.fumblesRecovered);
+    add(`${fumblesRecovered} fumble recover${fumblesRecovered === 1 ? "y" : "ies"}`, fumblesRecovered * ruleValue(rules, "fumble_recovery", position));
+    const dInt = numeric(defense.defensiveInterceptions);
+    add(`${dInt} interception${dInt === 1 ? "" : "s"}`, dInt * ruleValue(rules, "defensive_interception", position));
+    const sacks = numeric(defense.sacks);
+    add(`${sacks} sack${sacks === 1 ? "" : "s"}`, sacks * ruleValue(rules, "sack", position));
+    const defTD = numeric(defense.defensiveOrSpecialTeamsTds ?? defense.defTD);
+    add(`${defTD} defensive TD${defTD === 1 ? "" : "s"}`, defTD * ruleValue(rules, "defensive_touchdown", position));
+    const safeties = numeric(defense.safeties);
+    add(`${safeties} safet${safeties === 1 ? "y" : "ies"}`, safeties * ruleValue(rules, "safety", position));
     const pointsAllowed = numeric(defense.ptsAgainst ?? defense.ptsAllowed);
-    if (pointsAllowed === 0) points += ruleValue(rules, "points_allowed_0", position);
-    else if (pointsAllowed <= 6) points += ruleValue(rules, "points_allowed_1_6", position);
-    else if (pointsAllowed <= 13) points += ruleValue(rules, "points_allowed_7_13", position);
-    else if (pointsAllowed <= 20) points += ruleValue(rules, "points_allowed_14_20", position);
+    if (pointsAllowed === 0) add("0 points allowed", ruleValue(rules, "points_allowed_0", position));
+    else if (pointsAllowed <= 6) add(`${pointsAllowed} points allowed (1-6)`, ruleValue(rules, "points_allowed_1_6", position));
+    else if (pointsAllowed <= 13) add(`${pointsAllowed} points allowed (7-13)`, ruleValue(rules, "points_allowed_7_13", position));
+    else if (pointsAllowed <= 20) add(`${pointsAllowed} points allowed (14-20)`, ruleValue(rules, "points_allowed_14_20", position));
   }
+  return items;
+}
+function calculateCvcFantasyPoints(stats, position, rules) {
+  const points = calculateCvcFantasyPointsBreakdown(stats, position, rules).reduce((total, item) => total + item.points, 0);
   return Math.round(points * 100) / 100;
 }
 

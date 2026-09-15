@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { calculateCvcFantasyPoints, type CvcScoringRule } from "../shared/cvcScoring";
+import { calculateCvcFantasyPoints, calculateCvcFantasyPointsBreakdown, type CvcScoringRule } from "../shared/cvcScoring";
 
 const rules: CvcScoringRule[] = [
   { stat_key: "passing_yards", value: 0.05, applies_to_positions: ["QB", "RB", "WR", "TE"] },
@@ -58,5 +58,43 @@ describe("CVC scoring engine", () => {
   it("can award multiple bonuses at once for a dual-threat stat line (e.g. 350+ passing and 100+ rushing in the same game)", () => {
     const points = calculateCvcFantasyPoints({ Passing: { passYds: 380 }, Rushing: { rushYds: 110 } }, "QB", rules);
     expect(points).toBe(380 * 0.05 + 5 + 110 * 0.1 + 5);
+  });
+});
+
+describe("calculateCvcFantasyPointsBreakdown (powers the points-breakdown popup)", () => {
+  it("sums to exactly the same total as calculateCvcFantasyPoints, for a QB with a bonus", () => {
+    const stats = { Passing: { passYds: 380, passTD: 3, int: 1 }, Rushing: { rushYds: 20 } };
+    const total = calculateCvcFantasyPoints(stats, "QB", rules);
+    const breakdown = calculateCvcFantasyPointsBreakdown(stats, "QB", rules);
+    const breakdownTotal = Math.round(breakdown.reduce((sum, item) => sum + item.points, 0) * 100) / 100;
+    expect(breakdownTotal).toBe(total);
+  });
+
+  it("omits stats that didn't happen (zero value), same convention as the DST live-scoring chips", () => {
+    const breakdown = calculateCvcFantasyPointsBreakdown({ Passing: { passYds: 250, passTD: 2, int: 0 } }, "QB", rules);
+    expect(breakdown.some(item => item.label.includes("INT"))).toBe(false);
+    expect(breakdown.some(item => item.label.includes("rushing"))).toBe(false);
+  });
+
+  it("includes a labeled bonus line item separately from the base yardage line item", () => {
+    const breakdown = calculateCvcFantasyPointsBreakdown({ Passing: { passYds: 380 } }, "QB", rules);
+    expect(breakdown).toContainEqual({ label: "380 passing yds", points: 380 * 0.05 });
+    expect(breakdown).toContainEqual({ label: "350+ passing yd bonus", points: 5 });
+  });
+
+  it("breaks down the real confirmed Jacksonville DST line from Week 1 CLE@JAX correctly", () => {
+    const jaxDefense = { defensiveInterceptions: 1, sacks: 5, fumblesRecovered: 1, ptsAllowed: 10, defTD: 0, safeties: 0 };
+    const breakdown = calculateCvcFantasyPointsBreakdown({ Defense: jaxDefense }, "DST", rules);
+    expect(breakdown).toContainEqual({ label: "1 fumble recovery", points: 2 });
+    expect(breakdown).toContainEqual({ label: "1 interception", points: 2 });
+    expect(breakdown).toContainEqual({ label: "5 sacks", points: 10 });
+    expect(breakdown).toContainEqual({ label: "10 points allowed (7-13)", points: 5 });
+    // No defensive-TD or safety line items, since both are 0.
+    expect(breakdown.some(item => item.label.includes("defensive TD"))).toBe(false);
+    expect(breakdown.some(item => item.label.includes("safet"))).toBe(false);
+  });
+
+  it("returns an empty list for a completely blank stat line", () => {
+    expect(calculateCvcFantasyPointsBreakdown({}, "QB", rules)).toEqual([]);
   });
 });
