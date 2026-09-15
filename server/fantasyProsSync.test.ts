@@ -81,3 +81,30 @@ describe("CVC FantasyPros player matching -- generational-suffix mismatches (the
     expect(match?.id).toBe("real-kenny");
   });
 });
+
+describe("CVC FantasyPros player matching -- DST team-code fallback (a team defense's name can differ between providers in ways no name normalizer can fix -- \"LA Rams\" vs \"Los Angeles Rams\" is a genuinely different string, not a formatting variant)", () => {
+  const player = (overrides: Partial<{ id: string; provider: string; external_id: string | null; display_name: string; position: string | null; nfl_team: string | null; metadata: Record<string, unknown> | null }>) => ({
+    id: "id", provider: "cvc_workbook_2026", external_id: null, display_name: "", position: null, nfl_team: null, metadata: null, ...overrides,
+  });
+
+  it("matches a DST by team code + position when the display names are unrelated strings", () => {
+    const existing = [player({ id: "real-rams-dst", display_name: "LA Rams", nfl_team: "LAR", position: "DST" })];
+    const match = resolveMatchingPlayer({ externalId: "40001", displayName: "Los Angeles Rams", nflTeam: "LAR", position: "DST" }, existing);
+    expect(match?.id).toBe("real-rams-dst");
+  });
+
+  it("does not fall back to the DST team match for a non-DST incoming record", () => {
+    const existing = [player({ id: "real-rams-dst", display_name: "LA Rams", nfl_team: "LAR", position: "DST" })];
+    const match = resolveMatchingPlayer({ externalId: "40002", displayName: "Some Rams Player", nflTeam: "LAR", position: "WR" }, existing);
+    expect(match).toBeNull();
+  });
+
+  it("does not match when no existing DST shares that team code", () => {
+    const existing = [
+      player({ id: "rams-dst", display_name: "Rams", nfl_team: "LAR", position: "DST" }),
+      player({ id: "bears-dst", display_name: "Bears", nfl_team: "CHI", position: "DST" }),
+    ];
+    const match = resolveMatchingPlayer({ externalId: "40003", displayName: "Seattle Defense", nflTeam: "SEA", position: "DST" }, existing);
+    expect(match).toBeNull();
+  });
+});

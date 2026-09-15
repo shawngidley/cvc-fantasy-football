@@ -45,8 +45,15 @@ export function normalizeFantasyProsPlayers(payload: unknown) {
  * where the original CVC workbook import didn't have nfl_team populated yet at sync
  * time, so name+team failed and a brand new row got created instead of enriching the
  * real one. The name-only fallback is only used when the name is unique among existing
- * players, so it can never merge two genuinely different real people sharing a name. */
-export function resolveMatchingPlayer(incoming: { externalId: string; displayName: string; nflTeam: string | null }, existing: CvcPlayer[]): CvcPlayer | null {
+ * players, so it can never merge two genuinely different real people sharing a name.
+ * (4) for a DST specifically, a team-code match alone: unlike a suffix or alias
+ * mismatch, a team defense's display name can differ between providers in ways that
+ * aren't fixable by any name normalizer at all ("LA Rams" vs "Los Angeles Rams" is a
+ * genuinely different string, not a formatting variant) -- but since a real NFL team
+ * has exactly one defense, matching by team code + position="DST" alone is always
+ * unambiguous and doesn't depend on the two providers agreeing on a name string at
+ * all. */
+export function resolveMatchingPlayer(incoming: { externalId: string; displayName: string; nflTeam: string | null; position?: string | null }, existing: CvcPlayer[]): CvcPlayer | null {
   const byFantasyProsId = existing.find(player => player.provider === "fantasypros" && player.external_id === incoming.externalId);
   if (byFantasyProsId) return byFantasyProsId;
   const nameTeamKey = `${normalizePlayerName(incoming.displayName)}|${canonicalTeam(incoming.nflTeam)}`;
@@ -54,7 +61,12 @@ export function resolveMatchingPlayer(incoming: { externalId: string; displayNam
   if (byNameAndTeam) return byNameAndTeam;
   const nameKey = normalizePlayerName(incoming.displayName);
   const nameMatches = existing.filter(player => normalizePlayerName(player.display_name) === nameKey);
-  return nameMatches.length === 1 ? nameMatches[0] : null;
+  if (nameMatches.length === 1) return nameMatches[0];
+  if ((incoming.position ?? "").toUpperCase() === "DST" && incoming.nflTeam) {
+    const dstMatches = existing.filter(player => (player.position ?? "").toUpperCase() === "DST" && canonicalTeam(player.nfl_team) === canonicalTeam(incoming.nflTeam));
+    if (dstMatches.length === 1) return dstMatches[0];
+  }
+  return null;
 }
 
 export async function syncFantasyProsSnapshot(snapshot: FantasyProsSnapshot): Promise<FantasyProsSyncSummary> {
