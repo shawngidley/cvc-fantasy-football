@@ -907,6 +907,7 @@ export const leagueRouter = router({
           playerName: match?.display_name || injury.name,
           position: match?.position ?? injury.position,
           team: match?.nfl_team || injury.team,
+          shortStatus: injury.shortStatus || null,
           headline: `${status}${injury.injuryType ? ` · ${injury.injuryType}` : ""}`,
           description,
           published: injury.updated || new Date().toISOString(),
