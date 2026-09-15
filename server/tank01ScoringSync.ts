@@ -53,7 +53,21 @@ export type Tank01SyncSummary = {
 
 
 
-async function currentContext() {
+/** Picks which week syncTank01Scores should operate on. Normal path (no
+ * forceWeekNumber): only ever selects a "live" or "upcoming" week -- once a week's
+ * status flips to "final" it can never be selected here again, which is exactly the
+ * gap confirmed by the finalization audit (item 9): if a scoring bug is fixed AFTER a
+ * week has already finalized, simply re-running this sync does nothing for that
+ * week -- it silently moves on to whatever the next live/upcoming week is instead.
+ * forceWeekNumber bypasses that filter entirely, selecting the named week regardless
+ * of its current status, so a commissioner has a way to actually reach a week that's
+ * already final. */
+export function selectWeekForSync<T extends { week_number: number; status: string }>(weeks: T[], forceWeekNumber?: number): T | null {
+  if (forceWeekNumber !== undefined) return weeks.find(item => item.week_number === forceWeekNumber) ?? null;
+  return weeks.find(item => item.status === "live") ?? weeks.find(item => item.status === "upcoming") ?? null;
+}
+
+async function currentContext(forceWeekNumber?: number) {
   // Prefer the explicitly-flagged current season (see season.is_current migration) --
   // neither `year` nor `status` can safely identify it once a future season row exists
   // (e.g. to hold next year's tradeable rookie picks). Falls back to the old highest-
@@ -62,7 +76,7 @@ async function currentContext() {
   const season = flagged ?? unwrap(await supabase.from("season").select("id, league_id, year").order("year", { ascending: false }).limit(1).maybeSingle());
   if (!season) throw new Error("No CVC season is available for Tank01 scoring synchronization.");
   const weeks = unwrap(await supabase.from("schedule_week").select("id, week_number, label, status").eq("season_id", season.id).order("week_number")) ?? [];
-  const week = weeks.find(item => item.status === "live") ?? weeks.find(item => item.status === "upcoming") ?? null;
+  const week = selectWeekForSync(weeks, forceWeekNumber);
   return { season, week, weeks };
 }
 
@@ -178,10 +192,14 @@ async function tankStatLinesForWeek(adapter: Tank01NFLDataAdapter, nflWeek: numb
   return { statLines, games };
 }
 
-/** Idempotent provider-only score reconciliation. Called by the authenticated Heartbeat callback. */
-export async function syncTank01Scores(now = new Date()): Promise<Tank01SyncSummary> {
-  const { season, week, weeks } = await currentContext();
-  if (!week) return { status: "skipped", matchupsUpdated: 0, reason: "No live or upcoming CVC week." };
+/** Idempotent provider-only score reconciliation. Called by the authenticated Heartbeat
+ * callback for the normal live/upcoming week. Pass forceWeekNumber to instead target a
+ * specific week regardless of its current status -- the only way to reach an
+ * already-final week, since the normal lookup only ever considers live/upcoming
+ * weeks. */
+export async function syncTank01Scores(now = new Date(), forceWeekNumber?: number): Promise<Tank01SyncSummary> {
+  const { season, week, weeks } = await currentContext(forceWeekNumber);
+  if (!week) return { status: "skipped", matchupsUpdated: 0, reason: forceWeekNumber !== undefined ? `No CVC week numbered ${forceWeekNumber} was found.` : "No live or upcoming CVC week." };
   const adapter = getNFLDataAdapter();
   if (!(adapter instanceof Tank01NFLDataAdapter)) return { status: "skipped", matchupsUpdated: 0, reason: "Tank01 is not configured." };
   const rules = unwrap(await supabase.from("scoring_rule").select("stat_key, value, applies_to_positions").eq("season_id", season.id)) ?? [];

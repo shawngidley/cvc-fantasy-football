@@ -1035,6 +1035,16 @@ export const leagueRouter = router({
     return syncTank01Scores();
   }),
 
+  // Confirmed real gap (finalization audit item 9): once a week's status flips to
+  // "final", the normal syncMatchupScores/heartbeat cron can never touch it again --
+  // it only ever looks for a "live" or "upcoming" week. Without this, fixing a scoring
+  // bug after a week has already finalized would appear to do nothing when re-run,
+  // since the sync silently skips straight past that week to whatever's next.
+  forceRecomputeWeek: protectedProcedure.input(z.object({ weekNumber: z.number().int().positive() })).mutation(async ({ ctx, input }) => {
+    await requireCommissioner({ openId: ctx.user.openId });
+    return syncTank01Scores(new Date(), input.weekNumber);
+  }),
+
   // Debug-only: captures the raw, unprocessed box.DST object from a currently-active
   // game, to confirm exactly which fields Tank01 actually provides for defensive
   // scoring (specifically: does fumblesRecovered exist as a real field, or -- like the

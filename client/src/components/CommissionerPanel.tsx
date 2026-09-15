@@ -235,6 +235,15 @@ function SeasonStatsSyncModule() {
     onError: error => toast.error(error.message),
   });
 
+  const [forceWeekNumber, setForceWeekNumber] = useState(1);
+  const forceRecomputeWeek = trpc.league.forceRecomputeWeek.useMutation({
+    onSuccess: data => {
+      if (data.status === "skipped") { toast.error(data.reason ?? "That week could not be recomputed."); return; }
+      toast.success(`Recomputed ${data.weekLabel ?? `week ${forceWeekNumber}`} -- ${data.matchupsUpdated} matchup(s), status: ${data.status}.`);
+    },
+    onError: error => toast.error(error.message),
+  });
+
   const [dstYear, setDstYear] = useState(new Date().getFullYear());
   const [dstThroughWeek, setDstThroughWeek] = useState(18);
   const syncDst = trpc.league.syncDstSeasonStats.useMutation({
@@ -269,6 +278,14 @@ function SeasonStatsSyncModule() {
       <p className="mt-1 text-xs leading-5 text-slate-500">Recomputes every current-week matchup's score from Tank01 and writes it to the database -- this is the same sync the 5-minute cron runs automatically. Use this to force an immediate update, or to see the exact result/error directly instead of waiting on the next scheduled run.</p>
       <div className="mt-3">
         <button type="button" className="cvc-button-compact" disabled={syncMatchupScores.isPending} onClick={() => syncMatchupScores.mutate()}><Save size={14} /> {syncMatchupScores.isPending ? "Syncing…" : "Sync matchup scores now"}</button>
+      </div>
+    </div>
+    <div className="rounded-lg border border-dashed border-cvc-deep/20 bg-cvc-tint p-4">
+      <p className="text-sm font-semibold text-cvc-deep">Force-recompute a specific week</p>
+      <p className="mt-1 text-xs leading-5 text-slate-500">The sync above only ever touches the current live/upcoming week -- once a week is marked final, it's normally never touched again, even after a scoring fix. Use this to force a full recompute of a specific week regardless of its current status (e.g. to apply a scoring fix retroactively).</p>
+      <div className="mt-3 flex items-center gap-2">
+        <input type="number" min={1} value={forceWeekNumber} onChange={event => setForceWeekNumber(Number(event.target.value) || 1)} className="w-20 rounded border border-slate-300 px-2 py-1.5 text-sm" aria-label="Week number"/>
+        <button type="button" className="cvc-button-compact" disabled={forceRecomputeWeek.isPending} onClick={() => forceRecomputeWeek.mutate({ weekNumber: forceWeekNumber })}><Save size={14} /> {forceRecomputeWeek.isPending ? "Recomputing…" : `Recompute week ${forceWeekNumber}`}</button>
       </div>
     </div>
     <div className="rounded-lg border border-dashed border-cvc-deep/20 bg-cvc-tint p-4">

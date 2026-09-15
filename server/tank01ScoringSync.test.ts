@@ -1,4 +1,4 @@
-import { applyEspnKickerOverrides, correctionWindowClosed, hasKickedOff, shouldFinalizeWeek } from "./tank01ScoringSync";
+import { applyEspnKickerOverrides, correctionWindowClosed, hasKickedOff, selectWeekForSync, shouldFinalizeWeek } from "./tank01ScoringSync";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Tank01LiveStats } from "@shared/cvcScoring";
 
@@ -119,5 +119,40 @@ describe("applyEspnKickerOverrides (finalization audit item 7: the OFFICIAL scor
     const result = statLines.get("patonlykicker") as any;
     expect(result.Kicking.xpMade).toBe(1);
     expect(result.Kicking.fgYds).toBe(0); // untouched -- no FG events for this kicker
+  });
+});
+
+describe("selectWeekForSync (finalization audit item 9: an already-final week could never be selected again for a normal sync, so a scoring fix could never actually reach it)", () => {
+  const weeks = [
+    { week_number: 1, status: "final" },
+    { week_number: 2, status: "live" },
+    { week_number: 3, status: "upcoming" },
+    { week_number: 4, status: "upcoming" },
+  ];
+
+  it("without forceWeekNumber, selects the live week over any upcoming one", () => {
+    expect(selectWeekForSync(weeks)?.week_number).toBe(2);
+  });
+
+  it("without forceWeekNumber, falls back to the first upcoming week when none is live", () => {
+    const noLiveWeek = weeks.filter(week => week.status !== "live");
+    expect(selectWeekForSync(noLiveWeek)?.week_number).toBe(3);
+  });
+
+  it("without forceWeekNumber, never selects an already-final week -- this is the exact confirmed gap", () => {
+    const onlyFinal = [{ week_number: 1, status: "final" }];
+    expect(selectWeekForSync(onlyFinal)).toBeNull();
+  });
+
+  it("with forceWeekNumber, selects the named week even though it's already final", () => {
+    expect(selectWeekForSync(weeks, 1)?.week_number).toBe(1);
+  });
+
+  it("with forceWeekNumber, selects the named week regardless of status even when a live week also exists", () => {
+    expect(selectWeekForSync(weeks, 4)?.week_number).toBe(4);
+  });
+
+  it("with forceWeekNumber, returns null for a week number that doesn't exist", () => {
+    expect(selectWeekForSync(weeks, 999)).toBeNull();
   });
 });
