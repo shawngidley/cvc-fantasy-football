@@ -245,6 +245,14 @@ function SeasonStatsSyncModule() {
     onError: error => toast.error(error.message),
   });
 
+  const resetWeekSnapshot = trpc.league.resetWeekSnapshot.useMutation({
+    onSuccess: data => {
+      if (!data.deleted) { toast.error(data.reason ?? "No snapshot was found for that week -- nothing to reset."); return; }
+      toast.success(`Deleted ${data.deleted} snapshot row(s) for ${data.weekLabel ?? `week ${forceWeekNumber}`}. Now tap "Recompute" to re-capture it from the current roster.`);
+    },
+    onError: error => toast.error(error.message),
+  });
+
   const [dstYear, setDstYear] = useState(new Date().getFullYear());
   const [dstThroughWeek, setDstThroughWeek] = useState(18);
   const syncDst = trpc.league.syncDstSeasonStats.useMutation({
@@ -281,11 +289,13 @@ function SeasonStatsSyncModule() {
         <button type="button" className="cvc-button-compact" disabled={syncMatchupScores.isPending} onClick={() => syncMatchupScores.mutate()}><Save size={14} /> {syncMatchupScores.isPending ? "Syncing…" : "Sync matchup scores now"}</button>
       </div>
     </div>
-    <div className="rounded-lg border border-dashed border-cvc-deep/20 bg-cvc-tint p-4">
+    <div className="rounded-lg border border-dashed border-rose-400/40 bg-rose-50 p-4">
       <p className="text-sm font-semibold text-cvc-deep">Force-recompute a specific week</p>
       <p className="mt-1 text-xs leading-5 text-slate-500">The sync above only ever touches the current live/upcoming week -- once a week is marked final, it's normally never touched again, even after a scoring fix. Use this to force a full recompute of a specific week regardless of its current status (e.g. to apply a scoring fix retroactively).</p>
+      <p className="mt-2 text-xs leading-5 text-rose-700"><strong>If a week's official score is wrong because its frozen lineup snapshot itself has the wrong players on it</strong> (not just a scoring formula bug), tap "Reset week N's snapshot" FIRST -- this permanently deletes that week's locked-in lineup record so the recompute below can re-capture it fresh from the current roster. Only do this if you've confirmed the current roster is actually correct for that week (e.g. no waiver moves have happened since).</p>
       <div className="mt-3 flex items-center gap-2">
         <input type="number" min={1} value={forceWeekNumber} onChange={event => setForceWeekNumber(Number(event.target.value) || 1)} className="w-20 rounded border border-slate-300 px-2 py-1.5 text-sm" aria-label="Week number"/>
+        <button type="button" className="cvc-button-compact border-rose-300 bg-rose-100 text-rose-800" disabled={resetWeekSnapshot.isPending} onClick={() => { if (window.confirm(`This permanently deletes week ${forceWeekNumber}'s locked-in lineup snapshot. Only do this if you've confirmed the current roster is correct for that week. Continue?`)) resetWeekSnapshot.mutate({ weekNumber: forceWeekNumber }); }}>{resetWeekSnapshot.isPending ? "Resetting…" : `Reset week ${forceWeekNumber}'s snapshot`}</button>
         <button type="button" className="cvc-button-compact" disabled={forceRecomputeWeek.isPending} onClick={() => forceRecomputeWeek.mutate({ weekNumber: forceWeekNumber })}><Save size={14} /> {forceRecomputeWeek.isPending ? "Recomputing…" : `Recompute week ${forceWeekNumber}`}</button>
       </div>
     </div>

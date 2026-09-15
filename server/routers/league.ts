@@ -1080,6 +1080,26 @@ export const leagueRouter = router({
   // it only ever looks for a "live" or "upcoming" week. Without this, fixing a scoring
   // bug after a week has already finalized would appear to do nothing when re-run,
   // since the sync silently skips straight past that week to whatever's next.
+  // Confirmed real data problem: Week 1's weekly_lineup_snapshot was captured once,
+  // very early (this table is only ever written once per week, then locked forever --
+  // it explicitly skips re-writing itself if any row already exists for that week),
+  // and it doesn't match the real Week 1 rosters (confirmed directly: a player who was
+  // never actually on a franchise's roster ended up snapshotted onto it). Since
+  // snapshotLineups only skips re-taking a week's snapshot when rows already exist,
+  // deleting the bad rows here lets the very next forceRecomputeWeek call re-take the
+  // snapshot fresh from the current roster_assignment (confirmed as the accurate
+  // source -- it's what the Rosters page itself reads) and correctly re-score
+  // everything, including re-resolving the skin.
+  resetWeekSnapshot: protectedProcedure.input(z.object({ weekNumber: z.number().int().positive() })).mutation(async ({ ctx, input }) => {
+    await requireCommissioner({ openId: ctx.user.openId });
+    const { season } = await getCurrentLeagueAndSeason();
+    const week = unwrap(await supabase.from("schedule_week").select("id, week_number, label").eq("season_id", season.id).eq("week_number", input.weekNumber).maybeSingle());
+    if (!week) return { deleted: 0, reason: `No week ${input.weekNumber} found.` };
+    const existing = unwrap(await supabase.from("weekly_lineup_snapshot").select("id").eq("schedule_week_id", week.id)) ?? [];
+    if (existing.length) unwrap(await supabase.from("weekly_lineup_snapshot").delete().eq("schedule_week_id", week.id).select("id"));
+    return { deleted: existing.length, weekLabel: week.label };
+  }),
+
   forceRecomputeWeek: protectedProcedure.input(z.object({ weekNumber: z.number().int().positive() })).mutation(async ({ ctx, input }) => {
     await requireCommissioner({ openId: ctx.user.openId });
     return syncTank01Scores(new Date(), input.weekNumber);
