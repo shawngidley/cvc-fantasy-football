@@ -51,7 +51,7 @@ function toDstStatsShape(row: Record<string, unknown>): Tank01LiveStats {
   };
 }
 
-export type CvcProjectionEntry = { proj: number; pos: string; team: string };
+export type CvcProjectionEntry = { stats: Tank01LiveStats; pos: string; team: string };
 export type CvcProjectionMap = Record<string, CvcProjectionEntry>;
 
 /** Fetches Tank01's weekly fantasy projections (raw stat projections, not points) for
@@ -104,13 +104,16 @@ export function useCvcNFLProjections(week: number | undefined, season: number, r
           const rawPos = String(row.pos ?? "");
           const pos = rawPos.toUpperCase() === "PK" ? "K" : rawPos;
           const team = String(row.team ?? "");
-          const proj = calculateCvcFantasyPoints(toPlayerStatsShape(row), pos, currentRules);
-          const entry: CvcProjectionEntry = { proj: Math.max(0, Math.round(proj * 10) / 10), pos, team };
+          const stats = toPlayerStatsShape(row);
+          const entry: CvcProjectionEntry = { stats, pos, team };
           map[name.toLowerCase()] = entry;
           map[normalizePlayerName(name)] = entry;
           if (pos === "K") {
             if (!sampleKickerRow) sampleKickerRow = row;
-            kickerProjections.push({ name, pos: rawPos, proj: entry.proj });
+            // Debug-only estimate using Tank01's own (not necessarily reliable) rawPos
+            // -- doesn't affect any real scoring, which now always uses the roster's
+            // own known position instead (see getCvcProjectedPoints below).
+            kickerProjections.push({ name, pos: rawPos, proj: Math.max(0, Math.round(calculateCvcFantasyPoints(stats, pos, currentRules) * 10) / 10) });
           }
         }
         if (!cancelled) setDebug(current => ({ ...current, sampleKickerRow, kickerProjections }));
@@ -120,8 +123,7 @@ export function useCvcNFLProjections(week: number | undefined, season: number, r
           const rawAbv = String(row.teamAbv ?? "");
           if (!rawAbv) continue;
           const abv = normalizeAbv(rawAbv);
-          const proj = calculateCvcFantasyPoints(toDstStatsShape(row), "DST", currentRules);
-          map[`dst:${abv}`] = { proj: Math.max(0, Math.round(proj * 10) / 10), pos: "DST", team: abv };
+          map[`dst:${abv}`] = { stats: toDstStatsShape(row), pos: "DST", team: abv };
         }
         if (!cancelled) {
           setProjections(map);
@@ -157,9 +159,22 @@ export function useCvcNFLProjections(week: number | undefined, season: number, r
   return { projections, loading, debug, retryNow: () => runFetch("manual retry") };
 }
 
-export function getCvcProjectedPoints(projections: CvcProjectionMap, playerName: string, position: string | null | undefined, nflTeam: string | null | undefined): number | null {
-  if ((position ?? "").toUpperCase() === "DST" || (position ?? "").toUpperCase() === "DEF") {
-    return projections[`dst:${normalizeAbv(nflTeam ?? "")}`]?.proj ?? null;
+/** Computes a player's projected points lazily from their raw projected stat line,
+ * using the position the CALLER supplies (CVC's own player record) -- not a
+ * pre-computed number, for the same reason getCvcLivePoints computes live points
+ * lazily instead of trusting Tank01's own row.pos: Tank01 offers no reliable position
+ * of its own, and CVC's scoring rules are position-gated (a TE's reception bonus, for
+ * example, only applies if the position passed in actually says "TE"). Falls back to
+ * the provider's own pos only when the caller doesn't have one (e.g. an unrostered
+ * free agent with no CVC position on record yet). */
+export function getCvcProjectedPoints(projections: CvcProjectionMap, playerName: string, position: string | null | undefined, nflTeam: string | null | undefined, rules: CvcScoringRule[]): number | null {
+  const resolvedPosition = (position ?? "").toUpperCase() === "DEF" ? "DST" : (position ?? "").toUpperCase();
+  if (resolvedPosition === "DST") {
+    const entry = projections[`dst:${normalizeAbv(nflTeam ?? "")}`];
+    if (!entry) return null;
+    return Math.max(0, Math.round(calculateCvcFantasyPoints(entry.stats, "DST", rules) * 10) / 10);
   }
-  return projections[playerName.toLowerCase()]?.proj ?? projections[normalizePlayerName(playerName)]?.proj ?? null;
+  const entry = projections[playerName.toLowerCase()] ?? projections[normalizePlayerName(playerName)];
+  if (!entry) return null;
+  return Math.max(0, Math.round(calculateCvcFantasyPoints(entry.stats, resolvedPosition || entry.pos, rules) * 10) / 10);
 }

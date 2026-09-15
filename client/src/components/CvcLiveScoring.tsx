@@ -141,7 +141,7 @@ export function CvcLiveScoring() {
       const status = gameStatus[(player.nfl_team ?? "").toUpperCase()];
       if (status?.state === "post") played += 1; else if (status?.state === "in") playing += 1;
       minutesRemaining += minutesRemainingInGame(status);
-      projTotal += getCvcProjectedPoints(projections, player.display_name, isDst(player.position) ? "DST" : player.position, player.nfl_team) ?? 0;
+      projTotal += getCvcProjectedPoints(projections, player.display_name, isDst(player.position) ? "DST" : player.position, player.nfl_team, rules.data ?? []) ?? 0;
     }
     return { played, playing, yetToPlay: lineup.length - played - playing, minutesRemaining: Math.round(minutesRemaining), projTotal };
   }
@@ -185,7 +185,7 @@ function LineupRow({ away, home, slot, points, live, profiles, injuryStatuses, p
   const isBench = slot === "BN";
   const emptyName = isBench ? "—" : "Lineup not submitted";
   const emptyDetail = isBench ? "" : "Owner must set this slot";
-  const projFor = (entry: any) => entry?.player ? getCvcProjectedPoints(projections, entry.player.display_name, isDst(entry.player.position) ? "DST" : entry.player.position, entry.player.nfl_team) : null;
+  const projFor = (entry: any) => entry?.player ? getCvcProjectedPoints(projections, entry.player.display_name, isDst(entry.player.position) ? "DST" : entry.player.position, entry.player.nfl_team, rules) : null;
   const awayProj = projFor(away); const homeProj = projFor(home);
   const chipsFor = (entry: any) => entry?.player ? statChips(getCvcLiveStatLine(live.statLines, entry.player.display_name, isDst(entry.player.position) ? "DST" : entry.player.position, entry.player.nfl_team)) : [];
   const awayChips = chipsFor(away); const homeChips = chipsFor(home);
