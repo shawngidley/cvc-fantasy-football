@@ -20,8 +20,14 @@ export function buildInjuryStatusMap(items: CvcInjuryItem[]): Map<string, CvcInj
  * elsewhere (Lineup, Live Scoring) rather than only in the dedicated report. Backed by
  * the same tRPC query, so this doesn't add a second network fetch beyond whatever the
  * Injury Report panel (if also mounted) already triggers -- React Query dedupes
- * identical queries automatically. */
+ * identical queries automatically.
+ *
+ * Also returns isError: if the underlying fetch fails, an empty map is
+ * indistinguishable from "nobody on this roster is injured right now" -- which would
+ * quietly tell an owner the opposite of what's actually true (the data just isn't
+ * available, not that everyone's healthy). Callers should show that distinction
+ * somewhere, rather than letting the absence of badges imply a clean bill of health. */
 export function useCvcInjuryStatuses() {
-  const { data } = trpc.league.fantasyProsInjuries.useQuery();
-  return buildInjuryStatusMap(data?.items ?? []);
+  const { data, isError } = trpc.league.fantasyProsInjuries.useQuery();
+  return { statuses: buildInjuryStatusMap(data?.items ?? []), isError };
 }
