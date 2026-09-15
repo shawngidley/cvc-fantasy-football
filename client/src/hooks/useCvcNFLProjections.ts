@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { calculateCvcFantasyPoints, type CvcScoringRule, type Tank01LiveStats } from "@shared/cvcScoring";
+import { normalizePlayerName } from "@shared/playerNameMatch";
 
 const CACHE_PREFIX = "cvc_nfl_proj_v2_";
 const TEAM_ALIASES: Record<string, string> = { kan: "kc", tam: "tb", arz: "ari", jax: "jac", was: "wsh" };
@@ -7,13 +8,6 @@ const TEAM_ALIASES: Record<string, string> = { kan: "kc", tam: "tb", arz: "ari",
 function normalizeAbv(abv: string): string {
   const lower = abv.toLowerCase();
   return (TEAM_ALIASES[lower] ?? lower).toUpperCase();
-}
-
-/** Same suffix-stripping used elsewhere in this codebase (normalizePlayerName), applied
- * locally so this hook has no server dependency -- it's a pure client-side fetch,
- * matching WRC's exact architecture for this feature. */
-function normalizeProjectionName(name: string): string {
-  return name.toLowerCase().replace(/\b(jr|sr|ii|iii|iv|v)\.?$/i, "").replace(/[^a-z0-9]/g, "");
 }
 
 function n(value: unknown): number {
@@ -113,7 +107,7 @@ export function useCvcNFLProjections(week: number | undefined, season: number, r
           const proj = calculateCvcFantasyPoints(toPlayerStatsShape(row), pos, currentRules);
           const entry: CvcProjectionEntry = { proj: Math.max(0, Math.round(proj * 10) / 10), pos, team };
           map[name.toLowerCase()] = entry;
-          map[normalizeProjectionName(name)] = entry;
+          map[normalizePlayerName(name)] = entry;
           if (pos === "K") {
             if (!sampleKickerRow) sampleKickerRow = row;
             kickerProjections.push({ name, pos: rawPos, proj: entry.proj });
@@ -167,5 +161,5 @@ export function getCvcProjectedPoints(projections: CvcProjectionMap, playerName:
   if ((position ?? "").toUpperCase() === "DST" || (position ?? "").toUpperCase() === "DEF") {
     return projections[`dst:${normalizeAbv(nflTeam ?? "")}`]?.proj ?? null;
   }
-  return projections[playerName.toLowerCase()]?.proj ?? projections[normalizeProjectionName(playerName)]?.proj ?? null;
+  return projections[playerName.toLowerCase()]?.proj ?? projections[normalizePlayerName(playerName)]?.proj ?? null;
 }

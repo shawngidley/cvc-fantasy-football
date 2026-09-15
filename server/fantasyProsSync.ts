@@ -1,5 +1,6 @@
 import { supabase, unwrap } from "./supabase";
 import type { FantasyProsSnapshot } from "./fantasyProsCache";
+import { normalizePlayerName } from "@shared/playerNameMatch";
 
 type FantasyProsPlayer = {
   player_id?: number | string;
@@ -16,7 +17,9 @@ type CvcPlayer = { id: string; provider: string; external_id: string | null; dis
 
 export type FantasyProsSyncSummary = { source: FantasyProsSnapshot["source"]; fetchedAt: string; totalReceived: number; inserted: number; enriched: number; skipped: number };
 
-const canonical = (value: string | null | undefined) => (value ?? "").trim().toLowerCase().replace(/\s+/g, " ");
+// Team codes only, not player names -- a player name needs the suffix-aware
+// normalizePlayerName below, not this.
+const canonicalTeam = (value: string | null | undefined) => (value ?? "").trim().toLowerCase().replace(/\s+/g, " ");
 
 export function normalizeFantasyProsPlayers(payload: unknown) {
   const players = Array.isArray((payload as { players?: unknown[] })?.players) ? (payload as { players: unknown[] }).players : [];
@@ -46,11 +49,11 @@ export function normalizeFantasyProsPlayers(payload: unknown) {
 export function resolveMatchingPlayer(incoming: { externalId: string; displayName: string; nflTeam: string | null }, existing: CvcPlayer[]): CvcPlayer | null {
   const byFantasyProsId = existing.find(player => player.provider === "fantasypros" && player.external_id === incoming.externalId);
   if (byFantasyProsId) return byFantasyProsId;
-  const nameTeamKey = `${canonical(incoming.displayName)}|${canonical(incoming.nflTeam)}`;
-  const byNameAndTeam = existing.find(player => `${canonical(player.display_name)}|${canonical(player.nfl_team)}` === nameTeamKey);
+  const nameTeamKey = `${normalizePlayerName(incoming.displayName)}|${canonicalTeam(incoming.nflTeam)}`;
+  const byNameAndTeam = existing.find(player => `${normalizePlayerName(player.display_name)}|${canonicalTeam(player.nfl_team)}` === nameTeamKey);
   if (byNameAndTeam) return byNameAndTeam;
-  const nameKey = canonical(incoming.displayName);
-  const nameMatches = existing.filter(player => canonical(player.display_name) === nameKey);
+  const nameKey = normalizePlayerName(incoming.displayName);
+  const nameMatches = existing.filter(player => normalizePlayerName(player.display_name) === nameKey);
   return nameMatches.length === 1 ? nameMatches[0] : null;
 }
 

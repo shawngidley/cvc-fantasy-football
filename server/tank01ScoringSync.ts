@@ -3,7 +3,7 @@ import { getNFLDataAdapter, Tank01NFLDataAdapter, type Tank01BoxScore } from "./
 import { supabase, unwrap } from "./supabase";
 import { resolveSkinForWeek } from "./cvcSkins";
 import { promotePlannedLineupForWeek } from "./plannedLineup";
-import { normalizeTeam, type SnapshotRow } from "./cvcScoringShared";
+import { mapWithConcurrencyLimit, normalizeTeam, type SnapshotRow } from "./cvcScoringShared";
 import { normalizePlayerName } from "@shared/playerNameMatch";
 
 export { normalizeTeam };
@@ -92,8 +92,8 @@ async function tankStatLinesForWeek(adapter: Tank01NFLDataAdapter, nflWeek: numb
   const games = await adapter.listGamesForWeek(nflWeek, seasonYear);
   const kickedOffGames = games.filter(game => game.gameID && hasKickedOff(game.gameDate, game.gameTime));
   const statLines = new Map<string, Tank01LiveStats>();
-  for (const game of kickedOffGames) {
-    if (!game.gameID) continue;
+  await mapWithConcurrencyLimit(kickedOffGames, 5, async game => {
+    if (!game.gameID) return;
     const box = await adapter.getBoxScore(game.gameID) as Tank01BoxScore;
     for (const raw of Object.values(box.playerStats ?? {})) {
       const player = raw as Record<string, unknown>;
@@ -105,7 +105,7 @@ async function tankStatLinesForWeek(adapter: Tank01NFLDataAdapter, nflWeek: numb
       const teamAbv = String(entry.teamAbv ?? "");
       if (teamAbv) statLines.set(`dst:${normalizeTeam(teamAbv)}`, { Defense: entry as unknown as Record<string, string | number> });
     }
-  }
+  });
   return { statLines, games };
 }
 

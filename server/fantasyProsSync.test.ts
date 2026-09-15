@@ -57,3 +57,27 @@ describe("CVC FantasyPros player matching (regression: ~123 duplicate rows creat
     expect(match?.id).toBe("correct-id-match");
   });
 });
+
+describe("CVC FantasyPros player matching -- generational-suffix mismatches (the real James Cook incident referenced in shared/playerNameMatch.ts's own doc comment: this sync file used its own un-suffix-aware comparison and was never updated when that shared fix was introduced elsewhere)", () => {
+  const player = (overrides: Partial<{ id: string; provider: string; external_id: string | null; display_name: string; position: string | null; nfl_team: string | null; metadata: Record<string, unknown> | null }>) => ({
+    id: "id", provider: "cvc_workbook_2026", external_id: null, display_name: "", position: null, nfl_team: null, metadata: null, ...overrides,
+  });
+
+  it("matches by name+team even when FantasyPros includes a generational suffix the CVC roster doesn't", () => {
+    const existing = [player({ id: "real-james-cook", display_name: "James Cook", nfl_team: "BUF" })];
+    const match = resolveMatchingPlayer({ externalId: "20001", displayName: "James Cook III", nflTeam: "BUF" }, existing);
+    expect(match?.id).toBe("real-james-cook");
+  });
+
+  it("matches by name only (suffix-aware) even when the existing row's team is blank", () => {
+    const existing = [player({ id: "real-james-cook", display_name: "James Cook", nfl_team: null })];
+    const match = resolveMatchingPlayer({ externalId: "20001", displayName: "James Cook III", nflTeam: "BUF" }, existing);
+    expect(match?.id).toBe("real-james-cook");
+  });
+
+  it("matches through the known alias table too (Kenneth Gainwell / Kenny Gainwell), not just suffixes", () => {
+    const existing = [player({ id: "real-kenny", display_name: "Kenny Gainwell", nfl_team: "PIT" })];
+    const match = resolveMatchingPlayer({ externalId: "30001", displayName: "Kenneth Gainwell", nflTeam: "PIT" }, existing);
+    expect(match?.id).toBe("real-kenny");
+  });
+});
