@@ -32,7 +32,8 @@ const ruleValue = (rules: CvcScoringRule[], statKey: string, position: string): 
  * Scoring (nothing shown for a stat that didn't happen). calculateCvcFantasyPoints
  * below is defined in terms of this function's output, specifically so the total and
  * the breakdown can never drift apart from each other. */
-export function calculateCvcFantasyPointsBreakdown(stats: Tank01LiveStats, position: string, rules: CvcScoringRule[]): CvcScoringLineItem[] {
+export function calculateCvcFantasyPointsBreakdown(stats: Tank01LiveStats | null | undefined, position: string, rules: CvcScoringRule[]): CvcScoringLineItem[] {
+  if (!stats) return []; // defends against a caller (or a stale cache with an incompatible shape) passing no stats at all, rather than crashing on stats.Passing
   const passing = stats.Passing ?? {};
   const rushing = stats.Rushing ?? {};
   const receiving = stats.Receiving ?? {};
@@ -91,7 +92,7 @@ export function calculateCvcFantasyPointsBreakdown(stats: Tank01LiveStats, posit
 }
 
 /** Converts a Tank01 player or D/ST stat object with CVC's supplied scoring configuration. */
-export function calculateCvcFantasyPoints(stats: Tank01LiveStats, position: string, rules: CvcScoringRule[]): number {
+export function calculateCvcFantasyPoints(stats: Tank01LiveStats | null | undefined, position: string, rules: CvcScoringRule[]): number {
   const points = calculateCvcFantasyPointsBreakdown(stats, position, rules).reduce((total, item) => total + item.points, 0);
   return Math.round(points * 100) / 100;
 }

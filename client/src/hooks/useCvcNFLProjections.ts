@@ -2,7 +2,13 @@ import { useEffect, useRef, useState } from "react";
 import { calculateCvcFantasyPoints, type CvcScoringRule, type Tank01LiveStats } from "@shared/cvcScoring";
 import { normalizePlayerName } from "@shared/playerNameMatch";
 
-const CACHE_PREFIX = "cvc_nfl_proj_v2_";
+// v3: bumped from v2 when CvcProjectionEntry's shape changed from a pre-computed
+// `proj: number` to a raw `stats: Tank01LiveStats` (points are now computed lazily
+// using the roster's own position, not baked in at fetch time -- see
+// getCvcProjectedPoints below). A stale v2-cached entry has no .stats at all, so
+// reading it crashed every consumer of getCvcProjectedPoints with "Cannot read
+// properties of undefined (reading 'Passing')" the moment it tried to score it.
+const CACHE_PREFIX = "cvc_nfl_proj_v3_";
 const TEAM_ALIASES: Record<string, string> = { kan: "kc", tam: "tb", arz: "ari", jax: "jac", was: "wsh" };
 
 function normalizeAbv(abv: string): string {

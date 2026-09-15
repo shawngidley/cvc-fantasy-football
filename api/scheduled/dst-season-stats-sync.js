@@ -8,6 +8,7 @@ var ruleValue = (rules, statKey, position) => {
   return rule ? numeric(rule.value) : 0;
 };
 function calculateCvcFantasyPointsBreakdown(stats, position, rules) {
+  if (!stats) return [];
   const passing = stats.Passing ?? {};
   const rushing = stats.Rushing ?? {};
   const receiving = stats.Receiving ?? {};

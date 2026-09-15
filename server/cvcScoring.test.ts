@@ -97,4 +97,11 @@ describe("calculateCvcFantasyPointsBreakdown (powers the points-breakdown popup)
   it("returns an empty list for a completely blank stat line", () => {
     expect(calculateCvcFantasyPointsBreakdown({}, "QB", rules)).toEqual([]);
   });
+
+  it("does not crash when stats itself is null or undefined (e.g. a stale cache with an incompatible shape) -- returns an empty breakdown instead of throwing on stats.Passing", () => {
+    expect(calculateCvcFantasyPointsBreakdown(null, "QB", rules)).toEqual([]);
+    expect(calculateCvcFantasyPointsBreakdown(undefined, "QB", rules)).toEqual([]);
+    expect(calculateCvcFantasyPoints(null, "QB", rules)).toBe(0);
+    expect(calculateCvcFantasyPoints(undefined, "QB", rules)).toBe(0);
+  });
 });
