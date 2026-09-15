@@ -3,6 +3,7 @@ import { z } from "zod";
 import { protectedProcedure, publicProcedure, router } from "../_core/trpc";
 import { getFantasyProsDataAdapter, getNFLDataAdapter, Tank01NFLDataAdapter } from "../nflDataAdapter";
 import { getCvcPlayerCareerStats, parseCvcGameLog } from "../playerCareerStats";
+import { headToHeadDelta } from "../cvcStandings";
 import { fantasyProsCacheStatus, getFantasyProsActivePlayerIds, getFantasyProsRookiePlayerIds } from "../fantasyProsCache";
 import { getFantasyProsInjuries, getFantasyProsNews, getFantasyProsProjections, getFantasyProsRanks, matchPlayerNameFromTitle } from "../fantasyProsNews";
 import { archiveFantasyProsNews, getArchivedFantasyProsNews, mergeFantasyProsNews } from "../fantasyProsArchive";
@@ -191,7 +192,8 @@ export const leagueRouter = router({
     const weekById = new Map(weekRows.map(week => [week.id, week]));
 
     const franchiseStats = new Map(franchiseRows.map(franchise => [franchise.id, { wins: 0, losses: 0, pointsFor: 0, pointsAgainst: 0, divisionWins: 0, divisionLosses: 0 }]));
-    matchupRows.filter(matchup => matchup.result_state === "final").forEach(matchup => {
+    const finalMatchups = matchupRows.filter(matchup => matchup.result_state === "final");
+    finalMatchups.forEach(matchup => {
       const home = franchiseStats.get(matchup.home_franchise_id); const away = franchiseStats.get(matchup.away_franchise_id);
       if (!home || !away) return;
       const homeScore = Number(matchup.home_score); const awayScore = Number(matchup.away_score); const sameDivision = teamById.get(matchup.home_franchise_id)?.division_name === teamById.get(matchup.away_franchise_id)?.division_name;
@@ -219,7 +221,18 @@ export const leagueRouter = router({
         moneyOwed,
         completedGames: completed.length,
       };
-    }).sort((left, right) => left.division_name.localeCompare(right.division_name) || right.wins - left.wins || left.losses - right.losses || right.pointsFor - left.pointsFor || left.display_order - right.display_order);
+    }).sort((left, right) => {
+      if (left.division_name !== right.division_name) return left.division_name.localeCompare(right.division_name);
+      if (left.wins !== right.wins) return right.wins - left.wins;
+      if (left.losses !== right.losses) return left.losses - right.losses;
+      const headToHead = headToHeadDelta(left.id, right.id, finalMatchups);
+      if (headToHead !== 0) return -headToHead; // more head-to-head wins sorts first
+      const leftStats = franchiseStats.get(left.id)!; const rightStats = franchiseStats.get(right.id)!;
+      if (leftStats.divisionWins !== rightStats.divisionWins) return rightStats.divisionWins - leftStats.divisionWins;
+      if (leftStats.divisionLosses !== rightStats.divisionLosses) return leftStats.divisionLosses - rightStats.divisionLosses;
+      if (left.pointsFor !== right.pointsFor) return right.pointsFor - left.pointsFor;
+      return left.display_order - right.display_order;
+    });
 
     return {
       league: leagueData,
