@@ -18,7 +18,12 @@ type CacheEntry = { value: Tank01Profile | null; expiresAt: number };
 // same data.
 const profileCache = new Map<string, CacheEntry>();
 export const PROFILE_TTL_MS = 24 * 60 * 60 * 1000;
-const STORAGE_PREFIX = "cvc_tank01_profile_";
+// v2: bumped from the original prefix when espnId extraction was added to
+// fetchTank01Profile below -- a profile cached before that change has no espnId at
+// all, and would otherwise sit "fresh" (not re-fetched) for up to the full 24h TTL,
+// silently breaking the new past-season stats lookup (lineupSeasonStats), which
+// filters to only players with an espnId and would find none.
+const STORAGE_PREFIX = "cvc_tank01_profile_v2_";
 
 export function readPersistedProfile(key: string): CacheEntry | null {
   try {
