@@ -6,6 +6,7 @@ import { promotePlannedLineupForWeek } from "./plannedLineup";
 import { mapWithConcurrencyLimit, normalizeTeam, type SnapshotRow } from "./cvcScoringShared";
 import { normalizePlayerName } from "@shared/playerNameMatch";
 import { getKickerEventsForPlayer, parseEspnKickerEvents, sumMadeFieldGoalYards, countMadeExtraPoints, type KickerPlayEvent } from "@shared/espnKickerEvents";
+import { persistWeeklyStats, type WeeklyStatPlayer } from "./cvcPlayerWeeklyStats";
 
 export { normalizeTeam };
 
@@ -264,6 +265,16 @@ export async function syncTank01Scores(now = new Date(), forceWeekNumber?: numbe
   if (finalizing) {
     const isLastWeek = week.week_number === Math.max(...weeks.map(item => item.week_number));
     await resolveSkinForWeek({ seasonId: season.id, weekNumber: week.week_number, isLastWeek, matchups, franchiseTotals, snapshots, statLines, rules, force: forceWeekNumber !== undefined });
+    const rosteredPlayers = snapshots.map(entry => Array.isArray(entry.player) ? entry.player[0] : entry.player).filter((player): player is WeeklyStatPlayer => Boolean(player));
+    await persistWeeklyStats({
+      seasonId: season.id,
+      scheduleWeekId: week.id,
+      weekNumber: week.week_number,
+      players: rosteredPlayers,
+      statLines,
+      statLineKeyFor: player => (player.position === "DEF" || player.position === "DST") ? `dst:${normalizeTeam(player.nfl_team ?? "")}` : normalizePlayerName(player.display_name),
+      rules,
+    });
     unwrap(await supabase.from("audit_event").insert({ league_id: season.league_id, season_id: season.id, entity_type: "schedule_week", entity_id: week.id, action: "tank01_result_finalized", summary: `Tank01 finalized ${week.label} after the CVC correction window.`, payload: { source: "Tank01", matchups: matchups.length } }).select("id").single());
   }
   return { status: finalizing ? "finalized" : "updated", weekLabel: week.label, matchupsUpdated: matchups.length };

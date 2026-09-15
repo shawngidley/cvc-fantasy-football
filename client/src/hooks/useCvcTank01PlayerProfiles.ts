@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import type { Tank01LiveStats } from "@shared/cvcScoring";
 
-export type Tank01Profile = { espnHeadshot?: string; age?: string; stats?: Tank01LiveStats & { gamesPlayed?: string | number } };
+export type Tank01Profile = { espnHeadshot?: string; espnId?: string; age?: string; stats?: Tank01LiveStats & { gamesPlayed?: string | number } };
 export type ProfileLookupPlayer = { display_name: string; metadata?: { tank01_id?: unknown } | null };
 
 type CacheEntry = { value: Tank01Profile | null; expiresAt: number };
@@ -113,6 +113,11 @@ async function fetchTank01Profile(player: ProfileLookupPlayer): Promise<Tank01Pr
     } finally {
       releasePlayerInfoSlot();
     }
+  }
+  if (value) {
+    const raw = value as unknown as Record<string, unknown>;
+    const espnId = raw.espnID ?? raw.espnId;
+    if (espnId !== undefined) value = { ...value, espnId: String(espnId) };
   }
   return value;
 }

@@ -2,7 +2,8 @@ import { TRPCError } from "@trpc/server";
 import { z } from "zod";
 import { protectedProcedure, publicProcedure, router } from "../_core/trpc";
 import { getFantasyProsDataAdapter, getNFLDataAdapter, Tank01NFLDataAdapter } from "../nflDataAdapter";
-import { getCvcPlayerCareerStats, parseCvcGameLog } from "../playerCareerStats";
+import { getCvcPlayerCareerStats, parseCvcGameLog, type CvcSeasonStatRow } from "../playerCareerStats";
+import { readSeasonStatsFromWeekly } from "../cvcPlayerWeeklyStats";
 import { headToHeadDelta } from "../cvcStandings";
 import { fantasyProsCacheStatus, getFantasyProsActivePlayerIds, getFantasyProsRookiePlayerIds } from "../fantasyProsCache";
 import { getFantasyProsInjuries, getFantasyProsNews, getFantasyProsProjections, getFantasyProsRanks, matchPlayerNameFromTitle } from "../fantasyProsNews";
@@ -166,6 +167,23 @@ async function attachSeasonStats<T extends { id: string }>(players: T[], seasonI
     const stats = byPlayerId.get(player.id);
     return stats ? { ...player, seasonStats: stats } : player;
   });
+}
+
+/** Maps the ESPN-gamelog-derived CvcSeasonStatRow shape (camelCase: passYds, gp,
+ * cvcPts...) onto the same field names player_season_stat / cvc_player_weekly_stat
+ * already use (snake_case: pass_yds, games_played, fantasy_points...), so the client
+ * can treat a past-season (ESPN) result and a current-season (database) result
+ * identically. */
+function toLineupSeasonStatsShape(row: CvcSeasonStatRow) {
+  return {
+    games_played: row.gp,
+    pass_yds: row.passYds ?? null, pass_td: row.passTD ?? null, pass_int: row.passInt ?? null,
+    rush_att: row.rushAtt ?? null, rush_yds: row.rushYds ?? null, rush_td: row.rushTD ?? null,
+    targets: row.recTargets ?? null, receptions: row.rec ?? null, rec_yds: row.recYds ?? null, rec_td: row.recTD ?? null,
+    fg_made: row.fgMade ?? null, xp_made: row.xpMade ?? null,
+    sacks: row.sacks ?? null, def_int: row.defInt ?? null, def_td: row.defTD ?? null,
+    fantasy_points: row.cvcPts, fantasy_points_per_game: row.cvcPtsPerGame,
+  };
 }
 
 export const leagueRouter = router({
@@ -940,6 +958,49 @@ export const leagueRouter = router({
     const rules = unwrap(await supabase.from("scoring_rule").select("stat_key, value, applies_to_positions").eq("season_id", season.id)) ?? [];
     const seasons = await getCvcPlayerCareerStats(input.espnId, player.position, rules, season.year);
     return { seasons };
+  }),
+
+  // Batched, multi-year season stats for a whole Lineup page's worth of players at
+  // once (the player-profile procedure above is per-player, fine for one profile page,
+  // too slow to call once per roster spot). For the CURRENT season, reads
+  // cvc_player_weekly_stat -- persisted once, directly from weekly finalization's own
+  // already-computed, already-corrected stat lines -- instead of a second,
+  // independent recomputation from Tank01's season-total aggregate endpoint (which can
+  // lag behind a game's actual completion by hours, and once cached wrong, never
+  // self-corrects). For a PAST season (2023 and later, up to but not including the
+  // current one), reuses the same proven ESPN gamelog path the player profile page
+  // already uses -- those seasons are complete and static, so a live, lightly-cached
+  // fetch is perfectly stable; there's no "provider hasn't caught up yet" problem for
+  // a season that ended over a year ago. Output uses the same field names as
+  // player_season_stat (pass_yds, fantasy_points, etc.) either way, so the client
+  // doesn't need to know which source answered.
+  lineupSeasonStats: publicProcedure.input(z.object({
+    year: z.number().int(),
+    players: z.array(z.object({ playerId: z.string().uuid(), espnId: z.string().optional(), position: z.string() })),
+  })).query(async ({ input }) => {
+    const { season } = await getCurrentLeagueAndSeason();
+    if (!input.players.length) return { statsByPlayerId: {} };
+    const statsByPlayerId: Record<string, {
+      games_played: number | null;
+      pass_yds: number | null; pass_td: number | null; pass_int: number | null;
+      rush_att: number | null; rush_yds: number | null; rush_td: number | null;
+      targets: number | null; receptions: number | null; rec_yds: number | null; rec_td: number | null;
+      fg_made: number | null; xp_made: number | null;
+      sacks: number | null; def_int: number | null; def_td: number | null;
+      fantasy_points: number; fantasy_points_per_game: number | null;
+    }> = {};
+    if (input.year === season.year) {
+      const weekly = await readSeasonStatsFromWeekly(season.id, input.players.map(player => player.playerId));
+      for (const [playerId, stats] of Array.from(weekly)) statsByPlayerId[playerId] = stats;
+      return { statsByPlayerId };
+    }
+    const rules = unwrap(await supabase.from("scoring_rule").select("stat_key, value, applies_to_positions").eq("season_id", season.id)) ?? [];
+    await Promise.all(input.players.filter(player => player.espnId).map(async player => {
+      const seasons = await getCvcPlayerCareerStats(player.espnId!, player.position, rules, input.year, 1).catch(() => []);
+      const row = seasons.find(candidate => candidate.season === input.year);
+      if (row) statsByPlayerId[player.playerId] = toLineupSeasonStatsShape(row);
+    }));
+    return { statsByPlayerId };
   }),
 
   // Per-game log for one season, powering the player profile's Game Log tab. Needs the
