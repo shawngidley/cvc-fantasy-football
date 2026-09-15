@@ -1058,7 +1058,7 @@ export const leagueRouter = router({
     const { season } = await getCurrentLeagueAndSeason();
     const week = unwrap(await supabase.from("schedule_week").select("id, week_number, status").eq("season_id", season.id).eq("week_number", input.weekNumber).maybeSingle());
     if (!week) return { error: `No week ${input.weekNumber} found.` };
-    const franchises = unwrap(await supabase.from("franchise").select("id, name").eq("season_id", season.id)) ?? [];
+    const franchises = unwrap(await supabase.from("franchise").select("id, name").eq("is_active", true)) ?? [];
     const snapshotRows = unwrap(await supabase.from("weekly_lineup_snapshot").select("franchise_id, slot_code, player:player_id(id, display_name)").eq("schedule_week_id", week.id)) ?? [];
     const currentRows = unwrap(await supabase.from("roster_assignment").select("franchise_id, assigned_slot_code, player:player_id(id, display_name)").eq("season_id", season.id).is("released_at", null)) ?? [];
     const nameOf = (p: unknown) => { const player = Array.isArray(p) ? p[0] : p; return (player as { display_name?: string } | undefined)?.display_name ?? "?"; };
