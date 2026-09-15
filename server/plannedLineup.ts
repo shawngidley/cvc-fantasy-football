@@ -39,7 +39,7 @@ export async function loadEffectiveFutureLineup(seasonId: string, franchiseId: s
   const [currentAssignments, plannedRows] = await Promise.all([
     supabase.from("roster_assignment").select("id, player_id, franchise_id, assigned_slot_code").eq("season_id", seasonId).eq("franchise_id", franchiseId).is("released_at", null).then(result => unwrap(result) as CurrentAssignment[]),
     supabase.from("planned_lineup_assignment").select("player_id, slot_code, schedule_week:schedule_week_id(week_number)").eq("season_id", seasonId).eq("franchise_id", franchiseId)
-      .then(result => (unwrap(result) ?? []).map((row: any) => ({ player_id: row.player_id, slot_code: row.slot_code, week_number: (Array.isArray(row.schedule_week) ? row.schedule_week[0] : row.schedule_week)?.week_number })).filter((row: any) => typeof row.week_number === "number") as PlannedRow[]),
+      .then(result => (result.error ? [] : (result.data ?? [])).map((row: any) => ({ player_id: row.player_id, slot_code: row.slot_code, week_number: (Array.isArray(row.schedule_week) ? row.schedule_week[0] : row.schedule_week)?.week_number })).filter((row: any) => typeof row.week_number === "number") as PlannedRow[]),
   ]);
   return resolveEffectiveLineupForWeek(targetWeekNumber, currentAssignments, plannedRows);
 }
@@ -54,7 +54,13 @@ export async function promotePlannedLineupForWeek(seasonId: string, weekId: stri
   let franchisesUpdated = 0;
   for (const franchiseId of franchiseIds) {
     const currentAssignments = unwrap(await supabase.from("roster_assignment").select("id, player_id, franchise_id, assigned_slot_code").eq("season_id", seasonId).eq("franchise_id", franchiseId).is("released_at", null)) as CurrentAssignment[] ?? [];
-    const plannedRowsRaw = unwrap(await supabase.from("planned_lineup_assignment").select("player_id, slot_code, schedule_week:schedule_week_id(week_number)").eq("season_id", seasonId).eq("franchise_id", franchiseId)) ?? [];
+    // Gracefully treats a failed query here (confirmed real cause: the
+    // planned_lineup_assignment table's own migration was never actually run against
+    // the real database) the same as "nothing was ever planned ahead" -- this feature
+    // is purely additive on top of the current roster, so a missing/broken table
+    // should never block the core weekly sync/recompute flow that calls this.
+    const plannedResult = await supabase.from("planned_lineup_assignment").select("player_id, slot_code, schedule_week:schedule_week_id(week_number)").eq("season_id", seasonId).eq("franchise_id", franchiseId);
+    const plannedRowsRaw = plannedResult.error ? [] : (plannedResult.data ?? []);
     const plannedRows = plannedRowsRaw.map((row: any) => ({ player_id: row.player_id, slot_code: row.slot_code, week_number: (Array.isArray(row.schedule_week) ? row.schedule_week[0] : row.schedule_week)?.week_number })).filter((row: any) => typeof row.week_number === "number") as PlannedRow[];
     if (!plannedRows.length) continue; // nothing was ever planned ahead -- current roster_assignment is already correct, no writes needed
     const effective = resolveEffectiveLineupForWeek(weekNumber, currentAssignments, plannedRows);
