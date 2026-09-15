@@ -1048,6 +1048,33 @@ export const leagueRouter = router({
     return syncTank01Scores();
   }),
 
+  // Debug-only: compares each franchise's snapshotted Week 1 lineup (what the
+  // OFFICIAL server-side score is computed from -- frozen once, never re-taken) against
+  // their CURRENT roster_assignment (what the client-side Live Scoring page reads
+  // live) -- to confirm or rule out a snapshot-vs-current lineup mismatch as the cause
+  // of a real, confirmed score discrepancy (Xavier: 154.1 official vs 109.6 live, for
+  // the same real, confirmed-correct roster). Not used by any real feature.
+  debugSnapshotVsCurrentLineup: publicProcedure.input(z.object({ weekNumber: z.number().int() })).query(async ({ input }) => {
+    const { season } = await getCurrentLeagueAndSeason();
+    const week = unwrap(await supabase.from("schedule_week").select("id, week_number, status").eq("season_id", season.id).eq("week_number", input.weekNumber).maybeSingle());
+    if (!week) return { error: `No week ${input.weekNumber} found.` };
+    const franchises = unwrap(await supabase.from("franchise").select("id, name").eq("season_id", season.id)) ?? [];
+    const snapshotRows = unwrap(await supabase.from("weekly_lineup_snapshot").select("franchise_id, slot_code, player:player_id(id, display_name)").eq("schedule_week_id", week.id)) ?? [];
+    const currentRows = unwrap(await supabase.from("roster_assignment").select("franchise_id, assigned_slot_code, player:player_id(id, display_name)").eq("season_id", season.id).is("released_at", null)) ?? [];
+    const nameOf = (p: unknown) => { const player = Array.isArray(p) ? p[0] : p; return (player as { display_name?: string } | undefined)?.display_name ?? "?"; };
+    const idOf = (p: unknown) => { const player = Array.isArray(p) ? p[0] : p; return (player as { id?: string } | undefined)?.id ?? null; };
+    const result = franchises.map(franchise => {
+      const snapshot = snapshotRows.filter(row => row.franchise_id === franchise.id).map(row => ({ slot: row.slot_code, name: nameOf(row.player), id: idOf(row.player) }));
+      const current = currentRows.filter(row => row.franchise_id === franchise.id).map(row => ({ slot: row.assigned_slot_code, name: nameOf(row.player), id: idOf(row.player) }));
+      const snapshotIds = new Set(snapshot.map(p => p.id));
+      const currentIds = new Set(current.map(p => p.id));
+      const onlyInSnapshot = snapshot.filter(p => !currentIds.has(p.id));
+      const onlyInCurrent = current.filter(p => !snapshotIds.has(p.id));
+      return { franchise: franchise.name, snapshotCount: snapshot.length, currentCount: current.length, matches: onlyInSnapshot.length === 0 && onlyInCurrent.length === 0, onlyInSnapshot, onlyInCurrent };
+    });
+    return { weekStatus: week.status, franchises: result };
+  }),
+
   // Confirmed real gap (finalization audit item 9): once a week's status flips to
   // "final", the normal syncMatchupScores/heartbeat cron can never touch it again --
   // it only ever looks for a "live" or "upcoming" week. Without this, fixing a scoring

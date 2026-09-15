@@ -236,6 +236,7 @@ function SeasonStatsSyncModule() {
   });
 
   const [forceWeekNumber, setForceWeekNumber] = useState(1);
+  const snapshotVsCurrent = trpc.league.debugSnapshotVsCurrentLineup.useQuery({ weekNumber: forceWeekNumber });
   const forceRecomputeWeek = trpc.league.forceRecomputeWeek.useMutation({
     onSuccess: data => {
       if (data.status === "skipped") { toast.error(data.reason ?? "That week could not be recomputed."); return; }
@@ -287,6 +288,12 @@ function SeasonStatsSyncModule() {
         <input type="number" min={1} value={forceWeekNumber} onChange={event => setForceWeekNumber(Number(event.target.value) || 1)} className="w-20 rounded border border-slate-300 px-2 py-1.5 text-sm" aria-label="Week number"/>
         <button type="button" className="cvc-button-compact" disabled={forceRecomputeWeek.isPending} onClick={() => forceRecomputeWeek.mutate({ weekNumber: forceWeekNumber })}><Save size={14} /> {forceRecomputeWeek.isPending ? "Recomputing…" : `Recompute week ${forceWeekNumber}`}</button>
       </div>
+    </div>
+    <div className="rounded-lg border border-dashed border-amber-400/40 bg-amber-50 p-4">
+      <p className="text-sm font-semibold text-cvc-deep">Debug: snapshot vs current lineup (week {forceWeekNumber})</p>
+      <details><summary className="mt-1 cursor-pointer text-xs font-bold uppercase tracking-[0.06em] text-amber-700">Show comparison</summary>
+        <pre className="mt-2 max-h-96 overflow-auto whitespace-pre-wrap break-all rounded bg-white p-2 text-[10px]">{JSON.stringify(snapshotVsCurrent.data, null, 2)}</pre>
+      </details>
     </div>
     <div className="rounded-lg border border-dashed border-cvc-deep/20 bg-cvc-tint p-4">
       <p className="text-sm font-semibold text-cvc-deep">Team bye week / schedule cache</p>
