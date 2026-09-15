@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { Link } from "wouter";
-import { getKickerEventsForPlayer, groupKickerEventsForDisplay } from "@/lib/espnKickerEvents";
+import { getKickerEventsForPlayer, groupKickerEventsForDisplay } from "@shared/espnKickerEvents";
 import { getCvcLivePoints, getCvcLiveStatLine, useCvcTank01LiveScores } from "@/hooks/useCvcTank01LiveScores";
 import { getCvcProjectedPoints, useCvcNFLProjections } from "@/hooks/useCvcNFLProjections";
 import { useCvcTank01PlayerProfiles, profileKey } from "@/hooks/useCvcTank01PlayerProfiles";

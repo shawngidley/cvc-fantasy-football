@@ -5,6 +5,7 @@ import { resolveSkinForWeek } from "./cvcSkins";
 import { promotePlannedLineupForWeek } from "./plannedLineup";
 import { mapWithConcurrencyLimit, normalizeTeam, type SnapshotRow } from "./cvcScoringShared";
 import { normalizePlayerName } from "@shared/playerNameMatch";
+import { getKickerEventsForPlayer, parseEspnKickerEvents, sumMadeFieldGoalYards, countMadeExtraPoints, type KickerPlayEvent } from "@shared/espnKickerEvents";
 
 export { normalizeTeam };
 export const correctionWindowClosed = (now = new Date()) => now.getUTCDay() === 5 && now.getUTCHours() >= 16;
@@ -88,6 +89,72 @@ async function snapshotLineups(seasonId: string, weekId: string, franchiseIds: s
  * team code inside each entry's own teamAbv field. Same two bugs already fixed in the
  * client-side useCvcTank01LiveScores.ts; this is a separate, duplicate implementation
  * that was missed at the time. */
+/** Server-side counterpart to the client's fetchEspnKickerEvents
+ * (client/src/hooks/useCvcTank01LiveScores.ts) -- same approach, but calling ESPN's
+ * API directly (the same URLs server/espnProxy.ts proxies for the client) instead of
+ * a relative /api/espn/... path, which only resolves inside a browser. This exists
+ * because the OFFICIAL scoring path (this file) was found, during the finalization
+ * audit, to have no kicker-yardage override at all -- it took Tank01's raw
+ * Kicking.fgYds directly, the same field the client-side comment confirms is
+ * unreliable ("none of the players in a real, verified live box score had usable
+ * Kicking.fgYds"). Live scoring already showed a kicker's correct point total during
+ * the game; without this, the OFFICIAL score that actually determines standings and
+ * win/loss records could still finalize that same made field goal as worth 0 yards --
+ * a silent discrepancy between what was shown live and what actually counted. */
+async function fetchEspnKickerEventsForWeek(games: { gameDate?: string; home?: string; away?: string }[]): Promise<KickerPlayEvent[]> {
+  const events: KickerPlayEvent[] = [];
+  const seen = new Set<string>();
+  const dates = Array.from(new Set(games.map(game => game.gameDate).filter((date): date is string => Boolean(date))));
+  for (const date of dates) {
+    try {
+      const scoreboard = await fetch(`https://site.api.espn.com/apis/site/v2/sports/football/nfl/scoreboard?dates=${date}`);
+      if (!scoreboard.ok) continue;
+      const payload = await scoreboard.json() as { events?: Array<{ id?: string; competitions?: Array<{ competitors?: Array<{ homeAway?: string; team?: { abbreviation?: string } }> }> }> };
+      for (const game of games.filter(candidate => candidate.gameDate === date)) {
+        const espnEvent = payload.events?.find(candidate => {
+          const competitors = candidate.competitions?.[0]?.competitors ?? [];
+          const home = competitors.find(item => item.homeAway === "home")?.team?.abbreviation;
+          const away = competitors.find(item => item.homeAway === "away")?.team?.abbreviation;
+          return normalizeTeam(home ?? "") === normalizeTeam(game.home ?? "") && normalizeTeam(away ?? "") === normalizeTeam(game.away ?? "");
+        });
+        if (!espnEvent?.id) continue;
+        const summary = await fetch(`https://site.api.espn.com/apis/site/v2/sports/football/nfl/summary?event=${espnEvent.id}`);
+        if (!summary.ok) continue;
+        for (const play of parseEspnKickerEvents(await summary.json())) {
+          const key = `${play.playerName}|${play.type}|${play.outcome}|${play.yards}|${play.text}`;
+          if (!seen.has(key)) { seen.add(key); events.push(play); }
+        }
+      }
+    } catch { /* one bad date's ESPN fetch shouldn't block the rest */ }
+  }
+  return events;
+}
+
+/** Overrides a player's Kicking.fgYds/xpMade with real per-kick ESPN data where
+ * available, same guard logic as the client: only a player Tank01 already flagged
+ * with FG attempt data is treated as a kicker (avoids misapplying FG/XP data to, say,
+ * a returner whose Kicking field is actually kick-return yards), and only the
+ * field(s) ESPN actually has events for get overridden -- if ESPN parsing finds
+ * nothing for a kicker, their stat line is left as Tank01 provided it, not blanked
+ * out. */
+export function applyEspnKickerOverrides(statLines: Map<string, Tank01LiveStats>, kickerEvents: KickerPlayEvent[]) {
+  if (!kickerEvents.length) return;
+  for (const [key, entry] of Array.from(statLines)) {
+    if (key.startsWith("dst:")) continue;
+    const raw = entry as unknown as Record<string, unknown>;
+    const longName = String(raw.longName ?? "");
+    const existingKicking = raw.Kicking as Record<string, unknown> | undefined;
+    if (!longName || !existingKicking || existingKicking.fgMade === undefined) continue;
+    const playerEvents = getKickerEventsForPlayer(kickerEvents, longName);
+    if (!playerEvents.length) continue;
+    const fgYds = sumMadeFieldGoalYards(playerEvents);
+    const xpMade = countMadeExtraPoints(playerEvents);
+    const hasFgEvents = playerEvents.some(event => event.type === "fg");
+    const hasXpEvents = playerEvents.some(event => event.type === "xp");
+    statLines.set(key, { ...entry, Kicking: { ...existingKicking, ...(hasFgEvents ? { fgYds } : {}), ...(hasXpEvents ? { xpMade } : {}) } } as Tank01LiveStats);
+  }
+}
+
 async function tankStatLinesForWeek(adapter: Tank01NFLDataAdapter, nflWeek: number, seasonYear: number) {
   const games = await adapter.listGamesForWeek(nflWeek, seasonYear);
   const kickedOffGames = games.filter(game => game.gameID && hasKickedOff(game.gameDate, game.gameTime));
@@ -106,6 +173,8 @@ async function tankStatLinesForWeek(adapter: Tank01NFLDataAdapter, nflWeek: numb
       if (teamAbv) statLines.set(`dst:${normalizeTeam(teamAbv)}`, { Defense: entry as unknown as Record<string, string | number> });
     }
   });
+  const kickerEvents = await fetchEspnKickerEventsForWeek(kickedOffGames);
+  applyEspnKickerOverrides(statLines, kickerEvents);
   return { statLines, games };
 }
 
