@@ -233,7 +233,7 @@ export async function syncTank01Scores(now = new Date(), forceWeekNumber?: numbe
   const { statLines, games, gameStatuses } = await tankStatLinesForWeek(adapter, week.week_number, season.year);
   if (!statLines.size) {
     unwrap(await supabase.from("tank01_scoring_sync_state").upsert({ season_id: season.id, last_attempt_at: now.toISOString(), last_error: null, updated_at: now.toISOString() }, { onConflict: "season_id" }).select("id").single());
-    return { status: "skipped", weekLabel: week.label, matchupsUpdated: 0, reason: "Tank01 has not published box-score data for this CVC week." };
+    return { status: "skipped", weekLabel: week.label, matchupsUpdated: 0, reason: `Tank01 has not published box-score data for this CVC week. [debug: season.year=${season.year}, week.week_number=${week.week_number}, Tank01 games found=${games.length}, kicked-off games=${gameStatuses.length}]` };
   }
   const franchiseTotals = new Map<string, number>();
   for (const entry of snapshots) {
