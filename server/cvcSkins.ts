@@ -1,6 +1,5 @@
 import { calculateCvcFantasyPoints, type CvcScoringRule, type Tank01LiveStats } from "@shared/cvcScoring";
-import { normalizePlayerName } from "@shared/playerNameMatch";
-import { normalizeTeam, type SnapshotRow } from "./cvcScoringShared";
+import { resolveStatLine, type SnapshotRow } from "./cvcScoringShared";
 import { supabase, unwrap } from "./supabase";
 
 export const SKIN_BASE_AMOUNT = 20;
@@ -118,8 +117,7 @@ export async function resolveSkinForWeek(params: {
       const player = Array.isArray(entry.player) ? entry.player[0] : entry.player;
       if (!player) continue;
       const position = player.position === "DEF" ? "DST" : player.position ?? "";
-      const key = position === "DST" ? `dst:${normalizeTeam(player.nfl_team ?? "")}` : normalizePlayerName(player.display_name);
-      const statLine = statLines.get(key);
+      const statLine = resolveStatLine(statLines, player);
       const points = statLine ? calculateCvcFantasyPoints(statLine, position, rules) : 0;
       tiebreakerCandidates.push({ franchiseId: entry.franchise_id, playerId: player.id ?? null, playerName: player.display_name, points });
     }

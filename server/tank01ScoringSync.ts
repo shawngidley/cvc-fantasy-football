@@ -3,7 +3,7 @@ import { getNFLDataAdapter, Tank01NFLDataAdapter, type Tank01BoxScore } from "./
 import { supabase, unwrap } from "./supabase";
 import { resolveSkinForWeek } from "./cvcSkins";
 import { promotePlannedLineupForWeek } from "./plannedLineup";
-import { mapWithConcurrencyLimit, normalizeTeam, type SnapshotRow } from "./cvcScoringShared";
+import { mapWithConcurrencyLimit, normalizeTeam, resolveStatLine, type SnapshotRow } from "./cvcScoringShared";
 import { normalizePlayerName } from "@shared/playerNameMatch";
 import { getKickerEventsForPlayer, parseEspnKickerEvents, sumMadeFieldGoalYards, countMadeExtraPoints, type KickerPlayEvent } from "@shared/espnKickerEvents";
 import { persistWeeklyStats, refreshSeasonStatsCurrent, type WeeklyStatPlayer } from "./cvcPlayerWeeklyStats";
@@ -199,7 +199,11 @@ async function tankStatLinesForWeek(adapter: Tank01NFLDataAdapter, nflWeek: numb
     for (const raw of Object.values(box.playerStats ?? {})) {
       const player = raw as Record<string, unknown>;
       const name = String(player.longName ?? "");
-      if (name) statLines.set(normalizePlayerName(name), player as Tank01LiveStats);
+      if (!name) continue;
+      const nameKey = normalizePlayerName(name);
+      statLines.set(nameKey, player as Tank01LiveStats);
+      const rawTeam = player.team ?? player.teamAbv ?? player.team_abv ?? player.currentTeam;
+      if (rawTeam) statLines.set(`${nameKey}|${normalizeTeam(String(rawTeam))}`, player as Tank01LiveStats);
     }
     const dst = (box as unknown as { DST?: Record<string, Record<string, unknown>> }).DST ?? {};
     for (const entry of Object.values(dst)) {
@@ -248,8 +252,7 @@ export async function syncTank01Scores(now = new Date(), forceWeekNumber?: numbe
     const player = Array.isArray(entry.player) ? entry.player[0] : entry.player;
     if (!player) continue;
     const position = player.position === "DEF" ? "DST" : player.position ?? "";
-    const key = position === "DST" ? `dst:${normalizeTeam(player.nfl_team ?? "")}` : normalizePlayerName(player.display_name);
-    const statLine = statLines.get(key);
+    const statLine = resolveStatLine(statLines, player);
     const points = statLine ? calculateCvcFantasyPoints(statLine, position, rules) : 0;
     franchiseTotals.set(entry.franchise_id, (franchiseTotals.get(entry.franchise_id) ?? 0) + points);
   }
@@ -284,7 +287,6 @@ export async function syncTank01Scores(now = new Date(), forceWeekNumber?: numbe
       weekNumber: week.week_number,
       players: fullPlayerPool,
       statLines,
-      statLineKeyFor: player => (player.position === "DEF" || player.position === "DST") ? `dst:${normalizeTeam(player.nfl_team ?? "")}` : normalizePlayerName(player.display_name),
       rules,
     });
     await refreshSeasonStatsCurrent(season.id, persistResult.playerIdsWithActivity);

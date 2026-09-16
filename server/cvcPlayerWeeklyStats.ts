@@ -1,5 +1,6 @@
 import { calculateCvcFantasyPoints, type CvcScoringRule, type Tank01LiveStats } from "@shared/cvcScoring";
 import { supabase, unwrap } from "./supabase";
+import { resolveStatLine } from "./cvcScoringShared";
 
 function numeric(value: unknown): number | null {
   if (value === undefined || value === null || value === "") return null;
@@ -217,10 +218,9 @@ export async function persistWeeklyStats(params: {
   weekNumber: number;
   players: WeeklyStatPlayer[];
   statLines: Map<string, Tank01LiveStats>;
-  statLineKeyFor: (player: WeeklyStatPlayer) => string;
   rules: CvcScoringRule[];
 }): Promise<{ rowsWritten: number; playerIdsWithActivity: string[] }> {
-  const { seasonId, scheduleWeekId, weekNumber, players, statLines, statLineKeyFor, rules } = params;
+  const { seasonId, scheduleWeekId, weekNumber, players, statLines, rules } = params;
   const seen = new Set<string>();
   const rows = players.filter(player => {
     if (seen.has(player.id)) return false; // a player can appear on multiple snapshot rows in rare cases (e.g. a mid-week slot change); one row per player per week
@@ -228,7 +228,7 @@ export async function persistWeeklyStats(params: {
     return true;
   }).map(player => {
     const position = player.position === "DEF" ? "DST" : player.position ?? "";
-    const statLine = statLines.get(statLineKeyFor(player));
+    const statLine = resolveStatLine(statLines, player);
     const row = extractWeeklyStatRow(statLine, position, rules);
     return { season_id: seasonId, schedule_week_id: scheduleWeekId, week_number: weekNumber, player_id: player.id, position, nfl_team: player.nfl_team, ...row };
   });
