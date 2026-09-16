@@ -1440,6 +1440,28 @@ export const leagueRouter = router({
     return { alreadyConfirmed: false };
   }),
 
+  // Lets an owner withdraw their own pending claim -- either type (bid-period FAAB or
+  // free-period) -- before it resolves. "cancelled" is one of faab_bid's existing
+  // status values (see the 202608220001 migration's check constraint), so this needed
+  // no schema change. A cancelled claim frees up the FAAB budget it was holding
+  // (getFaabBalance only counts 'won' bids against the season cap, so this happens
+  // automatically) and no longer counts toward otherPendingThisPeriod for other bids.
+  cancelFaabBid: protectedProcedure.input(z.object({ bidId: z.string().uuid() })).mutation(async ({ ctx, input }) => {
+    const owner = await getOwnerAccess({ openId: ctx.user.openId });
+    if (!owner) throw new TRPCError({ code: "FORBIDDEN", message: "A CVC owner session is required to cancel a claim." });
+    const franchise = unwrap(await supabase.from("franchise").select("id").eq("current_owner_id", owner.id).eq("is_active", true).limit(1).maybeSingle());
+    if (!franchise) throw new TRPCError({ code: "FORBIDDEN", message: "Only an owner with an active CVC franchise may cancel a claim." });
+    const bid = unwrap(await supabase.from("faab_bid").select("id, franchise_id, status, player:player_id(display_name)").eq("id", input.bidId).maybeSingle());
+    if (!bid) throw new TRPCError({ code: "NOT_FOUND", message: "That CVC claim was not found." });
+    if (bid.franchise_id !== franchise.id) throw new TRPCError({ code: "FORBIDDEN", message: "You may only cancel your own CVC franchise's claims." });
+    if (bid.status !== "pending") throw new TRPCError({ code: "BAD_REQUEST", message: "That claim has already been resolved and can no longer be cancelled." });
+    unwrap(await supabase.from("faab_bid").update({ status: "cancelled", resolved_at: new Date().toISOString() }).eq("id", input.bidId).select("id").single());
+    const player = Array.isArray(bid.player) ? bid.player[0] : bid.player;
+    const { league, season } = await getCurrentLeagueAndSeason();
+    await createAuditEvent(league.id, season.id, owner.id, "faab_bid", bid.id, "cancelled", `Cancelled claim for ${player?.display_name ?? "a player"}`);
+    return { cancelled: true };
+  }),
+
   myFaabBids: protectedProcedure.query(async ({ ctx }) => {
     const owner = await getOwnerAccess({ openId: ctx.user.openId });
     if (!owner) throw new TRPCError({ code: "FORBIDDEN", message: "A CVC owner session is required." });
