@@ -2,6 +2,7 @@
 import { trpc } from "@/lib/trpc";
 import { useCvcOwnerAuth } from "@/hooks/useCvcOwnerAuth";
 import { Link } from "wouter";
+import { toast } from "sonner";
 import { ArrowDownUp, DollarSign, Search, ShieldCheck, Star, Users, X } from "lucide-react";
 import { useMemo, useState } from "react";
 import { teamLogoUrl as scheduleTeamLogoUrl, shortenTeamName } from "@/lib/nflSchedule";
@@ -118,6 +119,7 @@ export function CvcFreeAgents() {
   const commissioner = ["commissioner", "administrator"].includes(owner?.role ?? "");
   const queue = trpc.league.waiverBidQueue.useQuery(undefined, { enabled: commissioner });
   const submit = trpc.league.submitFaabBid.useMutation({ onSuccess: async () => { setSelectedPlayerId(""); setAmount("1"); setMaxPlayersDesired("1"); setDropPlayerId(""); await Promise.all([utils.league.myFaabBids.invalidate(), utils.league.myFaabBalance.invalidate(), utils.league.activity.invalidate()]); } });
+  const confirmClaim = trpc.league.confirmFreeAgentClaim.useMutation({ onSuccess: async () => { await utils.league.myFaabBids.invalidate(); }, onError: error => toast.error(error.message) });
   const resolve = trpc.league.resolveFaabBid.useMutation({ onSuccess: () => { utils.league.waiverBidQueue.invalidate(); utils.league.freeAgents.invalidate(); utils.league.myFaabBalance.invalidate(); utils.league.activity.invalidate(); } });
 
   const activePool = tab === "all-players" ? allPlayersPool : tab === "watchlist" ? watchlistPool : freeAgentsPool;
@@ -201,7 +203,7 @@ export function CvcFreeAgents() {
 
     {tab === "manage-bids" ? (
       <div className="grid gap-5 lg:grid-cols-2">
-        <section className="rounded-xl border border-white/10 bg-cvc-deep/60 p-5"><div className="flex items-center gap-2 text-cvc-accent"><DollarSign size={16} /><p className="font-display text-lg uppercase">My claim status</p></div><div className="mt-4 space-y-2">{owner?.franchise ? myBids.data?.length ? myBids.data.map((bid: any) => <div key={bid.id} className="rounded bg-white/5 px-3 py-2 text-sm text-white"><b>{bid.player?.[0]?.display_name ?? bid.player?.display_name}</b> · ${bid.amount} · <span className="uppercase text-cvc-accent">{bid.status}</span></div>) : <p className="text-sm text-cvc-muted">No CVC waiver claims submitted.</p> : <p className="text-sm text-cvc-muted">Sign in with an owner account to submit and review claims.</p>}</div></section>
+        <section className="rounded-xl border border-white/10 bg-cvc-deep/60 p-5"><div className="flex items-center gap-2 text-cvc-accent"><DollarSign size={16} /><p className="font-display text-lg uppercase">My claim status</p></div><div className="mt-4 space-y-2">{owner?.franchise ? myBids.data?.length ? myBids.data.map((bid: any) => { const period = Array.isArray(bid.period) ? bid.period[0] : bid.period; const needsConfirmation = bid.status === "pending" && period?.period_type === "free" && period?.status === "open" && !bid.confirmed_at; return <div key={bid.id} className="flex items-center justify-between gap-3 rounded bg-white/5 px-3 py-2 text-sm text-white"><span><b>{bid.player?.[0]?.display_name ?? bid.player?.display_name}</b> · ${bid.amount} · <span className="uppercase text-cvc-accent">{needsConfirmation ? "unconfirmed" : bid.status}</span></span>{needsConfirmation ? <button onClick={() => confirmClaim.mutate({ bidId: bid.id })} disabled={confirmClaim.isPending} className="shrink-0 rounded bg-amber-500 px-2.5 py-1 text-xs font-bold text-white hover:bg-amber-600">Confirm claim</button> : null}</div>; }) : <p className="text-sm text-cvc-muted">No CVC waiver claims submitted.</p> : <p className="text-sm text-cvc-muted">Sign in with an owner account to submit and review claims.</p>}</div></section>
         <section className="rounded-xl border border-white/10 bg-cvc-deep/60 p-5"><div className="flex items-center gap-2 text-cvc-accent"><ShieldCheck size={16} /><p className="font-display text-lg uppercase">Commissioner queue</p></div><div className="mt-4 space-y-2">{commissioner ? queue.data?.length ? queue.data.map((bid: any) => <div key={bid.id} className="flex flex-wrap items-center justify-between gap-2 rounded bg-white/5 px-3 py-2 text-sm text-white"><span><b>{bid.player?.[0]?.display_name ?? bid.player?.display_name}</b> · {bid.franchise?.[0]?.name ?? bid.franchise?.name} · ${bid.amount}</span><span className="flex gap-2"><button onClick={() => resolve.mutate({ bidId: bid.id, outcome: "won" })} className="cvc-mini-button">Award</button><button onClick={() => resolve.mutate({ bidId: bid.id, outcome: "lost" })} className="cvc-mini-button">Lost</button></span></div>) : <p className="text-sm text-cvc-muted">No pending CVC waiver claims.</p> : <p className="text-sm text-cvc-muted">Protected commissioner controls appear for commissioner and administrator accounts.</p>}</div></section>
       </div>
     ) : (

@@ -1413,10 +1413,31 @@ export const leagueRouter = router({
         throw new TRPCError({ code: "BAD_REQUEST", message: `This player was just acquired via waivers and can't be cut until the next waiver resolution (${new Date(drop.locked_until).toLocaleString("en-US", { weekday: "short", hour: "numeric", minute: "2-digit", timeZoneName: "short" })}).` });
       }
     }
-    const bid = unwrap(await supabase.from("faab_bid").upsert({ waiver_period_id: period.id, franchise_id: franchise.id, player_id: input.playerId, drop_player_id: input.dropPlayerId ?? null, amount, priority: input.priority, max_players_desired: input.maxPlayersDesired, status: "pending" }, { onConflict: "waiver_period_id,franchise_id,player_id" }).select("id, amount, priority, status").single());
+    const bid = unwrap(await supabase.from("faab_bid").upsert({ waiver_period_id: period.id, franchise_id: franchise.id, player_id: input.playerId, drop_player_id: input.dropPlayerId ?? null, amount, priority: input.priority, max_players_desired: input.maxPlayersDesired, status: "pending", confirmed_at: isFreePeriod ? null : new Date().toISOString() }, { onConflict: "waiver_period_id,franchise_id,player_id" }).select("id, amount, priority, status, confirmed_at").single());
     if (!bid) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "CVC waiver claim could not be saved." });
     await createAuditEvent(league.id, season.id, owner.id, "faab_bid", bid.id, "submitted", `Submitted ${period.label} claim for ${playerRow.display_name}`);
     return bid;
+  }),
+
+  // Free-period claims are NOT auto-awarded like bid-period FAAB claims are -- the
+  // claiming owner must explicitly confirm before it can be awarded. Anything left
+  // unconfirmed when the free period closes is dropped entirely, same as any other
+  // losing claim (see resolveOpenWaiverPeriod's confirmed_at filter).
+  confirmFreeAgentClaim: protectedProcedure.input(z.object({ bidId: z.string().uuid() })).mutation(async ({ ctx, input }) => {
+    const owner = await getOwnerAccess({ openId: ctx.user.openId });
+    if (!owner) throw new TRPCError({ code: "FORBIDDEN", message: "A CVC owner session is required to confirm a claim." });
+    const franchise = unwrap(await supabase.from("franchise").select("id").eq("current_owner_id", owner.id).eq("is_active", true).limit(1).maybeSingle());
+    if (!franchise) throw new TRPCError({ code: "FORBIDDEN", message: "Only an owner with an active CVC franchise may confirm a claim." });
+    const bid = unwrap(await supabase.from("faab_bid").select("id, franchise_id, status, confirmed_at, period:waiver_period_id(period_type, status)").eq("id", input.bidId).maybeSingle());
+    if (!bid) throw new TRPCError({ code: "NOT_FOUND", message: "That CVC claim was not found." });
+    if (bid.franchise_id !== franchise.id) throw new TRPCError({ code: "FORBIDDEN", message: "You may only confirm your own CVC franchise's claims." });
+    const period = Array.isArray(bid.period) ? bid.period[0] : bid.period;
+    if (period?.period_type !== "free") throw new TRPCError({ code: "BAD_REQUEST", message: "Only free-period claims need to be confirmed -- a regular FAAB bid is already ready to be awarded." });
+    if (period?.status !== "open") throw new TRPCError({ code: "BAD_REQUEST", message: "That free agent period is no longer open." });
+    if (bid.status !== "pending") throw new TRPCError({ code: "BAD_REQUEST", message: "That claim has already been resolved and can no longer be confirmed." });
+    if (bid.confirmed_at) return { alreadyConfirmed: true };
+    unwrap(await supabase.from("faab_bid").update({ confirmed_at: new Date().toISOString() }).eq("id", input.bidId).select("id").single());
+    return { alreadyConfirmed: false };
   }),
 
   myFaabBids: protectedProcedure.query(async ({ ctx }) => {
@@ -1424,7 +1445,7 @@ export const leagueRouter = router({
     if (!owner) throw new TRPCError({ code: "FORBIDDEN", message: "A CVC owner session is required." });
     const franchise = unwrap(await supabase.from("franchise").select("id").eq("current_owner_id", owner.id).eq("is_active", true).limit(1).maybeSingle());
     if (!franchise) return [];
-    return unwrap(await supabase.from("faab_bid").select("id, amount, priority, status, submitted_at, player:player_id(id, display_name, position, nfl_team), period:waiver_period_id(label, closes_at, status)").eq("franchise_id", franchise.id).order("submitted_at", { ascending: false }).limit(100)) ?? [];
+    return unwrap(await supabase.from("faab_bid").select("id, amount, priority, status, submitted_at, confirmed_at, player:player_id(id, display_name, position, nfl_team), period:waiver_period_id(label, closes_at, status, period_type)").eq("franchise_id", franchise.id).order("submitted_at", { ascending: false }).limit(100)) ?? [];
   }),
 
   // CVC's real season FAAB budget: $30 per franchise, spent in $1 increments across the

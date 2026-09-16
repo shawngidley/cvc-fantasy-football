@@ -53,3 +53,20 @@ export function sortByWorstRecordFirst(franchiseIds: string[], standings: Map<st
     return sa.pointsFor - sb.pointsFor;
   });
 }
+
+/** Free-period claims are NOT auto-awarded like bid-period FAAB claims are -- the
+ * claiming owner must explicitly confirm their own claim before it can ever win the
+ * player. A claim never confirmed by the time the period closes is dropped entirely
+ * (excluded here), same as any other losing claim -- it still gets marked "lost"
+ * elsewhere, it just can never be selected as the winner. Among confirmed claims,
+ * ordered purely by current waiver priority (lower number = higher priority = first
+ * in line). A confirmed claim from a lower-priority franchise can still win the player
+ * outright if a higher-priority franchise's claim was never confirmed -- an
+ * unconfirmed claim doesn't block anyone else from winning it, it just can't win
+ * itself. */
+export function selectFreeAgentCandidates<T extends { franchise_id: string; confirmed_at: string | null }>(bidsForPlayer: T[], waiverPriorityByFranchiseId: Map<string, number | null | undefined>): { orderedCandidateFranchiseIds: string[]; bidByFranchise: Map<string, T> } {
+  const confirmedBids = bidsForPlayer.filter(bid => bid.confirmed_at != null);
+  const bidByFranchise = new Map(confirmedBids.map(bid => [bid.franchise_id, bid]));
+  const orderedCandidateFranchiseIds = Array.from(bidByFranchise.keys()).sort((a, b) => (waiverPriorityByFranchiseId.get(a) ?? Number.MAX_SAFE_INTEGER) - (waiverPriorityByFranchiseId.get(b) ?? Number.MAX_SAFE_INTEGER));
+  return { orderedCandidateFranchiseIds, bidByFranchise };
+}
