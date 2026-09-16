@@ -1149,6 +1149,26 @@ export const leagueRouter = router({
   // Debug-only: shows every waiver_period row for the current season, plus whether the
   // "find an open period" query (the same one submitFaabBid actually uses) finds
   // anything right now. Not used by any real feature.
+  // Debug-only: shows every cvc_week_planning_cutoff row for the current season, the
+  // actual value getCurrentPlanningWeek returns right now, and (for comparison) the
+  // old status-based week. Not used by any real feature.
+  debugPlanningWeekCheck: publicProcedure.query(async () => {
+    const { season } = await getCurrentLeagueAndSeason();
+    const now = new Date().toISOString();
+    const cutoffResult = await supabase.from("cvc_week_planning_cutoff").select("week_number, cutoff_at, synced_at").eq("season_id", season.id).order("week_number");
+    const planningWeekNumber = await getCurrentPlanningWeek(season.id);
+    const weeks = unwrap(await supabase.from("schedule_week").select("week_number, status").eq("season_id", season.id).order("week_number")) ?? [];
+    const statusBasedWeek = weeks.find(item => item.status === "live") ?? weeks.find(item => item.status === "upcoming") ?? weeks[0];
+    return {
+      nowUtc: now,
+      cutoffRows: cutoffResult.data ?? [],
+      cutoffTableError: cutoffResult.error?.message ?? null,
+      getCurrentPlanningWeekResult: planningWeekNumber,
+      statusBasedCurrentWeek: statusBasedWeek?.week_number ?? null,
+      allScheduleWeekStatuses: weeks,
+    };
+  }),
+
   debugWaiverPeriodCheck: publicProcedure.query(async () => {
     const { season } = await getCurrentLeagueAndSeason();
     const now = new Date().toISOString();

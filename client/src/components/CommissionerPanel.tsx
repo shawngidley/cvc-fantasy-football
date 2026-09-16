@@ -240,6 +240,7 @@ function SeasonStatsSyncModule() {
   const [debugHistoricalYear, setDebugHistoricalYear] = useState(2023);
   const historicalCheck = trpc.league.debugHistoricalStatsCheck.useQuery({ year: debugHistoricalYear });
   const currentSeasonCheck = trpc.league.debugCurrentSeasonPipelineCheck.useQuery();
+  const planningWeekCheck = trpc.league.debugPlanningWeekCheck.useQuery();
   const waiverPeriodCheck = trpc.league.debugWaiverPeriodCheck.useQuery();
   const snapshotVsCurrent = trpc.league.debugSnapshotVsCurrentLineup.useQuery({ weekNumber: forceWeekNumber });
   const forceRecomputeWeek = trpc.league.forceRecomputeWeek.useMutation({
@@ -307,6 +308,10 @@ function SeasonStatsSyncModule() {
     <div className="rounded-lg border border-dashed border-amber-400/40 bg-amber-50 p-4">
       <p className="text-sm font-semibold text-cvc-deep">Debug: current-season (2026) pipeline check</p>
       <pre className="mt-2 max-h-96 overflow-auto whitespace-pre-wrap break-all rounded bg-white p-2 text-[10px]">{currentSeasonCheck.isLoading ? "Loading…" : currentSeasonCheck.isError ? `ERROR: ${currentSeasonCheck.error?.message ?? "unknown error"}` : JSON.stringify(currentSeasonCheck.data, null, 2) || "(empty result)"}</pre>
+    </div>
+    <div className="rounded-lg border border-dashed border-amber-400/40 bg-amber-50 p-4">
+      <p className="text-sm font-semibold text-cvc-deep">Debug: planning week check</p>
+      <pre className="mt-2 max-h-96 overflow-auto whitespace-pre-wrap break-all rounded bg-white p-2 text-[10px]">{planningWeekCheck.isLoading ? "Loading…" : planningWeekCheck.isError ? `ERROR: ${planningWeekCheck.error?.message ?? "unknown error"}` : JSON.stringify(planningWeekCheck.data, null, 2) || "(empty result)"}</pre>
     </div>
     <div className="rounded-lg border border-dashed border-amber-400/40 bg-amber-50 p-4">
       <p className="text-sm font-semibold text-cvc-deep">Debug: waiver period check</p>
