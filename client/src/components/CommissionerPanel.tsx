@@ -239,6 +239,7 @@ function SeasonStatsSyncModule() {
   const [forceWeekNumber, setForceWeekNumber] = useState(1);
   const [debugHistoricalYear, setDebugHistoricalYear] = useState(2023);
   const historicalCheck = trpc.league.debugHistoricalStatsCheck.useQuery({ year: debugHistoricalYear });
+  const currentSeasonCheck = trpc.league.debugCurrentSeasonPipelineCheck.useQuery();
   const snapshotVsCurrent = trpc.league.debugSnapshotVsCurrentLineup.useQuery({ weekNumber: forceWeekNumber });
   const forceRecomputeWeek = trpc.league.forceRecomputeWeek.useMutation({
     onSuccess: data => {
@@ -301,6 +302,10 @@ function SeasonStatsSyncModule() {
         <button type="button" className="cvc-button-compact border-rose-300 bg-rose-100 text-rose-800" disabled={resetWeekSnapshot.isPending} onClick={() => { if (window.confirm(`This permanently deletes week ${forceWeekNumber}'s locked-in lineup snapshot. Only do this if you've confirmed the current roster is correct for that week. Continue?`)) resetWeekSnapshot.mutate({ weekNumber: forceWeekNumber }); }}>{resetWeekSnapshot.isPending ? "Resetting…" : `Reset week ${forceWeekNumber}'s snapshot`}</button>
         <button type="button" className="cvc-button-compact" disabled={forceRecomputeWeek.isPending} onClick={() => forceRecomputeWeek.mutate({ weekNumber: forceWeekNumber })}><Save size={14} /> {forceRecomputeWeek.isPending ? "Recomputing…" : `Recompute week ${forceWeekNumber}`}</button>
       </div>
+    </div>
+    <div className="rounded-lg border border-dashed border-amber-400/40 bg-amber-50 p-4">
+      <p className="text-sm font-semibold text-cvc-deep">Debug: current-season (2026) pipeline check</p>
+      <pre className="mt-2 max-h-96 overflow-auto whitespace-pre-wrap break-all rounded bg-white p-2 text-[10px]">{currentSeasonCheck.isLoading ? "Loading…" : currentSeasonCheck.isError ? `ERROR: ${currentSeasonCheck.error?.message ?? "unknown error"}` : JSON.stringify(currentSeasonCheck.data, null, 2) || "(empty result)"}</pre>
     </div>
     <div className="rounded-lg border border-dashed border-amber-400/40 bg-amber-50 p-4">
       <p className="text-sm font-semibold text-cvc-deep">Debug: cvc_season_stats_historical check (year {debugHistoricalYear})</p>

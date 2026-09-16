@@ -1127,6 +1127,29 @@ export const leagueRouter = router({
   // attachSeasonStats currently swallows a query error silently (treats it the same
   // as "no rows found"), which could otherwise mask a real problem. Not used by any
   // real feature.
+  // Debug-only: quick current-season pipeline check -- how many players have
+  // cvc_player_weekly_stat rows for the current season (should now cover the full
+  // player pool, not just rostered, after this session's widening fix) vs how many
+  // have a precomputed cvc_season_stats_current row (should match, once the rebuild
+  // has run). Not used by any real feature.
+  debugCurrentSeasonPipelineCheck: publicProcedure.query(async () => {
+    const { season } = await getCurrentLeagueAndSeason();
+    const weeklyResult = await supabase.from("cvc_player_weekly_stat").select("player_id", { count: "exact", head: true }).eq("season_id", season.id);
+    const weeklyDistinctResult = await supabase.from("cvc_player_weekly_stat").select("player_id").eq("season_id", season.id).limit(5000);
+    const distinctWeeklyPlayerIds = new Set((weeklyDistinctResult.data ?? []).map((row: any) => row.player_id));
+    const currentResult = await supabase.from("cvc_season_stats_current").select("player_id", { count: "exact", head: true }).eq("season_id", season.id);
+    const rosteredResult = await supabase.from("roster_assignment").select("player_id", { count: "exact", head: true }).eq("season_id", season.id).is("released_at", null);
+    return {
+      seasonYear: season.year,
+      weeklyRowCount: weeklyResult.count ?? null,
+      weeklyRowError: weeklyResult.error?.message ?? null,
+      distinctPlayersWithWeeklyRows: distinctWeeklyPlayerIds.size,
+      precomputedSeasonStatsRowCount: currentResult.count ?? null,
+      precomputedSeasonStatsError: currentResult.error?.message ?? null,
+      currentlyRosteredPlayerCount: rosteredResult.count ?? null,
+    };
+  }),
+
   debugHistoricalStatsCheck: publicProcedure.input(z.object({ year: z.number().int() })).query(async ({ input }) => {
     const countResult = await supabase.from("cvc_season_stats_historical").select("id", { count: "exact", head: true }).eq("year", input.year);
     const sampleResult = await supabase.from("cvc_season_stats_historical").select("player_id, games_played, fantasy_points, backfilled_at").eq("year", input.year).limit(5);
