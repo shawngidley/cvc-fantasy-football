@@ -6,10 +6,10 @@
 -- for this week" -- and advances on a fixed calendar schedule regardless of whether
 -- the games have started yet.
 --
--- Refreshed once daily by a scheduled job (see runPlanningWeekCutoffSync), not
--- computed live on every request: the underlying schedule data barely ever changes,
--- so caching the calculated cutoff keeps every page's read a fast database lookup
--- instead of a live provider call.
+-- Refreshed once daily as part of the existing team-schedule-sync job (see
+-- runTeamScheduleSync), not computed live on every request: the underlying schedule
+-- data barely ever changes, so caching the calculated cutoff keeps every page's read
+-- a fast database lookup instead of a live provider call.
 create table if not exists public.cvc_week_planning_cutoff (
   id uuid primary key default gen_random_uuid(),
   season_id uuid not null references public.season(id) on delete cascade,
