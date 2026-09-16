@@ -1146,6 +1146,22 @@ export const leagueRouter = router({
   // player pool, not just rostered, after this session's widening fix) vs how many
   // have a precomputed cvc_season_stats_current row (should match, once the rebuild
   // has run). Not used by any real feature.
+  // Debug-only: shows every waiver_period row for the current season, plus whether the
+  // "find an open period" query (the same one submitFaabBid actually uses) finds
+  // anything right now. Not used by any real feature.
+  debugWaiverPeriodCheck: publicProcedure.query(async () => {
+    const { season } = await getCurrentLeagueAndSeason();
+    const now = new Date().toISOString();
+    const allPeriods = unwrap(await supabase.from("waiver_period").select("id, label, opens_at, closes_at, status, period_type").eq("season_id", season.id).order("opens_at")) ?? [];
+    const openPeriodQuery = await supabase.from("waiver_period").select("id, label, opens_at, closes_at, status, period_type").eq("season_id", season.id).eq("status", "open").lte("opens_at", now).gte("closes_at", now).order("closes_at").limit(1).maybeSingle();
+    return {
+      nowUtc: now,
+      allPeriods,
+      openPeriodFoundBySubmitFaabBidsQuery: openPeriodQuery.data,
+      openPeriodQueryError: openPeriodQuery.error?.message ?? null,
+    };
+  }),
+
   debugCurrentSeasonPipelineCheck: publicProcedure.query(async () => {
     const { season } = await getCurrentLeagueAndSeason();
     const weeklyResult = await supabase.from("cvc_player_weekly_stat").select("player_id", { count: "exact", head: true }).eq("season_id", season.id);
