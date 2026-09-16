@@ -1139,12 +1139,24 @@ export const leagueRouter = router({
     const playerById = new Map(playerRows.map(row => [row.id, row]));
     const attachTestPlayer = playerRows.find(row => !rosteredByPlayerId.has(row.id)) ?? playerRows[0] ?? null;
     const attachTestResult = attachTestPlayer ? await attachSeasonStats([{ id: attachTestPlayer.id }], season.id, input.year, season.year) : null;
+    // Same active-player filter freeAgents/allPlayers use -- a player whose last_seen_at
+    // predates the most recent FantasyPros active-flag sync is excluded from the pool
+    // BEFORE attachSeasonStats ever runs, regardless of whether they have real
+    // historical stats. Checked directly here to confirm/rule this out.
+    const mostRecentSync = unwrap(await supabase.from("player").select("last_seen_at").not("last_seen_at", "is", null).order("last_seen_at", { ascending: false }).limit(1).maybeSingle());
+    const sampleLastSeenRows = samplePlayerIds.length ? unwrap(await supabase.from("player").select("id, last_seen_at, status").in("id", samplePlayerIds)) ?? [] : [];
+    const lastSeenById = new Map(sampleLastSeenRows.map(row => [row.id, row]));
     return {
       migrationLikelyMissing: Boolean(migrationExistsCheck.error),
       migrationErrorText: migrationExistsCheck.error?.message ?? null,
       rowCountForYear: countResult.count ?? null,
       countErrorText: countResult.error?.message ?? null,
-      sampleRows: (sampleResult.data ?? []).map(row => ({ ...row, display_name: playerById.get(row.player_id)?.display_name ?? "?", position: playerById.get(row.player_id)?.position ?? "?", rosteredBy: rosteredByPlayerId.get(row.player_id) ?? null })),
+      mostRecentActiveSyncCutoff: mostRecentSync?.last_seen_at ?? null,
+      sampleRows: (sampleResult.data ?? []).map(row => {
+        const lastSeen = lastSeenById.get(row.player_id);
+        const passesActiveFilter = !mostRecentSync?.last_seen_at || (lastSeen?.last_seen_at != null && lastSeen.last_seen_at >= mostRecentSync.last_seen_at);
+        return { ...row, display_name: playerById.get(row.player_id)?.display_name ?? "?", position: playerById.get(row.player_id)?.position ?? "?", rosteredBy: rosteredByPlayerId.get(row.player_id) ?? null, last_seen_at: lastSeen?.last_seen_at ?? null, status: lastSeen?.status ?? null, passesActiveFilter };
+      }),
       sampleErrorText: sampleResult.error?.message ?? null,
       attachSeasonStatsTest: attachTestPlayer ? { testedPlayer: attachTestPlayer.display_name, calledWith: { year: input.year, currentSeasonYear: season.year }, result: attachTestResult } : null,
     };
