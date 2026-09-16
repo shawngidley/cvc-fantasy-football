@@ -14,7 +14,8 @@
     "api/scheduled/team-schedule-sync.js": { "maxDuration": 60 },
     "api/scheduled/fantasypros-archive.js": { "maxDuration": 60 },
     "api/scheduled/historical-season-stats-backfill.js": { "maxDuration": 60 },
-    "api/scheduled/season-stats-current-rebuild.js": { "maxDuration": 60 }
+    "api/scheduled/season-stats-current-rebuild.js": { "maxDuration": 60 },
+    "api/scheduled/planning-week-cutoff-sync.js": { "maxDuration": 60 }
   },
   "crons": [
     { "path": "/api/scheduled/tank01-scoring-sync", "schedule": "*/5 * * * *" },
@@ -26,6 +27,7 @@
     { "path": "/api/scheduled/historical-season-stats-backfill?year=2023", "schedule": "0 12 * * *" },
     { "path": "/api/scheduled/historical-season-stats-backfill?year=2024", "schedule": "5 12 * * *" },
     { "path": "/api/scheduled/historical-season-stats-backfill?year=2025", "schedule": "10 12 * * *" },
-    { "path": "/api/scheduled/season-stats-current-rebuild", "schedule": "0 13 * * *" }
+    { "path": "/api/scheduled/season-stats-current-rebuild", "schedule": "0 13 * * *" },
+    { "path": "/api/scheduled/planning-week-cutoff-sync", "schedule": "30 11 * * *" }
   ]
 }

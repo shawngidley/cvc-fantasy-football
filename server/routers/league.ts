@@ -24,6 +24,7 @@ import { syncNflTeamSchedules } from "../nflTeamScheduleSync";
 import { syncTank01ActiveRoster } from "../tank01ActiveRosterSync";
 import { LOTTERY_REVEAL_INTERVAL_SECONDS, lotteryCommitment, revealedLotteryCount, reverseLotteryPositions, secureShuffle } from "../rookieDraftLottery";
 import { franchiseLiveLineup } from "../liveScoringLineup";
+import { getCurrentPlanningWeek } from "../planningWeek";
 import { supabase, unwrap } from "../supabase";
 import { cvcContractTier, cvcFranchiseTerms, cvcPriorSeasonSalary, cvcTransitionSalary, isCvcHighSalaryTransition, isCvcProtectionYear } from "../../shared/cvcProtectionPolicy";
 
@@ -188,6 +189,19 @@ async function attachSeasonStats<T extends { id: string }>(players: T[], seasonI
     const stats = byPlayerId.get(player.id);
     return stats ? { ...player, seasonStats: stats } : player;
   });
+}
+
+/** Resolves the effective "current week" for planning-oriented pages (and, per
+ * explicit instruction, Live Scoring too -- the whole site moves together) using the
+ * new planning-week cutoff (9am ET the Tuesday before that week's actual first
+ * kickoff) rather than schedule_week.status. Falls back to the old status-based
+ * lookup if the planning-week cache hasn't been populated yet for any reason (a
+ * graceful degradation, not a hard failure) -- the finalization sync's own use of
+ * schedule_week.status is entirely separate and untouched by this. */
+async function resolveEffectivePlanningWeek<T extends { week_number: number; status: string }>(weeks: T[], seasonId: string): Promise<T | null> {
+  const planningWeekNumber = await getCurrentPlanningWeek(seasonId);
+  const fromPlanningCutoff = planningWeekNumber != null ? weeks.find(item => item.week_number === planningWeekNumber) : undefined;
+  return fromPlanningCutoff ?? weeks.find(item => item.status === "live") ?? weeks.find(item => item.status === "upcoming") ?? weeks[0] ?? null;
 }
 
 export const leagueRouter = router({
@@ -869,7 +883,7 @@ export const leagueRouter = router({
     const { season } = await getCurrentLeagueAndSeason();
     const eligible = new Set(["QB", "RB", "WR", "TE", "K"]);
     const weeks = unwrap(await supabase.from("schedule_week").select("week_number, status").eq("season_id", season.id).order("week_number")) ?? [];
-    const currentWeek = weeks.find(item => item.status === "live") ?? weeks.find(item => item.status === "upcoming") ?? weeks[0];
+    const currentWeek = await resolveEffectivePlanningWeek(weeks, season.id);
     // Matches WRC's approach: the raw /nfl/news response has no player_name/name field
     // at all, only player_id -- fill it in by matching that ID against FantasyPros'
     // own ranks data (a reliable playerId -> name/team/position mapping), rather than
@@ -921,7 +935,7 @@ export const leagueRouter = router({
   fantasyProsInjuries: publicProcedure.query(async () => {
     const { season } = await getCurrentLeagueAndSeason();
     const weeks = unwrap(await supabase.from("schedule_week").select("id, week_number, status").eq("season_id", season.id).order("week_number")) ?? [];
-    const currentWeek = weeks.find(item => item.status === "live") ?? weeks.find(item => item.status === "upcoming") ?? weeks[0];
+    const currentWeek = await resolveEffectivePlanningWeek(weeks, season.id);
     if (!currentWeek) return { items: [], weekNumber: null };
     const rawInjuries = await getFantasyProsInjuries(season.year, currentWeek.week_number);
     const eligible = new Set(["QB", "RB", "WR", "TE", "K"]);
@@ -1041,7 +1055,7 @@ export const leagueRouter = router({
     }
     const { season } = await getCurrentLeagueAndSeason();
     const weeks = unwrap(await supabase.from("schedule_week").select("week_number, status").eq("season_id", season.id).order("week_number")) ?? [];
-    const currentWeek = (weeks.find(item => item.status === "live") ?? weeks.find(item => item.status === "upcoming") ?? weeks[0])?.week_number ?? 0;
+    const currentWeek = (await resolveEffectivePlanningWeek(weeks, season.id))?.week_number ?? 0;
     const [positionRanks, overallRanks, projections] = await Promise.all([
       getFantasyProsRanks(season.year, player.position, currentWeek),
       getFantasyProsRanks(season.year, "OP", currentWeek),
@@ -1349,7 +1363,7 @@ export const leagueRouter = router({
     // Fails safe: if the check itself can't be completed, isPlayerLockedForGameStart
     // returns true, blocking the pickup rather than risking one through unverified.
     const weeks = unwrap(await supabase.from("schedule_week").select("week_number, status").eq("season_id", season.id).order("week_number")) ?? [];
-    const currentWeek = weeks.find(item => item.status === "live") ?? weeks.find(item => item.status === "upcoming") ?? weeks[0];
+    const currentWeek = await resolveEffectivePlanningWeek(weeks, season.id);
     if (currentWeek && await isPlayerLockedForGameStart(playerRow.nfl_team, currentWeek.week_number, season.year)) {
       throw new TRPCError({ code: "BAD_REQUEST", message: `${playerRow.display_name}'s game has already started -- they can't be picked up until next week.` });
     }
@@ -1602,7 +1616,7 @@ export const leagueRouter = router({
     const weeks = unwrap(await supabase.from("schedule_week").select("id, week_number, label, status").eq("season_id", season.id).order("week_number")) ?? [];
     const week = input?.weekNumber != null
       ? weeks.find(item => item.week_number === input.weekNumber) ?? null
-      : weeks.find(item => item.status === "live") ?? weeks.find(item => item.status === "upcoming") ?? null;
+      : await resolveEffectivePlanningWeek(weeks, season.id);
     if (!week) return { week: null, matchups: [] };
     const matchups = unwrap(await supabase.from("matchup").select("id, home_franchise_id, away_franchise_id, home_score, away_score, result_state, home:home_franchise_id(id, name, logo_url), away:away_franchise_id(id, name, logo_url)").eq("schedule_week_id", week.id).order("created_at")) ?? [];
     const franchiseIds = Array.from(new Set(matchups.flatMap(item => [item.home_franchise_id, item.away_franchise_id])));
@@ -1637,7 +1651,7 @@ export const leagueRouter = router({
     const player = Array.isArray(assignment.player) ? assignment.player[0] : assignment.player;
     if (!["commissioner", "administrator"].includes(owner.role)) {
       const weeks = unwrap(await supabase.from("schedule_week").select("week_number, status").eq("season_id", season.id).order("week_number")) ?? [];
-      const currentWeek = weeks.find(item => item.status === "live") ?? weeks.find(item => item.status === "upcoming") ?? weeks[0];
+      const currentWeek = await resolveEffectivePlanningWeek(weeks, season.id);
       if (currentWeek && await isPlayerLockedForGameStart(player?.nfl_team, currentWeek.week_number, season.year)) {
         throw new TRPCError({ code: "BAD_REQUEST", message: `${player?.display_name ?? "This player"}'s game has already started -- their lineup slot is locked until next week.` });
       }
@@ -1670,7 +1684,7 @@ export const leagueRouter = router({
     const franchise = unwrap(await supabase.from("franchise").select("id, name, current_owner_id").eq("id", input.franchiseId).maybeSingle());
     if (!franchise || (franchise.current_owner_id !== owner.id && !["commissioner", "administrator"].includes(owner.role))) throw new TRPCError({ code: "FORBIDDEN", message: "You may only update your own CVC franchise lineup." });
     const weeks = unwrap(await supabase.from("schedule_week").select("id, week_number, status").eq("season_id", season.id).order("week_number")) ?? [];
-    const currentWeek = weeks.find(item => item.status === "live") ?? weeks.find(item => item.status === "upcoming") ?? weeks[0];
+    const currentWeek = await resolveEffectivePlanningWeek(weeks, season.id);
     const targetWeek = weeks.find(item => item.week_number === input.weekNumber);
     if (!targetWeek) throw new TRPCError({ code: "NOT_FOUND", message: "That CVC week was not found." });
     if (currentWeek && targetWeek.week_number <= currentWeek.week_number) throw new TRPCError({ code: "BAD_REQUEST", message: "Only a future week can be planned ahead -- use the regular lineup save for the current week." });
@@ -1693,7 +1707,7 @@ export const leagueRouter = router({
   lineupForWeek: publicProcedure.input(z.object({ franchiseId: z.string().uuid(), weekNumber: z.number().int().positive() })).query(async ({ input }) => {
     const { season } = await getCurrentLeagueAndSeason();
     const weeks = unwrap(await supabase.from("schedule_week").select("id, week_number, status").eq("season_id", season.id).order("week_number")) ?? [];
-    const currentWeek = weeks.find(item => item.status === "live") ?? weeks.find(item => item.status === "upcoming") ?? weeks[0];
+    const currentWeek = await resolveEffectivePlanningWeek(weeks, season.id);
     const targetWeek = weeks.find(item => item.week_number === input.weekNumber);
     if (!targetWeek) return { weekNumber: input.weekNumber, status: "unknown" as const, slotsByPlayerId: {} };
     if (currentWeek && targetWeek.week_number === currentWeek.week_number) {

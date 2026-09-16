@@ -1,6 +1,6 @@
 const EASTERN_TZ = "America/New_York";
 
-function getEasternDateParts(instant: Date): { year: number; month: number; day: number; weekday: number } {
+export function getEasternDateParts(instant: Date): { year: number; month: number; day: number; weekday: number } {
   const formatter = new Intl.DateTimeFormat("en-US", { timeZone: EASTERN_TZ, year: "numeric", month: "2-digit", day: "2-digit", weekday: "short" });
   const parts: Record<string, string> = {};
   for (const part of formatter.formatToParts(instant)) parts[part.type] = part.value;
@@ -11,7 +11,7 @@ function getEasternDateParts(instant: Date): { year: number; month: number; day:
 /** The UTC instant corresponding to a given wall-clock hour in America/New_York on a
  * given calendar date, correctly accounting for EST/EDT. Accurate except within the
  * ~1-2am window of a DST transition itself, which never coincides with 9am. */
-function easternWallClockToUtc(year: number, month: number, day: number, hour: number): Date {
+export function easternWallClockToUtc(year: number, month: number, day: number, hour: number): Date {
   const asIfUtc = Date.UTC(year, month - 1, day, hour, 0, 0);
   const formatter = new Intl.DateTimeFormat("en-US", { timeZone: EASTERN_TZ, hour12: false, year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit" });
   const parts: Record<string, string> = {};
