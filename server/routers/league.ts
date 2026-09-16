@@ -1131,12 +1131,18 @@ export const leagueRouter = router({
     const countResult = await supabase.from("cvc_season_stats_historical").select("id", { count: "exact", head: true }).eq("year", input.year);
     const sampleResult = await supabase.from("cvc_season_stats_historical").select("player_id, games_played, fantasy_points, backfilled_at").eq("year", input.year).limit(5);
     const migrationExistsCheck = await supabase.from("cvc_season_stats_historical").select("id").limit(1);
+    const samplePlayerIds = (sampleResult.data ?? []).map(row => row.player_id);
+    const playerRows = samplePlayerIds.length ? unwrap(await supabase.from("player").select("id, display_name, position").in("id", samplePlayerIds)) ?? [] : [];
+    const { season } = await getCurrentLeagueAndSeason();
+    const rosteredRows = samplePlayerIds.length ? unwrap(await supabase.from("roster_assignment").select("player_id, franchise:franchise_id(name)").eq("season_id", season.id).is("released_at", null).in("player_id", samplePlayerIds)) ?? [] : [];
+    const rosteredByPlayerId = new Map(rosteredRows.map((row: any) => [row.player_id, Array.isArray(row.franchise) ? row.franchise[0]?.name : row.franchise?.name]));
+    const playerById = new Map(playerRows.map(row => [row.id, row]));
     return {
       migrationLikelyMissing: Boolean(migrationExistsCheck.error),
       migrationErrorText: migrationExistsCheck.error?.message ?? null,
       rowCountForYear: countResult.count ?? null,
       countErrorText: countResult.error?.message ?? null,
-      sampleRows: sampleResult.data ?? [],
+      sampleRows: (sampleResult.data ?? []).map(row => ({ ...row, display_name: playerById.get(row.player_id)?.display_name ?? "?", position: playerById.get(row.player_id)?.position ?? "?", rosteredBy: rosteredByPlayerId.get(row.player_id) ?? null })),
       sampleErrorText: sampleResult.error?.message ?? null,
     };
   }),
