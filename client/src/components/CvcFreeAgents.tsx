@@ -95,13 +95,18 @@ export function CvcFreeAgents() {
   const [matchingRightsOnly, setMatchingRightsOnly] = useState(false);
   const activeColumns = columnsForPosition(position);
 
+  const overview = trpc.league.overview.useQuery();
+  const currentSeasonYear = overview.data?.season?.year ?? new Date().getFullYear();
+  const [selectedStatsYear, setSelectedStatsYear] = useState<number | null>(null);
+  const effectiveStatsYear = selectedStatsYear ?? currentSeasonYear;
+
   const queryPosition = position === "FLEX" ? undefined : position;
-  const freeAgentInput = useMemo(() => ({ search: search.trim() || undefined, position: queryPosition, limit: 1000, matchingRightsOnly: matchingRightsOnly || undefined }), [queryPosition, search, matchingRightsOnly]);
-  const allPlayersInput = useMemo(() => ({ search: search.trim() || undefined, position: queryPosition, limit: 1000 }), [queryPosition, search]);
+  const freeAgentInput = useMemo(() => ({ search: search.trim() || undefined, position: queryPosition, limit: 1000, matchingRightsOnly: matchingRightsOnly || undefined, year: effectiveStatsYear }), [queryPosition, search, matchingRightsOnly, effectiveStatsYear]);
+  const allPlayersInput = useMemo(() => ({ search: search.trim() || undefined, position: queryPosition, limit: 1000, year: effectiveStatsYear }), [queryPosition, search, effectiveStatsYear]);
 
   const freeAgentsPool = trpc.league.freeAgents.useQuery(freeAgentInput, { enabled: tab === "free-agents" });
   const allPlayersPool = trpc.league.allPlayers.useQuery(allPlayersInput, { enabled: tab === "all-players" });
-  const watchlistPool = trpc.league.watchlistPlayers.useQuery(undefined, { enabled: tab === "watchlist" && Boolean(owner?.franchise) });
+  const watchlistPool = trpc.league.watchlistPlayers.useQuery({ year: effectiveStatsYear }, { enabled: tab === "watchlist" && Boolean(owner?.franchise) });
   const watchlist = trpc.league.watchlist.useQuery(undefined, { enabled: Boolean(owner?.franchise) });
   const toggleWatch = trpc.league.toggleWatchlistPlayer.useMutation({ onSuccess: () => { utils.league.watchlist.invalidate(); utils.league.watchlistPlayers.invalidate(); } });
   const watchedIds = useMemo(() => new Set((watchlist.data ?? []).map(row => row.player_id)), [watchlist.data]);
@@ -209,6 +214,7 @@ export function CvcFreeAgents() {
           <label className="relative flex-1"><Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" /><input value={search} onChange={event => setSearch(event.target.value)} placeholder="Search player name" className="w-full rounded-md border border-slate-200 py-2.5 pl-9 pr-3 text-sm text-cvc-deep" /></label>
           <div className="flex flex-wrap gap-2">
             {tab === "free-agents" ? <button onClick={() => setMatchingRightsOnly(current => !current)} className={matchingRightsOnly ? "cvc-mini-button bg-cvc-deep text-white" : "cvc-mini-button"}><ShieldCheck size={13} /> Matching rights only</button> : null}
+            <div className="flex overflow-hidden rounded-md border border-slate-200">{[0, 1, 2, 3].map(yearsBack => currentSeasonYear - yearsBack).map(year => <button key={year} onClick={() => setSelectedStatsYear(year)} className={`px-2.5 py-1.5 text-xs font-bold ${effectiveStatsYear === year ? "bg-cvc-deep text-white" : "bg-white text-cvc-deep hover:bg-slate-50"}`}>{year}</button>)}</div>
           </div>
         </div>
         <div className="overflow-x-auto">

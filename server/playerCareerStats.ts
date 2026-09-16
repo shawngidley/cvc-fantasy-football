@@ -213,3 +213,33 @@ export function parseCvcGameLog(body: Record<string, unknown>, teamAbv: string, 
     })
     .sort((a, b) => a.gameDate.localeCompare(b.gameDate));
 }
+
+/** Maps the ESPN-gamelog-derived CvcSeasonStatRow shape (camelCase: passYds, gp,
+ * cvcPts...) onto the same field names cvc_season_stats_current / _historical /
+ * player_season_stat already use (snake_case: pass_yds, games_played,
+ * fantasy_points...), so a past-season (ESPN) result and a current-season (database)
+ * result can be handled identically by any caller. Single, shared, tested source for
+ * this mapping -- exists specifically so every field always gets included: an object
+ * literal silently missing one key is not a type error, just a field that quietly
+ * defaults wrong in the database every time this runs, which is exactly the kind of
+ * bug this function (and its own test) is meant to catch immediately instead of after
+ * a report that some particular stat "looks wrong." */
+export function toCvcSeasonStatsShape(row: CvcSeasonStatRow): {
+  games_played: number;
+  pass_yds: number | null; pass_td: number | null; pass_int: number | null;
+  rush_att: number | null; rush_yds: number | null; rush_td: number | null;
+  targets: number | null; receptions: number | null; rec_yds: number | null; rec_td: number | null;
+  fg_made: number | null; xp_made: number | null;
+  sacks: number | null; def_int: number | null; def_td: number | null;
+  fantasy_points: number; fantasy_points_per_game: number;
+} {
+  return {
+    games_played: row.gp,
+    pass_yds: row.passYds ?? null, pass_td: row.passTD ?? null, pass_int: row.passInt ?? null,
+    rush_att: row.rushAtt ?? null, rush_yds: row.rushYds ?? null, rush_td: row.rushTD ?? null,
+    targets: row.recTargets ?? null, receptions: row.rec ?? null, rec_yds: row.recYds ?? null, rec_td: row.recTD ?? null,
+    fg_made: row.fgMade ?? null, xp_made: row.xpMade ?? null,
+    sacks: row.sacks ?? null, def_int: row.defInt ?? null, def_td: row.defTD ?? null,
+    fantasy_points: row.cvcPts, fantasy_points_per_game: row.cvcPtsPerGame,
+  };
+}

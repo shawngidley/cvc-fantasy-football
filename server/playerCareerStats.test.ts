@@ -1,5 +1,5 @@
 import { describe, expect, it, vi, afterEach } from "vitest";
-import { getCvcPlayerCareerStats } from "./playerCareerStats";
+import { getCvcPlayerCareerStats, toCvcSeasonStatsShape, type CvcSeasonStatRow } from "./playerCareerStats";
 
 const QB_LABELS = ["CMP", "ATT", "YDS", "CMP%", "AVG", "TD", "INT", "LNG", "SACK", "RTG", "QBR", "CAR", "YDS", "AVG", "TD", "LNG"];
 const RB_LABELS = ["CAR", "YDS", "AVG", "TD", "LNG", "REC", "TGTS", "YDS", "AVG", "TD", "LNG"];
@@ -101,5 +101,52 @@ describe("getCvcPlayerCareerStats", () => {
     const rows = await getCvcPlayerCareerStats("12345", "QB", passRules, 2026, 1);
     // 300 * 0.04 + 3 * 4 - 1 * 2 = 12 + 12 - 2 = 22
     expect(rows[0].cvcPts).toBeCloseTo(22, 1);
+  });
+});
+
+describe("toCvcSeasonStatsShape (single shared mapping used by both the Free Agents backfill and the Lineup page's historical-years lookup -- exists specifically to catch a field silently missing from the output object, the exact class of bug that made gp/games_played write as 0 for every player in WRC despite being computed correctly)", () => {
+  const fullRow: CvcSeasonStatRow = {
+    season: 2024, team: "BUF", gp: 15,
+    passYds: 4200, passTD: 32, passInt: 10, passAtt: 550, passCmp: 380, passCmpPct: 69.1,
+    rushYds: 520, rushTD: 6, rushAtt: 90, rushAvg: 5.8,
+    rec: 0, recYds: 0, recTD: 0, recTargets: 0, recAvg: 0,
+    fgMade: 0, fgAtt: 0, fgPct: 0, xpMade: 0, xpAtt: 0,
+    sacks: 0, defInt: 0, defTD: 0, fumblesRecovered: 0,
+    cvcPts: 312.5, cvcPtsPerGame: 20.83,
+  };
+
+  it("includes every expected output field -- explicit, exhaustive key check, not just a spot-check of a few fields", () => {
+    const result = toCvcSeasonStatsShape(fullRow);
+    const expectedKeys = [
+      "games_played",
+      "pass_yds", "pass_td", "pass_int",
+      "rush_att", "rush_yds", "rush_td",
+      "targets", "receptions", "rec_yds", "rec_td",
+      "fg_made", "xp_made",
+      "sacks", "def_int", "def_td",
+      "fantasy_points", "fantasy_points_per_game",
+    ].sort();
+    expect(Object.keys(result).sort()).toEqual(expectedKeys);
+  });
+
+  it("maps games_played (gp) correctly -- the exact field that silently went missing in WRC, defaulting to 0 regardless of the real value", () => {
+    expect(toCvcSeasonStatsShape(fullRow).games_played).toBe(15);
+    expect(toCvcSeasonStatsShape({ ...fullRow, gp: 0 }).games_played).toBe(0);
+  });
+
+  it("maps every other field to its correct snake_case counterpart with the real values", () => {
+    const result = toCvcSeasonStatsShape(fullRow);
+    expect(result.pass_yds).toBe(4200);
+    expect(result.pass_td).toBe(32);
+    expect(result.rush_yds).toBe(520);
+    expect(result.fantasy_points).toBe(312.5);
+    expect(result.fantasy_points_per_game).toBe(20.83);
+  });
+
+  it("maps an unset (undefined) source field to null, not 0 or undefined", () => {
+    const sparse: CvcSeasonStatRow = { season: 2024, gp: 10, cvcPts: 50, cvcPtsPerGame: 5 };
+    const result = toCvcSeasonStatsShape(sparse);
+    expect(result.pass_yds).toBeNull();
+    expect(result.sacks).toBeNull();
   });
 });

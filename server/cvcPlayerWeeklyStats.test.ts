@@ -8,6 +8,24 @@ const rules: CvcScoringRule[] = [
 ];
 
 describe("extractWeeklyStatRow", () => {
+  const EXPECTED_KEYS = [
+    "games_played",
+    "pass_yds", "pass_td", "pass_int",
+    "rush_att", "rush_yds", "rush_td",
+    "targets", "receptions", "rec_yds", "rec_td",
+    "fg_made", "xp_made",
+    "sacks", "def_int", "def_td",
+    "fantasy_points",
+  ].sort();
+
+  it("includes every expected field for a null stat line -- explicit, exhaustive key check, not just a spot-check", () => {
+    expect(Object.keys(extractWeeklyStatRow(null, "QB", rules)).sort()).toEqual(EXPECTED_KEYS);
+  });
+
+  it("includes every expected field for a real stat line too", () => {
+    expect(Object.keys(extractWeeklyStatRow({ Passing: { passYds: 300, passTD: 2 } }, "QB", rules)).sort()).toEqual(EXPECTED_KEYS);
+  });
+
   it("marks games_played 0 and leaves every stat field null when there's no stat line at all (bye, injury, inactive)", () => {
     const row = extractWeeklyStatRow(null, "QB", rules);
     expect(row.games_played).toBe(0);

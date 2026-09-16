@@ -124,6 +124,43 @@ export async function readSeasonStatsFromWeekly(seasonId: string, playerIds: str
   return result;
 }
 
+/** Recomputes and upserts cvc_season_stats_current for every given player, from their
+ * cvc_player_weekly_stat rows for this season -- the read side (Free Agents, All
+ * Players, Watchlist, Lineup) then becomes a plain table lookup instead of summing
+ * potentially hundreds of players' rows on every request. Called right after
+ * persistWeeklyStats writes a week's rows, not on a separate daily cron -- there's
+ * exactly one clear, infrequent point where new weekly data lands (weekly
+ * finalization), so refreshing there keeps this table always current rather than
+ * stale for up to a day. Gracefully degrades (no-op) if either table's migration
+ * hasn't been run yet, same as the read/write functions above. */
+export async function refreshSeasonStatsCurrent(seasonId: string, playerIds: string[]): Promise<{ playersRefreshed: number }> {
+  if (!playerIds.length) return { playersRefreshed: 0 };
+  const weekly = await readSeasonStatsFromWeekly(seasonId, playerIds);
+  if (!weekly.size) return { playersRefreshed: 0 };
+  const rows = Array.from(weekly).map(([playerId, stats]) => ({ season_id: seasonId, player_id: playerId, ...stats, updated_at: new Date().toISOString() }));
+  const result = await supabase.from("cvc_season_stats_current").upsert(rows, { onConflict: "season_id,player_id" });
+  if (result.error) return { playersRefreshed: 0 }; // e.g. this table's migration hasn't been run yet
+  return { playersRefreshed: rows.length };
+}
+
+/** Plain lookup against the precomputed cvc_season_stats_current table -- no summing,
+ * just a read. Prefer this over readSeasonStatsFromWeekly wherever the precomputed
+ * table is expected to be populated (i.e. after refreshSeasonStatsCurrent has run at
+ * least once) -- same data, but O(1) per player instead of summing every week's rows
+ * on every request, which matters once a page can show hundreds of players at once
+ * (Free Agents, All Players, Watchlist). Falls back to nothing found rather than
+ * summing itself if the precomputed row is missing for a player who does have weekly
+ * rows -- callers that need a guaranteed-fresh result during any gap between weekly
+ * finalization and its own refresh call should use readSeasonStatsFromWeekly instead. */
+export async function readSeasonStatsCurrent(seasonId: string, playerIds: string[]): Promise<Map<string, CvcSeasonStatsFromWeekly>> {
+  if (!playerIds.length) return new Map();
+  const result = await supabase.from("cvc_season_stats_current").select("player_id, games_played, pass_yds, pass_td, pass_int, rush_att, rush_yds, rush_td, targets, receptions, rec_yds, rec_td, fg_made, xp_made, sacks, def_int, def_td, fantasy_points, fantasy_points_per_game").eq("season_id", seasonId).in("player_id", playerIds);
+  const rows = result.error ? [] : (result.data ?? []); // e.g. this table's migration hasn't been run yet
+  const byPlayer = new Map<string, CvcSeasonStatsFromWeekly>();
+  for (const row of rows) byPlayer.set(row.player_id, row as CvcSeasonStatsFromWeekly);
+  return byPlayer;
+}
+
 export type WeeklyStatPlayer = { id: string; display_name: string; position: string | null; nfl_team: string | null };
 
 /** Persists one row per rostered player (starters AND bench -- the Lineup page shows
@@ -142,7 +179,7 @@ export async function persistWeeklyStats(params: {
   statLines: Map<string, Tank01LiveStats>;
   statLineKeyFor: (player: WeeklyStatPlayer) => string;
   rules: CvcScoringRule[];
-}): Promise<{ rowsWritten: number }> {
+}): Promise<{ rowsWritten: number; playerIdsWithActivity: string[] }> {
   const { seasonId, scheduleWeekId, weekNumber, players, statLines, statLineKeyFor, rules } = params;
   const seen = new Set<string>();
   const rows = players.filter(player => {
@@ -155,8 +192,8 @@ export async function persistWeeklyStats(params: {
     const row = extractWeeklyStatRow(statLine, position, rules);
     return { season_id: seasonId, schedule_week_id: scheduleWeekId, week_number: weekNumber, player_id: player.id, position, nfl_team: player.nfl_team, ...row };
   });
-  if (!rows.length) return { rowsWritten: 0 };
+  if (!rows.length) return { rowsWritten: 0, playerIdsWithActivity: [] };
   const result = await supabase.from("cvc_player_weekly_stat").upsert(rows, { onConflict: "schedule_week_id,player_id" });
-  if (result.error) return { rowsWritten: 0 }; // e.g. this table's migration hasn't been run yet -- never blocks weekly finalization itself, which this is called from
-  return { rowsWritten: rows.length };
+  if (result.error) return { rowsWritten: 0, playerIdsWithActivity: [] }; // e.g. this table's migration hasn't been run yet -- never blocks weekly finalization itself, which this is called from
+  return { rowsWritten: rows.length, playerIdsWithActivity: rows.filter(row => row.games_played > 0).map(row => row.player_id) };
 }

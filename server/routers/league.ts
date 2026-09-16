@@ -2,8 +2,9 @@ import { TRPCError } from "@trpc/server";
 import { z } from "zod";
 import { protectedProcedure, publicProcedure, router } from "../_core/trpc";
 import { getFantasyProsDataAdapter, getNFLDataAdapter, Tank01NFLDataAdapter } from "../nflDataAdapter";
-import { getCvcPlayerCareerStats, parseCvcGameLog, type CvcSeasonStatRow } from "../playerCareerStats";
-import { readSeasonStatsFromWeekly } from "../cvcPlayerWeeklyStats";
+import { getCvcPlayerCareerStats, parseCvcGameLog, toCvcSeasonStatsShape } from "../playerCareerStats";
+import { readSeasonStatsFromWeekly, readSeasonStatsCurrent } from "../cvcPlayerWeeklyStats";
+import { backfillHistoricalSeasonStats } from "../cvcSeasonStatsHistorical";
 import { headToHeadDelta } from "../cvcStandings";
 import { fantasyProsCacheStatus, getFantasyProsActivePlayerIds, getFantasyProsRookiePlayerIds } from "../fantasyProsCache";
 import { getFantasyProsInjuries, getFantasyProsNews, getFantasyProsProjections, getFantasyProsRanks, matchPlayerNameFromTitle } from "../fantasyProsNews";
@@ -145,10 +146,16 @@ async function applyRookieLotteryResults(lotteryId: string, draftId: string, rou
   unwrap(await supabase.from("rookie_draft_lottery").update({ results_applied: true, updated_at: new Date().toISOString() }).eq("id", lotteryId).select("id").single());
 }
 
-/** Attaches cached Tank01 season-total stats (see tank01SeasonStatsSync.ts) to a page
- * of player rows for display — a cheap join against the cache table, never a live
- * per-row Tank01 call. Players with no cached row yet (not synced) are left as-is. */
-async function attachSeasonStats<T extends { id: string }>(players: T[], seasonId: string): Promise<(T & { seasonStats?: Record<string, number | null> })[]> {
+/** Attaches season stats to a page of player rows for display -- a cheap join against
+ * a precomputed cache table, never a live per-row provider call. Year-aware: the
+ * current season prefers cvc_season_stats_current (populated directly from weekly
+ * finalization's own stat lines, covering the full player pool including free
+ * agents), falling back to the legacy player_season_stat (Tank01 season-aggregate
+ * sync) only for a player missing from the new table -- a transition safety net, not
+ * the steady-state path. A past year (2023 and later, excluding the current season)
+ * reads cvc_season_stats_historical instead, which has no such fallback since it's the
+ * only source for those years at all. Players with no row anywhere are left as-is. */
+async function attachSeasonStats<T extends { id: string }>(players: T[], seasonId: string, year?: number, currentSeasonYear?: number): Promise<(T & { seasonStats?: Record<string, number | null> })[]> {
   if (!players.length) return players;
   // A single .in() clause with up to 1000 player UUIDs (36+ chars each, plus URL
   // encoding) produces a URL long enough that Supabase/PostgREST rejects it outright
@@ -160,30 +167,28 @@ async function attachSeasonStats<T extends { id: string }>(players: T[], seasonI
   const playerIds = players.map(player => player.id);
   const batches: string[][] = [];
   for (let index = 0; index < playerIds.length; index += BATCH_SIZE) batches.push(playerIds.slice(index, index + BATCH_SIZE));
-  const results = await Promise.all(batches.map(batch => supabase.from("player_season_stat").select("player_id, games_played, pass_yds, pass_td, pass_int, rush_att, rush_yds, rush_td, targets, receptions, rec_yds, rec_td, fg_made, xp_made, sacks, def_int, def_td, fantasy_points, fantasy_points_per_game").eq("season_id", seasonId).in("player_id", batch)));
-  const rows = results.flatMap(result => unwrap(result) ?? []);
-  const byPlayerId = new Map(rows.map(row => [row.player_id, row]));
+
+  const isHistorical = year !== undefined && currentSeasonYear !== undefined && year !== currentSeasonYear;
+  const byPlayerId = new Map<string, Record<string, number | null>>();
+
+  if (isHistorical) {
+    const results = await Promise.all(batches.map(batch => supabase.from("cvc_season_stats_historical").select("player_id, games_played, pass_yds, pass_td, pass_int, rush_att, rush_yds, rush_td, targets, receptions, rec_yds, rec_td, fg_made, xp_made, sacks, def_int, def_td, fantasy_points, fantasy_points_per_game").eq("year", year).in("player_id", batch)));
+    for (const result of results) for (const row of (result.error ? [] : (result.data ?? []))) byPlayerId.set(row.player_id, row);
+  } else {
+    const currentResults = await Promise.all(batches.map(batch => supabase.from("cvc_season_stats_current").select("player_id, games_played, pass_yds, pass_td, pass_int, rush_att, rush_yds, rush_td, targets, receptions, rec_yds, rec_td, fg_made, xp_made, sacks, def_int, def_td, fantasy_points, fantasy_points_per_game").eq("season_id", seasonId).in("player_id", batch)));
+    for (const result of currentResults) for (const row of (result.error ? [] : (result.data ?? []))) byPlayerId.set(row.player_id, row);
+    const missingIds = playerIds.filter(id => !byPlayerId.has(id));
+    if (missingIds.length) {
+      const missingBatches: string[][] = [];
+      for (let index = 0; index < missingIds.length; index += BATCH_SIZE) missingBatches.push(missingIds.slice(index, index + BATCH_SIZE));
+      const legacyResults = await Promise.all(missingBatches.map(batch => supabase.from("player_season_stat").select("player_id, games_played, pass_yds, pass_td, pass_int, rush_att, rush_yds, rush_td, targets, receptions, rec_yds, rec_td, fg_made, xp_made, sacks, def_int, def_td, fantasy_points, fantasy_points_per_game").eq("season_id", seasonId).in("player_id", batch)));
+      for (const result of legacyResults) for (const row of (unwrap(result) ?? [])) byPlayerId.set(row.player_id, row);
+    }
+  }
   return players.map(player => {
     const stats = byPlayerId.get(player.id);
     return stats ? { ...player, seasonStats: stats } : player;
   });
-}
-
-/** Maps the ESPN-gamelog-derived CvcSeasonStatRow shape (camelCase: passYds, gp,
- * cvcPts...) onto the same field names player_season_stat / cvc_player_weekly_stat
- * already use (snake_case: pass_yds, games_played, fantasy_points...), so the client
- * can treat a past-season (ESPN) result and a current-season (database) result
- * identically. */
-function toLineupSeasonStatsShape(row: CvcSeasonStatRow) {
-  return {
-    games_played: row.gp,
-    pass_yds: row.passYds ?? null, pass_td: row.passTD ?? null, pass_int: row.passInt ?? null,
-    rush_att: row.rushAtt ?? null, rush_yds: row.rushYds ?? null, rush_td: row.rushTD ?? null,
-    targets: row.recTargets ?? null, receptions: row.rec ?? null, rec_yds: row.recYds ?? null, rec_td: row.recTD ?? null,
-    fg_made: row.fgMade ?? null, xp_made: row.xpMade ?? null,
-    sacks: row.sacks ?? null, def_int: row.defInt ?? null, def_td: row.defTD ?? null,
-    fantasy_points: row.cvcPts, fantasy_points_per_game: row.cvcPtsPerGame,
-  };
 }
 
 export const leagueRouter = router({
@@ -709,7 +714,7 @@ export const leagueRouter = router({
     return players;
   }),
 
-  freeAgents: publicProcedure.input(z.object({ search: z.string().trim().max(64).optional(), position: z.string().trim().max(12).optional(), limit: z.number().int().min(1).max(1000).optional(), matchingRightsOnly: z.boolean().optional() }).optional()).query(async ({ input }) => {
+  freeAgents: publicProcedure.input(z.object({ search: z.string().trim().max(64).optional(), position: z.string().trim().max(12).optional(), limit: z.number().int().min(1).max(1000).optional(), matchingRightsOnly: z.boolean().optional(), year: z.number().int().optional() }).optional()).query(async ({ input }) => {
     const { season } = await getCurrentLeagueAndSeason();
     const limit = input?.limit ?? 75;
     const eligiblePositions = ["QB", "RB", "WR", "TE", "K", "DST"];
@@ -742,7 +747,7 @@ export const leagueRouter = router({
       }
       tagged.sort((a, b) => a.display_name.localeCompare(b.display_name));
       const page = tagged.slice(0, limit);
-      return attachSeasonStats(page, season.id);
+      return attachSeasonStats(page, season.id, input?.year, season.year);
     }
 
     let playerQuery = supabase.from("player").select("id, provider, display_name, position, nfl_team, status, metadata").neq("provider", "placeholder").in("position", eligiblePositions).order("display_name").limit(limit + 220);
@@ -782,14 +787,14 @@ export const leagueRouter = router({
       const tag = latestCutTagByPlayerId.get(player.id);
       return tag ? { ...player, cutByFranchiseName: tag.franchiseName, cutTagType: tag.tagType } : player;
     });
-    return attachSeasonStats(tagged, season.id);
+    return attachSeasonStats(tagged, season.id, input?.year, season.year);
   }),
 
   // "All Players" tab equivalent -- same eligible-position pool as freeAgents, but
   // without excluding rostered players. Each rostered player is tagged with their
   // owning franchise name so the page can show "Rostered · <Franchise>" instead of
   // "Available".
-  allPlayers: publicProcedure.input(z.object({ search: z.string().trim().max(64).optional(), position: z.string().trim().max(12).optional(), limit: z.number().int().min(1).max(1000).optional() }).optional()).query(async ({ input }) => {
+  allPlayers: publicProcedure.input(z.object({ search: z.string().trim().max(64).optional(), position: z.string().trim().max(12).optional(), limit: z.number().int().min(1).max(1000).optional(), year: z.number().int().optional() }).optional()).query(async ({ input }) => {
     const { season } = await getCurrentLeagueAndSeason();
     const limit = input?.limit ?? 200;
     const eligiblePositions = ["QB", "RB", "WR", "TE", "K", "DST"];
@@ -814,12 +819,12 @@ export const leagueRouter = router({
       const franchise = franchiseByPlayerId.get(player.id);
       return franchise ? { ...player, rosteredByFranchiseName: franchise.name, rosteredByFranchiseAbbreviation: franchise.abbreviation } : player;
     });
-    return attachSeasonStats(tagged, season.id);
+    return attachSeasonStats(tagged, season.id, input?.year, season.year);
   }),
 
   // Watchlist tab: resolves the owner's saved player ids into full player + season-stat
   // rows, same shape as freeAgents/allPlayers so the page can render them identically.
-  watchlistPlayers: protectedProcedure.query(async ({ ctx }) => {
+  watchlistPlayers: protectedProcedure.input(z.object({ year: z.number().int().optional() }).optional()).query(async ({ ctx, input }) => {
     const owner = await getOwnerAccess({ openId: ctx.user.openId });
     if (!owner) throw new TRPCError({ code: "FORBIDDEN", message: "A CVC owner session is required." });
     const franchise = unwrap(await supabase.from("franchise").select("id").eq("current_owner_id", owner.id).eq("is_active", true).limit(1).maybeSingle());
@@ -828,7 +833,7 @@ export const leagueRouter = router({
     const watched = unwrap(await supabase.from("watchlist").select("player_id").eq("franchise_id", franchise.id)) ?? [];
     if (!watched.length) return [];
     const players = unwrap(await supabase.from("player").select("id, provider, display_name, position, nfl_team, status, metadata").in("id", watched.map(row => row.player_id))) ?? [];
-    return attachSeasonStats(players, season.id);
+    return attachSeasonStats(players, season.id, input?.year, season.year);
   }),
 
 
@@ -990,15 +995,21 @@ export const leagueRouter = router({
       fantasy_points: number; fantasy_points_per_game: number | null;
     }> = {};
     if (input.year === season.year) {
-      const weekly = await readSeasonStatsFromWeekly(season.id, input.players.map(player => player.playerId));
-      for (const [playerId, stats] of Array.from(weekly)) statsByPlayerId[playerId] = stats;
+      const playerIds = input.players.map(player => player.playerId);
+      const precomputed = await readSeasonStatsCurrent(season.id, playerIds);
+      for (const [playerId, stats] of Array.from(precomputed)) statsByPlayerId[playerId] = stats;
+      const missingIds = playerIds.filter(id => !precomputed.has(id));
+      if (missingIds.length) {
+        const weekly = await readSeasonStatsFromWeekly(season.id, missingIds);
+        for (const [playerId, stats] of Array.from(weekly)) statsByPlayerId[playerId] = stats;
+      }
       return { statsByPlayerId };
     }
     const rules = unwrap(await supabase.from("scoring_rule").select("stat_key, value, applies_to_positions").eq("season_id", season.id)) ?? [];
     await Promise.all(input.players.filter(player => player.espnId).map(async player => {
       const seasons = await getCvcPlayerCareerStats(player.espnId!, player.position, rules, input.year, 1).catch(() => []);
       const row = seasons.find(candidate => candidate.season === input.year);
-      if (row) statsByPlayerId[player.playerId] = toLineupSeasonStatsShape(row);
+      if (row) statsByPlayerId[player.playerId] = toCvcSeasonStatsShape(row);
     }));
     return { statsByPlayerId };
   }),
@@ -1177,6 +1188,15 @@ export const leagueRouter = router({
     await requireCommissioner({ openId: ctx.user.openId });
     const { season } = await getCurrentLeagueAndSeason();
     return syncTank01SeasonStats(season.id, input?.limit ?? 40);
+  }),
+
+  // One-time-per-year backfill of a fully completed past season's stats (2023-2025 and
+  // any future closed season) -- unlike syncSeasonStats above, a past season's real
+  // stats never change once the season is over, so once a player has a row for a given
+  // year here, they're never re-attempted for that same year at all.
+  backfillHistoricalSeasonStats: protectedProcedure.input(z.object({ year: z.number().int().min(2000).max(2100), limit: z.number().int().min(1).max(100).optional() })).mutation(async ({ ctx, input }) => {
+    await requireCommissioner({ openId: ctx.user.openId });
+    return backfillHistoricalSeasonStats(input.year, input.limit ?? 40);
   }),
 
   // Real game-by-game D/ST aggregation (see dstSeasonAggregation.ts) -- correctly
