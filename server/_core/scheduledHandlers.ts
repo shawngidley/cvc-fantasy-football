@@ -139,21 +139,24 @@ export async function runFantasyProsArchiveCollection(req: Request, res: Respons
   }
 }
 
-// Runs daily (see vercel.json). Idempotent and self-limiting: backfillHistoricalSeasonStats
-// skips any player who already has a row for a given year, so once every eligible
-// player has been backfilled for 2023-2025 this naturally becomes a no-op every day
-// after -- same self-healing shape as runDstSeasonStatsSync above, not a one-time
-// manual trigger. Processes a fixed batch per year per run (not the whole pool at
-// once) to stay well within this function's time limit; a large initial backlog
-// clears over several days' worth of runs rather than in one call.
+// Runs daily, once per historic year (see vercel.json -- three separate cron entries,
+// same path with a different ?year= query string each), matching WRC's exact
+// approach: a single-year-per-invocation endpoint, not one invocation looping through
+// every year at once. Idempotent and self-limiting either way --
+// backfillHistoricalSeasonStats skips any player who already has a row for that
+// specific year, so once every eligible player has been backfilled for a given year
+// this naturally becomes a no-op every day after, the same self-healing shape as
+// runDstSeasonStatsSync above.
 export async function runHistoricalSeasonStatsBackfill(req: Request, res: Response) {
   if (!checkCronAuth(req, res)) return;
   try {
-    const currentYear = new Date().getFullYear();
-    const years = [currentYear - 3, currentYear - 2, currentYear - 1];
-    const results: Record<number, Awaited<ReturnType<typeof backfillHistoricalSeasonStats>>> = {};
-    for (const year of years) results[year] = await backfillHistoricalSeasonStats(year, 40);
-    res.json({ ok: true, results });
+    const year = Number(req.query.year);
+    if (!Number.isInteger(year) || year < 2000 || year > 2100) {
+      res.status(400).json({ error: "A valid ?year= query parameter is required." });
+      return;
+    }
+    const result = await backfillHistoricalSeasonStats(year, 40);
+    res.json({ ok: true, year, ...result });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     console.error("Historical season stats backfill failed", error);

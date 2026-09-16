@@ -387,11 +387,13 @@ function checkCronAuth(req, res) {
 async function runHistoricalSeasonStatsBackfill(req, res) {
   if (!checkCronAuth(req, res)) return;
   try {
-    const currentYear = (/* @__PURE__ */ new Date()).getFullYear();
-    const years = [currentYear - 3, currentYear - 2, currentYear - 1];
-    const results = {};
-    for (const year of years) results[year] = await backfillHistoricalSeasonStats(year, 40);
-    res.json({ ok: true, results });
+    const year = Number(req.query.year);
+    if (!Number.isInteger(year) || year < 2e3 || year > 2100) {
+      res.status(400).json({ error: "A valid ?year= query parameter is required." });
+      return;
+    }
+    const result = await backfillHistoricalSeasonStats(year, 40);
+    res.json({ ok: true, year, ...result });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     console.error("Historical season stats backfill failed", error);
