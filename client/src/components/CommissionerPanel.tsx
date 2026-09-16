@@ -149,34 +149,6 @@ function SeasonStatsSyncModule() {
       await utils.league.freeAgents.invalidate();
     }
   };
-  const [historicalYear, setHistoricalYear] = useState(new Date().getFullYear() - 1);
-  const backfillHistorical = trpc.league.backfillHistoricalSeasonStats.useMutation({
-    onSuccess: data => {
-      toast.success(`Backfilled ${data.updated} of ${data.attempted} players for ${historicalYear}${data.notFound ? ` (${data.notFound} not found)` : ""}.${data.remaining ? ` ${data.remaining} still pending — click again to continue.` : ` All players are backfilled for ${historicalYear}.`}`);
-    },
-    onError: error => toast.error(error.message),
-  });
-  const [autoBackfilling, setAutoBackfilling] = useState(false);
-  const [autoBackfillProgress, setAutoBackfillProgress] = useState<{ totalUpdated: number; totalAttempted: number } | null>(null);
-  const backfillAllHistorical = async () => {
-    setAutoBackfilling(true);
-    let totalUpdated = 0; let totalAttempted = 0;
-    try {
-      for (let i = 0; i < 60; i += 1) {
-        const result = await backfillHistorical.mutateAsync({ year: historicalYear });
-        totalUpdated += result.updated; totalAttempted += result.attempted;
-        setAutoBackfillProgress({ totalUpdated, totalAttempted });
-        if (result.status === "completed") { toast.success(`${historicalYear} fully backfilled — ${totalUpdated} total.`); break; }
-      }
-    } finally {
-      setAutoBackfilling(false);
-    }
-  };
-
-  const rebuildCurrent = trpc.league.rebuildSeasonStatsCurrent.useMutation({
-    onSuccess: data => toast.success(`Rebuilt current-season totals for ${data.playersRebuilt} player(s).`),
-    onError: error => toast.error(error.message),
-  });
 
   const [rookieResult, setRookieResult] = useState<null | { countByPosition: Record<string, number>; matchedInDb: number; notYetSynced: number; flaggedNow: number; clearedStale: number; errors: Record<string, string>; samplePlayers?: Record<string, unknown> }>(null);
   const [activeResult, setActiveResult] = useState<null | { teamsProcessed: number; totalRosterPlayers: number; matchedByStoredId: number; matchedByNameNewlyLinked: number; matchedDst: number; errors: Record<string, string>; sampleRosterPlayer?: unknown }>(null);
@@ -355,21 +327,6 @@ function SeasonStatsSyncModule() {
       <p className="text-sm font-semibold text-cvc-deep">Season stats sync</p>
       <p className="mt-1 text-xs leading-5 text-slate-500">Pulls season-total stats from Tank01 for every rostered and free-agent CVC player (QB/RB/WR/TE/K/DST), caches them for display on Free Agents, and updates each player's current NFL team on their CVC record (skipped for D/ST, since that record is the team itself). Each click processes up to 40 players who haven't been synced in the last 12 hours — click repeatedly until "All players are up to date" if the pool is large.</p>
       <div className="mt-3 flex flex-wrap items-center gap-3"><button type="button" className="cvc-button-compact" disabled={sync.isPending || autoSyncing} onClick={() => sync.mutate({})}><Save size={14} /> {sync.isPending && !autoSyncing ? "Syncing…" : "Sync next batch"}</button><button type="button" className="cvc-button-secondary" disabled={sync.isPending || autoSyncing} onClick={syncAll}>{autoSyncing ? "Syncing all…" : "Sync all players"}</button>{autoProgress ? <span className="text-xs text-slate-500">{autoProgress.totalUpdated} of {autoProgress.totalAttempted} synced so far{autoSyncing ? "…" : "."}</span> : null}</div>
-    </div>
-    <div className="rounded-lg border border-dashed border-cvc-deep/20 bg-cvc-tint p-4">
-      <p className="text-sm font-semibold text-cvc-deep">Historical season stats backfill</p>
-      <p className="mt-1 text-xs leading-5 text-slate-500">One-time-per-year backfill for a fully completed past season (2023-2025), pulled from ESPN's public gamelog. Unlike the current-season sync above, a past season's real stats never change once it's over, so once a player has a row for a given year, they're never re-fetched for that year again -- run each year once. D/ST is not included (ESPN's gamelog is for individual players, not team defenses, which have no individual ESPN ID to look up).</p>
-      <div className="mt-3 flex flex-wrap items-center gap-3">
-        <label className="text-xs font-bold uppercase tracking-[0.06em] text-slate-600">Year<input type="number" value={historicalYear} onChange={event => setHistoricalYear(Number(event.target.value))} className="ml-2 w-20 rounded-md border border-slate-300 px-2 py-1.5 text-sm"/></label>
-        <button type="button" className="cvc-button-compact" disabled={backfillHistorical.isPending || autoBackfilling} onClick={() => backfillHistorical.mutate({ year: historicalYear })}><Save size={14} /> {backfillHistorical.isPending && !autoBackfilling ? "Backfilling…" : "Backfill next batch"}</button>
-        <button type="button" className="cvc-button-secondary" disabled={backfillHistorical.isPending || autoBackfilling} onClick={backfillAllHistorical}>{autoBackfilling ? "Backfilling all…" : `Backfill all of ${historicalYear}`}</button>
-        {autoBackfillProgress ? <span className="text-xs text-slate-500">{autoBackfillProgress.totalUpdated} of {autoBackfillProgress.totalAttempted} backfilled so far{autoBackfilling ? "…" : "."}</span> : null}
-      </div>
-    </div>
-    <div className="rounded-lg border border-dashed border-cvc-deep/20 bg-cvc-tint p-4">
-      <p className="text-sm font-semibold text-cvc-deep">Rebuild current-season stat totals</p>
-      <p className="mt-1 text-xs leading-5 text-slate-500">One-time (or run whenever you want a full resync) bulk rebuild of every player's current-season total from their already-finalized weekly stat lines, in a single pass -- much faster than "Recompute week N" separately for every past week just to fully populate season totals for everyone. Weekly finalization already keeps this current going forward on its own; use this mainly to backfill after finalizing several past weeks at once, or if something looks off.</p>
-      <button type="button" className="cvc-button-compact mt-3" disabled={rebuildCurrent.isPending} onClick={() => rebuildCurrent.mutate()}><Save size={14} /> {rebuildCurrent.isPending ? "Rebuilding…" : "Rebuild season totals"}</button>
     </div>
     <div className="rounded-lg border border-dashed border-cvc-deep/20 bg-cvc-tint p-4">
       <p className="text-sm font-semibold text-cvc-deep">FantasyPros players</p>

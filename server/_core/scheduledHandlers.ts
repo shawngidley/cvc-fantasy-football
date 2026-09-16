@@ -7,6 +7,8 @@ import { syncNflTeamSchedules } from "../nflTeamScheduleSync";
 import { archiveFantasyProsNews } from "../fantasyProsArchive";
 import { attachFantasyProsPlayerNames } from "../fantasyProsNewsNames";
 import { getFantasyProsNews, getFantasyProsRanks } from "../fantasyProsNews";
+import { backfillHistoricalSeasonStats } from "../cvcSeasonStatsHistorical";
+import { rebuildSeasonStatsCurrentForAllPlayers } from "../cvcPlayerWeeklyStats";
 import { supabase, unwrap } from "../supabase";
 
 function checkCronAuth(req: Request, res: Response): boolean {
@@ -133,6 +135,48 @@ export async function runFantasyProsArchiveCollection(req: Request, res: Respons
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     console.error("FantasyPros archive collection failed", error);
+    res.status(500).json({ error: message, timestamp: new Date().toISOString() });
+  }
+}
+
+// Runs daily (see vercel.json). Idempotent and self-limiting: backfillHistoricalSeasonStats
+// skips any player who already has a row for a given year, so once every eligible
+// player has been backfilled for 2023-2025 this naturally becomes a no-op every day
+// after -- same self-healing shape as runDstSeasonStatsSync above, not a one-time
+// manual trigger. Processes a fixed batch per year per run (not the whole pool at
+// once) to stay well within this function's time limit; a large initial backlog
+// clears over several days' worth of runs rather than in one call.
+export async function runHistoricalSeasonStatsBackfill(req: Request, res: Response) {
+  if (!checkCronAuth(req, res)) return;
+  try {
+    const currentYear = new Date().getFullYear();
+    const years = [currentYear - 3, currentYear - 2, currentYear - 1];
+    const results: Record<number, Awaited<ReturnType<typeof backfillHistoricalSeasonStats>>> = {};
+    for (const year of years) results[year] = await backfillHistoricalSeasonStats(year, 40);
+    res.json({ ok: true, results });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.error("Historical season stats backfill failed", error);
+    res.status(500).json({ error: message, timestamp: new Date().toISOString() });
+  }
+}
+
+// Runs daily (see vercel.json). A safety net on top of the inline, incremental refresh
+// that already runs right after each week's finalization (tank01ScoringSync.ts) --
+// covers the case where that inline refresh silently failed for some player (a
+// transient error, a timing issue) by re-aggregating everyone's cvc_player_weekly_stat
+// rows from scratch. Fast and idempotent (a plain upsert), so running it daily
+// regardless of whether anything actually changed is cheap.
+export async function runSeasonStatsCurrentRebuild(req: Request, res: Response) {
+  if (!checkCronAuth(req, res)) return;
+  try {
+    const season = await getCurrentSeason();
+    if (!season) { res.json({ ok: true, status: "skipped", reason: "No current season found." }); return; }
+    const result = await rebuildSeasonStatsCurrentForAllPlayers(season.id);
+    res.json({ ok: true, ...result });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.error("Season stats current rebuild failed", error);
     res.status(500).json({ error: message, timestamp: new Date().toISOString() });
   }
 }

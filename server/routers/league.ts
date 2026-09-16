@@ -3,8 +3,7 @@ import { z } from "zod";
 import { protectedProcedure, publicProcedure, router } from "../_core/trpc";
 import { getFantasyProsDataAdapter, getNFLDataAdapter, Tank01NFLDataAdapter } from "../nflDataAdapter";
 import { getCvcPlayerCareerStats, parseCvcGameLog, toCvcSeasonStatsShape } from "../playerCareerStats";
-import { readSeasonStatsFromWeekly, readSeasonStatsCurrent, rebuildSeasonStatsCurrentForAllPlayers } from "../cvcPlayerWeeklyStats";
-import { backfillHistoricalSeasonStats } from "../cvcSeasonStatsHistorical";
+import { readSeasonStatsFromWeekly, readSeasonStatsCurrent } from "../cvcPlayerWeeklyStats";
 import { headToHeadDelta } from "../cvcStandings";
 import { fantasyProsCacheStatus, getFantasyProsActivePlayerIds, getFantasyProsRookiePlayerIds } from "../fantasyProsCache";
 import { getFantasyProsInjuries, getFantasyProsNews, getFantasyProsProjections, getFantasyProsRanks, matchPlayerNameFromTitle } from "../fantasyProsNews";
@@ -1188,25 +1187,6 @@ export const leagueRouter = router({
     await requireCommissioner({ openId: ctx.user.openId });
     const { season } = await getCurrentLeagueAndSeason();
     return syncTank01SeasonStats(season.id, input?.limit ?? 40);
-  }),
-
-  // One-time-per-year backfill of a fully completed past season's stats (2023-2025 and
-  // any future closed season) -- unlike syncSeasonStats above, a past season's real
-  // stats never change once the season is over, so once a player has a row for a given
-  // year here, they're never re-attempted for that same year at all.
-  backfillHistoricalSeasonStats: protectedProcedure.input(z.object({ year: z.number().int().min(2000).max(2100), limit: z.number().int().min(1).max(100).optional() })).mutation(async ({ ctx, input }) => {
-    await requireCommissioner({ openId: ctx.user.openId });
-    return backfillHistoricalSeasonStats(input.year, input.limit ?? 40);
-  }),
-
-  // One-time (or "run whenever you want a full resync") bulk rebuild of
-  // cvc_season_stats_current for every player who has any cvc_player_weekly_stat rows
-  // this season -- much faster than triggering the per-week incremental refresh
-  // separately for every already-finalized week to fully populate the table.
-  rebuildSeasonStatsCurrent: protectedProcedure.mutation(async ({ ctx }) => {
-    await requireCommissioner({ openId: ctx.user.openId });
-    const { season } = await getCurrentLeagueAndSeason();
-    return rebuildSeasonStatsCurrentForAllPlayers(season.id);
   }),
 
   // Real game-by-game D/ST aggregation (see dstSeasonAggregation.ts) -- correctly
