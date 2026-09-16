@@ -269,7 +269,15 @@ export async function syncTank01Scores(now = new Date(), forceWeekNumber?: numbe
     let fullPlayerPoolQuery = supabase.from("player").select("id, display_name, position, nfl_team").neq("provider", "placeholder").in("position", ELIGIBLE_STAT_POSITIONS);
     const mostRecentPlayerSync = unwrap(await supabase.from("player").select("last_seen_at").not("last_seen_at", "is", null).order("last_seen_at", { ascending: false }).limit(1).maybeSingle());
     if (mostRecentPlayerSync?.last_seen_at) fullPlayerPoolQuery = fullPlayerPoolQuery.gte("last_seen_at", mostRecentPlayerSync.last_seen_at);
-    const fullPlayerPool = unwrap(await fullPlayerPoolQuery) ?? [];
+    const activeFreeAgentPool = unwrap(await fullPlayerPoolQuery) ?? [];
+    // Every currently-rostered player must always get a weekly row, regardless of the
+    // active-player filter above -- someone owns them, so their season stats matter
+    // unconditionally, unlike a long-retired free agent that filter is meant to skip
+    // for efficiency. Confirmed as a real gap: the active-only pool alone left 56 of
+    // 174 rostered players with no weekly row at all.
+    const rosteredPlayers = snapshots.map(entry => Array.isArray(entry.player) ? entry.player[0] : entry.player).filter((player): player is WeeklyStatPlayer => Boolean(player));
+    const seenPlayerIds = new Set(rosteredPlayers.map(player => player.id));
+    const fullPlayerPool = [...rosteredPlayers, ...activeFreeAgentPool.filter(player => !seenPlayerIds.has(player.id))];
     const persistResult = await persistWeeklyStats({
       seasonId: season.id,
       scheduleWeekId: week.id,
