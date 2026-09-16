@@ -270,9 +270,12 @@ export const leagueRouter = router({
       return left.display_order - right.display_order;
     });
 
+    const currentWeekRow = seasonData ? await resolveEffectivePlanningWeek(weekRows, seasonData.id) : null;
+
     return {
       league: leagueData,
       season: seasonData,
+      currentWeekNumber: currentWeekRow?.week_number ?? null,
       franchises: franchisesWithRecord,
       matchups: matchupRows.map(matchup => ({
         ...matchup,
