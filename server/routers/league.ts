@@ -1155,6 +1155,34 @@ export const leagueRouter = router({
   // Debug-only: shows every cvc_week_planning_cutoff row for the current season, the
   // actual value getCurrentPlanningWeek returns right now, and (for comparison) the
   // old status-based week. Not used by any real feature.
+  // Debug-only: shows every player row matching a name, plus everything referencing
+  // each one (roster history, contracts, weekly stats, season stats, faab bids) so a
+  // deletion decision can be made safely rather than guessing. Not used by any real
+  // feature.
+  debugPlayerDuplicateCheck: publicProcedure.input(z.object({ name: z.string() })).query(async ({ input }) => {
+    const players = unwrap(await supabase.from("player").select("id, display_name, position, nfl_team, status, provider, last_seen_at, metadata").ilike("display_name", `%${input.name}%`)) ?? [];
+    const results = await Promise.all(players.map(async player => {
+      const [rosterHistory, contracts, weeklyStats, seasonStatsCurrent, seasonStatsHistorical, faabBids] = await Promise.all([
+        supabase.from("roster_assignment").select("id, season_id, franchise_id, released_at, acquired_via").eq("player_id", player.id),
+        supabase.from("player_contract").select("id, season_id, franchise_id, contract_status, salary").eq("player_id", player.id),
+        supabase.from("cvc_player_weekly_stat").select("id", { count: "exact", head: true }).eq("player_id", player.id),
+        supabase.from("cvc_season_stats_current").select("id", { count: "exact", head: true }).eq("player_id", player.id),
+        supabase.from("cvc_season_stats_historical").select("id", { count: "exact", head: true }).eq("player_id", player.id),
+        supabase.from("faab_bid").select("id", { count: "exact", head: true }).eq("player_id", player.id),
+      ]);
+      return {
+        player,
+        rosterHistory: unwrap(rosterHistory) ?? [],
+        contracts: unwrap(contracts) ?? [],
+        weeklyStatRowCount: weeklyStats.count ?? 0,
+        seasonStatsCurrentRowCount: seasonStatsCurrent.count ?? 0,
+        seasonStatsHistoricalRowCount: seasonStatsHistorical.count ?? 0,
+        faabBidRowCount: faabBids.count ?? 0,
+      };
+    }));
+    return results;
+  }),
+
   debugPlanningWeekCheck: publicProcedure.query(async () => {
     const { season } = await getCurrentLeagueAndSeason();
     const now = new Date().toISOString();

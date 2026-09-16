@@ -241,6 +241,8 @@ function SeasonStatsSyncModule() {
   const historicalCheck = trpc.league.debugHistoricalStatsCheck.useQuery({ year: debugHistoricalYear });
   const currentSeasonCheck = trpc.league.debugCurrentSeasonPipelineCheck.useQuery();
   const planningWeekCheck = trpc.league.debugPlanningWeekCheck.useQuery();
+  const [debugPlayerName, setDebugPlayerName] = useState("Antonio Williams");
+  const playerDuplicateCheck = trpc.league.debugPlayerDuplicateCheck.useQuery({ name: debugPlayerName });
   const waiverPeriodCheck = trpc.league.debugWaiverPeriodCheck.useQuery();
   const snapshotVsCurrent = trpc.league.debugSnapshotVsCurrentLineup.useQuery({ weekNumber: forceWeekNumber });
   const forceRecomputeWeek = trpc.league.forceRecomputeWeek.useMutation({
@@ -312,6 +314,13 @@ function SeasonStatsSyncModule() {
     <div className="rounded-lg border border-dashed border-amber-400/40 bg-amber-50 p-4">
       <p className="text-sm font-semibold text-cvc-deep">Debug: planning week check</p>
       <pre className="mt-2 max-h-96 overflow-auto whitespace-pre-wrap break-all rounded bg-white p-2 text-[10px]">{planningWeekCheck.isLoading ? "Loading…" : planningWeekCheck.isError ? `ERROR: ${planningWeekCheck.error?.message ?? "unknown error"}` : JSON.stringify(planningWeekCheck.data, null, 2) || "(empty result)"}</pre>
+    </div>
+    <div className="rounded-lg border border-dashed border-amber-400/40 bg-amber-50 p-4">
+      <p className="text-sm font-semibold text-cvc-deep">Debug: player duplicate check</p>
+      <div className="mt-2 flex items-center gap-2">
+        <input type="text" value={debugPlayerName} onChange={event => setDebugPlayerName(event.target.value)} className="w-48 rounded border border-slate-300 px-2 py-1.5 text-sm"/>
+      </div>
+      <pre className="mt-2 max-h-96 overflow-auto whitespace-pre-wrap break-all rounded bg-white p-2 text-[10px]">{playerDuplicateCheck.isLoading ? "Loading…" : playerDuplicateCheck.isError ? `ERROR: ${playerDuplicateCheck.error?.message ?? "unknown error"}` : JSON.stringify(playerDuplicateCheck.data, null, 2) || "(empty result)"}</pre>
     </div>
     <div className="rounded-lg border border-dashed border-amber-400/40 bg-amber-50 p-4">
       <p className="text-sm font-semibold text-cvc-deep">Debug: waiver period check</p>
