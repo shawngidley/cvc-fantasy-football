@@ -1137,6 +1137,8 @@ export const leagueRouter = router({
     const rosteredRows = samplePlayerIds.length ? unwrap(await supabase.from("roster_assignment").select("player_id, franchise:franchise_id(name)").eq("season_id", season.id).is("released_at", null).in("player_id", samplePlayerIds)) ?? [] : [];
     const rosteredByPlayerId = new Map(rosteredRows.map((row: any) => [row.player_id, Array.isArray(row.franchise) ? row.franchise[0]?.name : row.franchise?.name]));
     const playerById = new Map(playerRows.map(row => [row.id, row]));
+    const attachTestPlayer = playerRows.find(row => !rosteredByPlayerId.has(row.id)) ?? playerRows[0] ?? null;
+    const attachTestResult = attachTestPlayer ? await attachSeasonStats([{ id: attachTestPlayer.id }], season.id, input.year, season.year) : null;
     return {
       migrationLikelyMissing: Boolean(migrationExistsCheck.error),
       migrationErrorText: migrationExistsCheck.error?.message ?? null,
@@ -1144,6 +1146,7 @@ export const leagueRouter = router({
       countErrorText: countResult.error?.message ?? null,
       sampleRows: (sampleResult.data ?? []).map(row => ({ ...row, display_name: playerById.get(row.player_id)?.display_name ?? "?", position: playerById.get(row.player_id)?.position ?? "?", rosteredBy: rosteredByPlayerId.get(row.player_id) ?? null })),
       sampleErrorText: sampleResult.error?.message ?? null,
+      attachSeasonStatsTest: attachTestPlayer ? { testedPlayer: attachTestPlayer.display_name, calledWith: { year: input.year, currentSeasonYear: season.year }, result: attachTestResult } : null,
     };
   }),
 
