@@ -107,8 +107,11 @@ export async function runTeamScheduleSync(req: Request, res: Response) {
   try {
     const season = await getCurrentSeason();
     if (!season) { res.json({ ok: true, status: "skipped", reason: "No current season found." }); return; }
-    const result = await syncNflTeamSchedules(season.year);
-    res.json({ ok: true, ...result });
+    const [teamScheduleResult, planningWeekResult] = await Promise.all([
+      syncNflTeamSchedules(season.year),
+      syncPlanningWeekCutoffs(season.id, season.year).catch(error => ({ error: error instanceof Error ? error.message : String(error) })),
+    ]);
+    res.json({ ok: true, ...teamScheduleResult, planningWeekCutoff: planningWeekResult });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     console.error("NFL team schedule sync failed", error);
@@ -181,26 +184,6 @@ export async function runSeasonStatsCurrentRebuild(req: Request, res: Response) 
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     console.error("Season stats current rebuild failed", error);
-    res.status(500).json({ error: message, timestamp: new Date().toISOString() });
-  }
-}
-
-// Runs daily. Refreshes cvc_week_planning_cutoff -- 9am ET the Tuesday before each
-// week's actual first kickoff, a genuinely separate concept from schedule_week.status
-// (which tracks whether a week's games have actually been played, driven solely by
-// the finalization sync, and must never move early). Deliberately no manually-
-// triggerable version beyond this daily schedule -- the underlying NFL schedule data
-// this depends on barely ever changes, so a daily refresh is more than sufficient.
-export async function runPlanningWeekCutoffSync(req: Request, res: Response) {
-  if (!checkCronAuth(req, res)) return;
-  try {
-    const season = await getCurrentSeason();
-    if (!season) { res.json({ ok: true, status: "skipped", reason: "No current season found." }); return; }
-    const result = await syncPlanningWeekCutoffs(season.id, season.year);
-    res.json({ ok: true, ...result });
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    console.error("Planning-week cutoff sync failed", error);
     res.status(500).json({ error: message, timestamp: new Date().toISOString() });
   }
 }

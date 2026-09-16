@@ -115,6 +115,25 @@ function getNFLDataAdapter() {
 // server/nflTeamAssignmentSync.ts
 import { parse } from "csv-parse/sync";
 
+// server/waiverResolutionTiming.ts
+var EASTERN_TZ = "America/New_York";
+function getEasternDateParts(instant) {
+  const formatter = new Intl.DateTimeFormat("en-US", { timeZone: EASTERN_TZ, year: "numeric", month: "2-digit", day: "2-digit", weekday: "short" });
+  const parts = {};
+  for (const part of formatter.formatToParts(instant)) parts[part.type] = part.value;
+  const weekdayMap = { Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6 };
+  return { year: Number(parts.year), month: Number(parts.month), day: Number(parts.day), weekday: weekdayMap[parts.weekday] };
+}
+function easternWallClockToUtc(year, month, day, hour) {
+  const asIfUtc = Date.UTC(year, month - 1, day, hour, 0, 0);
+  const formatter = new Intl.DateTimeFormat("en-US", { timeZone: EASTERN_TZ, hour12: false, year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit" });
+  const parts = {};
+  for (const part of formatter.formatToParts(new Date(asIfUtc))) parts[part.type] = part.value;
+  const reinterpretedAsUtc = Date.UTC(Number(parts.year), Number(parts.month) - 1, Number(parts.day), parts.hour === "24" ? 0 : Number(parts.hour), Number(parts.minute), Number(parts.second));
+  const offsetMs = reinterpretedAsUtc - asIfUtc;
+  return new Date(asIfUtc - offsetMs);
+}
+
 // server/nflTeamScheduleSync.ts
 var TEAM_CODE_ALIASES = { kan: "kc", tam: "tb", arz: "ari", jax: "jac", was: "wsh" };
 var NFL_TEAMS = [
@@ -217,6 +236,43 @@ async function syncNflTeamSchedules(year) {
   return { status: "completed", teamsUpdated };
 }
 
+// server/planningWeek.ts
+function parseKickoffUtc(gameDate, gameTime) {
+  if (!gameDate || !gameTime || gameDate.length < 8) return null;
+  const time = gameTime.match(/(\d+):(\d+)([ap])/i);
+  if (!time) return null;
+  let hour = Number(time[1]);
+  if (time[3].toLowerCase() === "p" && hour !== 12) hour += 12;
+  if (time[3].toLowerCase() === "a" && hour === 12) hour = 0;
+  return easternWallClockToUtc(Number(gameDate.slice(0, 4)), Number(gameDate.slice(4, 6)), Number(gameDate.slice(6, 8)), hour);
+}
+function computePlanningWeekCutoff(games) {
+  const kickoffs = games.map((game) => parseKickoffUtc(game.gameDate, game.gameTime)).filter((date) => date !== null);
+  if (!kickoffs.length) return null;
+  const earliestKickoff = new Date(Math.min(...kickoffs.map((date) => date.getTime())));
+  const kickoffDateParts = getEasternDateParts(earliestKickoff);
+  for (let daysBack = 0; daysBack <= 6; daysBack++) {
+    const noonUtcOnCandidateDate = Date.UTC(kickoffDateParts.year, kickoffDateParts.month - 1, kickoffDateParts.day - daysBack, 12);
+    const candidateDate = getEasternDateParts(new Date(noonUtcOnCandidateDate));
+    if (candidateDate.weekday === 2) return easternWallClockToUtc(candidateDate.year, candidateDate.month, candidateDate.day, 9);
+  }
+  return null;
+}
+async function syncPlanningWeekCutoffs(seasonId, seasonYear) {
+  const adapter2 = getNFLDataAdapter();
+  if (!(adapter2 instanceof Tank01NFLDataAdapter)) throw new Error("Tank01 is not configured for the planning-week cutoff sync.");
+  const weeks = unwrap(await supabase.from("schedule_week").select("id, week_number").eq("season_id", seasonId)) ?? [];
+  let weeksSynced = 0;
+  for (const week of weeks) {
+    const games = await adapter2.listGamesForWeek(week.week_number, seasonYear).catch(() => []);
+    const cutoff = computePlanningWeekCutoff(games);
+    if (!cutoff) continue;
+    unwrap(await supabase.from("cvc_week_planning_cutoff").upsert({ season_id: seasonId, week_number: week.week_number, cutoff_at: cutoff.toISOString(), synced_at: (/* @__PURE__ */ new Date()).toISOString() }, { onConflict: "season_id,week_number" }).select("id").single());
+    weeksSynced += 1;
+  }
+  return { weeksSynced };
+}
+
 // server/_core/scheduledHandlers.ts
 function checkCronAuth(req, res) {
   const expected = process.env.CRON_SECRET;
@@ -244,8 +300,11 @@ async function runTeamScheduleSync(req, res) {
       res.json({ ok: true, status: "skipped", reason: "No current season found." });
       return;
     }
-    const result = await syncNflTeamSchedules(season.year);
-    res.json({ ok: true, ...result });
+    const [teamScheduleResult, planningWeekResult] = await Promise.all([
+      syncNflTeamSchedules(season.year),
+      syncPlanningWeekCutoffs(season.id, season.year).catch((error) => ({ error: error instanceof Error ? error.message : String(error) }))
+    ]);
+    res.json({ ok: true, ...teamScheduleResult, planningWeekCutoff: planningWeekResult });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     console.error("NFL team schedule sync failed", error);
