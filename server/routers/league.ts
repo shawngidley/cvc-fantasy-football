@@ -1146,6 +1146,17 @@ export const leagueRouter = router({
     const mostRecentSync = unwrap(await supabase.from("player").select("last_seen_at").not("last_seen_at", "is", null).order("last_seen_at", { ascending: false }).limit(1).maybeSingle());
     const sampleLastSeenRows = samplePlayerIds.length ? unwrap(await supabase.from("player").select("id, last_seen_at, status").in("id", samplePlayerIds)) ?? [] : [];
     const lastSeenById = new Map(sampleLastSeenRows.map(row => [row.id, row]));
+    // Replicates freeAgents' exact main-path query (not the matchingRightsOnly branch)
+    // for a specific search term, to see definitively whether a confirmed-good player
+    // actually makes it into that result set end to end.
+    const activeAssignmentsResult = await supabase.from("roster_assignment").select("player_id").eq("season_id", season.id).is("released_at", null);
+    const activePlayerIds = new Set((unwrap(activeAssignmentsResult) ?? []).map(a => a.player_id));
+    let testQuery = supabase.from("player").select("id, display_name, position").neq("provider", "placeholder").in("position", ["QB", "RB", "WR", "TE", "K", "DST"]).order("display_name").limit(1220).ilike("display_name", "%Prentice%");
+    if (mostRecentSync?.last_seen_at) testQuery = testQuery.gte("last_seen_at", mostRecentSync.last_seen_at);
+    const testQueryResult = await testQuery;
+    const testPlayers = testQueryResult.data ?? [];
+    const freeAgentPoolTest = testPlayers.filter(p => !activePlayerIds.has(p.id));
+    const freeAgentsEndToEndTest = { query: "Prentice", rawQueryError: testQueryResult.error?.message ?? null, foundByRawQuery: testPlayers, foundAfterRosterExclusion: freeAgentPoolTest, withStatsAttached: freeAgentPoolTest.length ? await attachSeasonStats(freeAgentPoolTest, season.id, input.year, season.year) : [] };
     return {
       migrationLikelyMissing: Boolean(migrationExistsCheck.error),
       migrationErrorText: migrationExistsCheck.error?.message ?? null,
@@ -1159,6 +1170,7 @@ export const leagueRouter = router({
       }),
       sampleErrorText: sampleResult.error?.message ?? null,
       attachSeasonStatsTest: attachTestPlayer ? { testedPlayer: attachTestPlayer.display_name, calledWith: { year: input.year, currentSeasonYear: season.year }, result: attachTestResult } : null,
+      freeAgentsEndToEndTest,
     };
   }),
 
