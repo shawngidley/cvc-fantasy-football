@@ -1119,6 +1119,28 @@ export const leagueRouter = router({
     return syncTank01Scores();
   }),
 
+  // Debug-only: directly checks whether cvc_season_stats_historical actually has any
+  // rows for a given year -- confirms/rules out whether the write side
+  // (backfillHistoricalSeasonStats) is actually persisting data, separate from
+  // whether the read side (attachSeasonStats) is finding it. Also surfaces the raw
+  // Supabase error text for both the count query and a sample-row query, since
+  // attachSeasonStats currently swallows a query error silently (treats it the same
+  // as "no rows found"), which could otherwise mask a real problem. Not used by any
+  // real feature.
+  debugHistoricalStatsCheck: publicProcedure.input(z.object({ year: z.number().int() })).query(async ({ input }) => {
+    const countResult = await supabase.from("cvc_season_stats_historical").select("id", { count: "exact", head: true }).eq("year", input.year);
+    const sampleResult = await supabase.from("cvc_season_stats_historical").select("player_id, games_played, fantasy_points, backfilled_at").eq("year", input.year).limit(5);
+    const migrationExistsCheck = await supabase.from("cvc_season_stats_historical").select("id").limit(1);
+    return {
+      migrationLikelyMissing: Boolean(migrationExistsCheck.error),
+      migrationErrorText: migrationExistsCheck.error?.message ?? null,
+      rowCountForYear: countResult.count ?? null,
+      countErrorText: countResult.error?.message ?? null,
+      sampleRows: sampleResult.data ?? [],
+      sampleErrorText: sampleResult.error?.message ?? null,
+    };
+  }),
+
   // Debug-only: compares each franchise's snapshotted Week 1 lineup (what the
   // OFFICIAL server-side score is computed from -- frozen once, never re-taken) against
   // their CURRENT roster_assignment (what the client-side Live Scoring page reads

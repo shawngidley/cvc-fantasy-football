@@ -237,6 +237,8 @@ function SeasonStatsSyncModule() {
   });
 
   const [forceWeekNumber, setForceWeekNumber] = useState(1);
+  const [debugHistoricalYear, setDebugHistoricalYear] = useState(2023);
+  const historicalCheck = trpc.league.debugHistoricalStatsCheck.useQuery({ year: debugHistoricalYear });
   const snapshotVsCurrent = trpc.league.debugSnapshotVsCurrentLineup.useQuery({ weekNumber: forceWeekNumber });
   const forceRecomputeWeek = trpc.league.forceRecomputeWeek.useMutation({
     onSuccess: data => {
@@ -299,6 +301,13 @@ function SeasonStatsSyncModule() {
         <button type="button" className="cvc-button-compact border-rose-300 bg-rose-100 text-rose-800" disabled={resetWeekSnapshot.isPending} onClick={() => { if (window.confirm(`This permanently deletes week ${forceWeekNumber}'s locked-in lineup snapshot. Only do this if you've confirmed the current roster is correct for that week. Continue?`)) resetWeekSnapshot.mutate({ weekNumber: forceWeekNumber }); }}>{resetWeekSnapshot.isPending ? "Resetting…" : `Reset week ${forceWeekNumber}'s snapshot`}</button>
         <button type="button" className="cvc-button-compact" disabled={forceRecomputeWeek.isPending} onClick={() => forceRecomputeWeek.mutate({ weekNumber: forceWeekNumber })}><Save size={14} /> {forceRecomputeWeek.isPending ? "Recomputing…" : `Recompute week ${forceWeekNumber}`}</button>
       </div>
+    </div>
+    <div className="rounded-lg border border-dashed border-amber-400/40 bg-amber-50 p-4">
+      <p className="text-sm font-semibold text-cvc-deep">Debug: cvc_season_stats_historical check (year {debugHistoricalYear})</p>
+      <div className="mt-2 flex items-center gap-2">
+        <input type="number" value={debugHistoricalYear} onChange={event => setDebugHistoricalYear(Number(event.target.value) || 2023)} className="w-20 rounded border border-slate-300 px-2 py-1.5 text-sm"/>
+      </div>
+      <pre className="mt-2 max-h-96 overflow-auto whitespace-pre-wrap break-all rounded bg-white p-2 text-[10px]">{historicalCheck.isLoading ? "Loading…" : historicalCheck.isError ? `ERROR: ${historicalCheck.error?.message ?? "unknown error"}` : JSON.stringify(historicalCheck.data, null, 2) || "(empty result)"}</pre>
     </div>
     <div className="rounded-lg border border-dashed border-amber-400/40 bg-amber-50 p-4">
       <p className="text-sm font-semibold text-cvc-deep">Debug: snapshot vs current lineup (week {forceWeekNumber})</p>
