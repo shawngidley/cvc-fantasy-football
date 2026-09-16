@@ -3,7 +3,7 @@ import { z } from "zod";
 import { protectedProcedure, publicProcedure, router } from "../_core/trpc";
 import { getFantasyProsDataAdapter, getNFLDataAdapter, Tank01NFLDataAdapter } from "../nflDataAdapter";
 import { getCvcPlayerCareerStats, parseCvcGameLog, toCvcSeasonStatsShape } from "../playerCareerStats";
-import { readSeasonStatsFromWeekly, readSeasonStatsCurrent } from "../cvcPlayerWeeklyStats";
+import { readSeasonStatsFromWeekly, readSeasonStatsCurrent, rebuildSeasonStatsCurrentForAllPlayers } from "../cvcPlayerWeeklyStats";
 import { backfillHistoricalSeasonStats } from "../cvcSeasonStatsHistorical";
 import { headToHeadDelta } from "../cvcStandings";
 import { fantasyProsCacheStatus, getFantasyProsActivePlayerIds, getFantasyProsRookiePlayerIds } from "../fantasyProsCache";
@@ -1197,6 +1197,16 @@ export const leagueRouter = router({
   backfillHistoricalSeasonStats: protectedProcedure.input(z.object({ year: z.number().int().min(2000).max(2100), limit: z.number().int().min(1).max(100).optional() })).mutation(async ({ ctx, input }) => {
     await requireCommissioner({ openId: ctx.user.openId });
     return backfillHistoricalSeasonStats(input.year, input.limit ?? 40);
+  }),
+
+  // One-time (or "run whenever you want a full resync") bulk rebuild of
+  // cvc_season_stats_current for every player who has any cvc_player_weekly_stat rows
+  // this season -- much faster than triggering the per-week incremental refresh
+  // separately for every already-finalized week to fully populate the table.
+  rebuildSeasonStatsCurrent: protectedProcedure.mutation(async ({ ctx }) => {
+    await requireCommissioner({ openId: ctx.user.openId });
+    const { season } = await getCurrentLeagueAndSeason();
+    return rebuildSeasonStatsCurrentForAllPlayers(season.id);
   }),
 
   // Real game-by-game D/ST aggregation (see dstSeasonAggregation.ts) -- correctly

@@ -173,6 +173,11 @@ function SeasonStatsSyncModule() {
     }
   };
 
+  const rebuildCurrent = trpc.league.rebuildSeasonStatsCurrent.useMutation({
+    onSuccess: data => toast.success(`Rebuilt current-season totals for ${data.playersRebuilt} player(s).`),
+    onError: error => toast.error(error.message),
+  });
+
   const [rookieResult, setRookieResult] = useState<null | { countByPosition: Record<string, number>; matchedInDb: number; notYetSynced: number; flaggedNow: number; clearedStale: number; errors: Record<string, string>; samplePlayers?: Record<string, unknown> }>(null);
   const [activeResult, setActiveResult] = useState<null | { teamsProcessed: number; totalRosterPlayers: number; matchedByStoredId: number; matchedByNameNewlyLinked: number; matchedDst: number; errors: Record<string, string>; sampleRosterPlayer?: unknown }>(null);
   const syncPlayers = trpc.league.syncFantasyProsPlayers.useMutation({
@@ -360,6 +365,11 @@ function SeasonStatsSyncModule() {
         <button type="button" className="cvc-button-secondary" disabled={backfillHistorical.isPending || autoBackfilling} onClick={backfillAllHistorical}>{autoBackfilling ? "Backfilling all…" : `Backfill all of ${historicalYear}`}</button>
         {autoBackfillProgress ? <span className="text-xs text-slate-500">{autoBackfillProgress.totalUpdated} of {autoBackfillProgress.totalAttempted} backfilled so far{autoBackfilling ? "…" : "."}</span> : null}
       </div>
+    </div>
+    <div className="rounded-lg border border-dashed border-cvc-deep/20 bg-cvc-tint p-4">
+      <p className="text-sm font-semibold text-cvc-deep">Rebuild current-season stat totals</p>
+      <p className="mt-1 text-xs leading-5 text-slate-500">One-time (or run whenever you want a full resync) bulk rebuild of every player's current-season total from their already-finalized weekly stat lines, in a single pass -- much faster than "Recompute week N" separately for every past week just to fully populate season totals for everyone. Weekly finalization already keeps this current going forward on its own; use this mainly to backfill after finalizing several past weeks at once, or if something looks off.</p>
+      <button type="button" className="cvc-button-compact mt-3" disabled={rebuildCurrent.isPending} onClick={() => rebuildCurrent.mutate()}><Save size={14} /> {rebuildCurrent.isPending ? "Rebuilding…" : "Rebuild season totals"}</button>
     </div>
     <div className="rounded-lg border border-dashed border-cvc-deep/20 bg-cvc-tint p-4">
       <p className="text-sm font-semibold text-cvc-deep">FantasyPros players</p>

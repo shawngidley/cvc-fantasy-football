@@ -124,6 +124,46 @@ export async function readSeasonStatsFromWeekly(seasonId: string, playerIds: str
   return result;
 }
 
+/**
+ * One-time-run bulk rebuild of cvc_season_stats_current for every player who has any
+ * cvc_player_weekly_stat rows this season -- reads the whole table in one pass
+ * (paginated: a full season can be hundreds of players times up to 18 weeks, well past
+ * a single query's row limit) and aggregates everyone at once, rather than requiring
+ * refreshSeasonStatsCurrent's incremental, per-week path to be triggered separately for
+ * every already-finalized week to fully populate the table. Not a scheduled job --
+ * genuinely a one-time (or "run whenever you want a full resync") operation, since it's
+ * fast even for a full season's data and the incremental refresh already keeps things
+ * current going forward.
+ */
+export async function rebuildSeasonStatsCurrentForAllPlayers(seasonId: string): Promise<{ playersRebuilt: number }> {
+  const PAGE_SIZE = 1000;
+  const allRows: (CvcWeeklyStatRow & { player_id: string })[] = [];
+  for (let offset = 0; ; offset += PAGE_SIZE) {
+    const result = await supabase.from("cvc_player_weekly_stat").select("player_id, games_played, pass_yds, pass_td, pass_int, rush_att, rush_yds, rush_td, targets, receptions, rec_yds, rec_td, fg_made, xp_made, sacks, def_int, def_td, fantasy_points").eq("season_id", seasonId).range(offset, offset + PAGE_SIZE - 1);
+    if (result.error) return { playersRebuilt: 0 }; // e.g. this table's migration hasn't been run yet
+    const page = result.data ?? [];
+    allRows.push(...(page as (CvcWeeklyStatRow & { player_id: string })[]));
+    if (page.length < PAGE_SIZE) break;
+  }
+  if (!allRows.length) return { playersRebuilt: 0 };
+
+  const byPlayer = new Map<string, CvcWeeklyStatRow[]>();
+  for (const row of allRows) {
+    const existing = byPlayer.get(row.player_id) ?? [];
+    existing.push(row);
+    byPlayer.set(row.player_id, existing);
+  }
+
+  const upsertRows = Array.from(byPlayer).map(([playerId, playerRows]) => ({ season_id: seasonId, player_id: playerId, ...aggregateWeeklyStatsForSeason(playerRows), updated_at: new Date().toISOString() }));
+  const UPSERT_BATCH_SIZE = 500;
+  for (let index = 0; index < upsertRows.length; index += UPSERT_BATCH_SIZE) {
+    const batch = upsertRows.slice(index, index + UPSERT_BATCH_SIZE);
+    const result = await supabase.from("cvc_season_stats_current").upsert(batch, { onConflict: "season_id,player_id" });
+    if (result.error) return { playersRebuilt: index }; // report how far it actually got rather than silently claiming full success
+  }
+  return { playersRebuilt: upsertRows.length };
+}
+
 /** Recomputes and upserts cvc_season_stats_current for every given player, from their
  * cvc_player_weekly_stat rows for this season -- the read side (Free Agents, All
  * Players, Watchlist, Lineup) then becomes a plain table lookup instead of summing
