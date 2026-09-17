@@ -1394,7 +1394,7 @@ export const leagueRouter = router({
     return period;
   }),
 
-  submitFaabBid: protectedProcedure.input(z.object({ playerId: z.string().uuid(), amount: z.number().int().min(1).max(30), maxPlayersDesired: z.number().int().min(1).max(10).default(1), priority: z.number().int().min(1).max(99).default(1), groupByPosition: z.boolean().default(false), dropPlayerId: z.string().uuid().optional() })).mutation(async ({ ctx, input }) => {
+  submitFaabBid: protectedProcedure.input(z.object({ playerId: z.string().uuid(), amount: z.number().int().min(1).max(30), maxPlayersDesired: z.number().int().min(1).max(10).default(1), priority: z.number().int().min(1).max(99).default(1), dropPlayerId: z.string().uuid().optional() })).mutation(async ({ ctx, input }) => {
     const owner = await getOwnerAccess({ openId: ctx.user.openId });
     if (!owner) throw new TRPCError({ code: "FORBIDDEN", message: "A CVC owner session is required to submit a waiver claim." });
     const { league, season } = await getCurrentLeagueAndSeason();
@@ -1441,7 +1441,7 @@ export const leagueRouter = router({
         throw new TRPCError({ code: "BAD_REQUEST", message: `This player was just acquired via waivers and can't be cut until the next waiver resolution (${new Date(drop.locked_until).toLocaleString("en-US", { weekday: "short", hour: "numeric", minute: "2-digit", timeZoneName: "short" })}).` });
       }
     }
-    const bid = unwrap(await supabase.from("faab_bid").upsert({ waiver_period_id: period.id, franchise_id: franchise.id, player_id: input.playerId, drop_player_id: input.dropPlayerId ?? null, amount, priority: input.priority, max_players_desired: input.maxPlayersDesired, group_by_position: input.groupByPosition, status: "pending", confirmed_at: isFreePeriod ? null : new Date().toISOString() }, { onConflict: "waiver_period_id,franchise_id,player_id" }).select("id, amount, priority, status, confirmed_at").single());
+    const bid = unwrap(await supabase.from("faab_bid").upsert({ waiver_period_id: period.id, franchise_id: franchise.id, player_id: input.playerId, drop_player_id: input.dropPlayerId ?? null, amount, priority: input.priority, max_players_desired: input.maxPlayersDesired, status: "pending", confirmed_at: isFreePeriod ? null : new Date().toISOString() }, { onConflict: "waiver_period_id,franchise_id,player_id" }).select("id, amount, priority, status, confirmed_at").single());
     if (!bid) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "CVC waiver claim could not be saved." });
     await createAuditEvent(league.id, season.id, owner.id, "faab_bid", bid.id, "submitted", `Submitted ${period.label} claim for ${playerRow.display_name}`);
     return bid;
@@ -1510,23 +1510,24 @@ export const leagueRouter = router({
     return { updated: true };
   }),
 
-  // Lets an owner retroactively opt an already-pending claim into (or out of)
-  // position-scoped grouping -- same idea as setFaabBidPriority above, just for the
-  // group_by_position flag instead. Grouped, a claim's max_players_desired only counts
-  // against that owner's other claims at the SAME position this period (so "1 RB, 1
-  // WR" becomes two independent pools); ungrouped (the default) shares one pool across
-  // everything, exactly like every claim submitted before this feature existed.
-  setFaabBidGroupByPosition: protectedProcedure.input(z.object({ bidId: z.string().uuid(), groupByPosition: z.boolean() })).mutation(async ({ ctx, input }) => {
+  // Claims are always grouped by position now (see resolveWaiverAssignments' groupKey
+  // in server/waiverResolution.ts) -- max_players_desired is a per-position-group cap,
+  // not a per-claim one. Bulk-updates every pending claim this franchise has at the
+  // given position, within the currently open period, to the same new cap at once.
+  setFaabBidGroupMaxPlayers: protectedProcedure.input(z.object({ position: z.string().min(1).max(10), maxPlayers: z.number().int().min(1).max(10) })).mutation(async ({ ctx, input }) => {
     const owner = await getOwnerAccess({ openId: ctx.user.openId });
     if (!owner) throw new TRPCError({ code: "FORBIDDEN", message: "A CVC owner session is required to update a claim." });
     const franchise = unwrap(await supabase.from("franchise").select("id").eq("current_owner_id", owner.id).eq("is_active", true).limit(1).maybeSingle());
     if (!franchise) throw new TRPCError({ code: "FORBIDDEN", message: "Only an owner with an active CVC franchise may update a claim." });
-    const bid = unwrap(await supabase.from("faab_bid").select("id, franchise_id, status").eq("id", input.bidId).maybeSingle());
-    if (!bid) throw new TRPCError({ code: "NOT_FOUND", message: "That CVC claim was not found." });
-    if (bid.franchise_id !== franchise.id) throw new TRPCError({ code: "FORBIDDEN", message: "You may only update your own CVC franchise's claims." });
-    if (bid.status !== "pending") throw new TRPCError({ code: "BAD_REQUEST", message: "That claim has already been resolved and can no longer be updated." });
-    unwrap(await supabase.from("faab_bid").update({ group_by_position: input.groupByPosition }).eq("id", input.bidId).select("id").single());
-    return { updated: true };
+    const { season } = await getCurrentLeagueAndSeason();
+    const now = new Date().toISOString();
+    const period = unwrap(await supabase.from("waiver_period").select("id").eq("season_id", season.id).eq("status", "open").lte("opens_at", now).gte("closes_at", now).order("closes_at").limit(1).maybeSingle());
+    if (!period) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "There is no open CVC waiver period." });
+    const pendingBids = unwrap(await supabase.from("faab_bid").select("id, player:player_id(position)").eq("waiver_period_id", period.id).eq("franchise_id", franchise.id).eq("status", "pending")) ?? [];
+    const bidIds = pendingBids.filter(bid => { const player = Array.isArray(bid.player) ? bid.player[0] : bid.player; return player?.position === input.position; }).map(bid => bid.id);
+    if (!bidIds.length) throw new TRPCError({ code: "NOT_FOUND", message: `You have no pending ${input.position} claims this period.` });
+    unwrap(await supabase.from("faab_bid").update({ max_players_desired: input.maxPlayers }).in("id", bidIds).select("id"));
+    return { updated: bidIds.length };
   }),
 
   myFaabBids: protectedProcedure.query(async ({ ctx }) => {
@@ -1534,7 +1535,7 @@ export const leagueRouter = router({
     if (!owner) throw new TRPCError({ code: "FORBIDDEN", message: "A CVC owner session is required." });
     const franchise = unwrap(await supabase.from("franchise").select("id").eq("current_owner_id", owner.id).eq("is_active", true).limit(1).maybeSingle());
     if (!franchise) return [];
-    return unwrap(await supabase.from("faab_bid").select("id, amount, priority, max_players_desired, group_by_position, status, submitted_at, confirmed_at, player:player_id(id, display_name, position, nfl_team), period:waiver_period_id(label, closes_at, status, period_type)").eq("franchise_id", franchise.id).order("submitted_at", { ascending: false }).limit(100)) ?? [];
+    return unwrap(await supabase.from("faab_bid").select("id, amount, priority, max_players_desired, status, submitted_at, confirmed_at, player:player_id(id, display_name, position, nfl_team), period:waiver_period_id(label, closes_at, status, period_type)").eq("franchise_id", franchise.id).order("submitted_at", { ascending: false }).limit(100)) ?? [];
   }),
 
   // CVC's real season FAAB budget: $30 per franchise, spent in $1 increments across the

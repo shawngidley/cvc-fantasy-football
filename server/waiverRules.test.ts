@@ -181,19 +181,7 @@ describe("resolveWaiverAssignments (the cascade: an owner's own claims collide w
     expect(rejectionReasonByBid.size).toBe(0);
   });
 
-  it("ungrouped claims (the default) still share ONE cap across every player, even different positions -- unchanged backward-compatible behavior", () => {
-    const ranked = new Map([
-      ["rb1", [candidate("bid-rb1", "teamA", { priority: 1, maxPlayersDesired: 1 })]],
-      ["wr1", [candidate("bid-wr1", "teamA", { priority: 2, maxPlayersDesired: 1 })]],
-    ]);
-    const capacity = new Map([["teamA", { rosterCount: 15, budget: 30 }]]);
-    const { winnerByPlayer, rejectionReasonByBid } = resolveWaiverAssignments(ranked, capacity, 22);
-    expect(winnerByPlayer.get("rb1")).toBe("bid-rb1"); // higher priority, kept
-    expect(winnerByPlayer.has("wr1")).toBe(false); // shares the same pool, bumped
-    expect(rejectionReasonByBid.get("bid-wr1")).toEqual({ type: "max_players_desired", limit: 1 });
-  });
-
-  it("position-grouped claims get independent caps -- '1 RB, 1 WR' wins both instead of sharing one shared pool of 1", () => {
+  it("claims at different positions get independent caps -- '1 RB, 1 WR' wins both instead of sharing one shared pool of 1 (grouping is automatic now, not opt-in)", () => {
     const ranked = new Map([
       ["rb1", [candidate("bid-rb1", "teamA", { priority: 1, maxPlayersDesired: 1, groupKey: "RB" })]],
       ["wr1", [candidate("bid-wr1", "teamA", { priority: 2, maxPlayersDesired: 1, groupKey: "WR" })]],

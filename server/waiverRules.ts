@@ -104,10 +104,9 @@ export type WaiverCandidateBid = {
   maxPlayersDesired: number;
   dropPlayerId: string | null;
   // Scopes maxPlayersDesired to bids sharing this same key, within one franchise.
-  // Ungrouped bids (the default) all share a single sentinel key ("__all__"), which is
-  // exactly today's behavior -- one shared cap across every claim. A bid opted into
-  // group_by_position instead uses its player's position as the key, so "1 RB, 1 WR"
-  // becomes two independent pools rather than one shared cap of 1.
+  // Every claim is grouped by its player's position (the caller sets this to the
+  // player's position for every bid), so "1 RB, 1 WR" is two independent pools rather
+  // than one shared cap of 1.
   groupKey: string;
 };
 
@@ -133,10 +132,10 @@ export type WaiverRejectionReason =
  * style, until nothing changes) rather than the player going unclaimed.
  *
  * The max-players-desired cap itself is scoped per-franchise by each bid's `groupKey`
- * -- an ungrouped bid shares one pool with every other ungrouped bid from that owner
- * (today's behavior), while a position-grouped bid's cap only counts against that
- * owner's other bids at the same position. Roster cap and season FAAB budget are never
- * grouped -- those are always shared across everything a franchise wins this period.
+ * -- a bid's cap only counts against that owner's other bids in the same group (the
+ * caller keys this by player position, so different positions never share a pool).
+ * Roster cap and season FAAB budget are never grouped -- those are always shared
+ * across everything a franchise wins this period.
  *
  * `capacityByFranchise` holds each franchise's PRE-period roster count and remaining
  * season FAAB budget (before anything in this period is awarded) -- this function

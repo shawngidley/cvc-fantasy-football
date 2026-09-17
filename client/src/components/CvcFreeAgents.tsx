@@ -92,8 +92,6 @@ export function CvcFreeAgents() {
   const [direction, setDirection] = useState<"asc" | "desc">("desc");
   const [selectedPlayerId, setSelectedPlayerId] = useState("");
   const [amount, setAmount] = useState("1");
-  const [maxPlayersDesired, setMaxPlayersDesired] = useState("1");
-  const [groupByPosition, setGroupByPosition] = useState(false);
   const [matchingRightsOnly, setMatchingRightsOnly] = useState(false);
   const activeColumns = columnsForPosition(position);
 
@@ -117,11 +115,29 @@ export function CvcFreeAgents() {
   const isFreePeriod = waiver.data?.period?.period_type === "free";
   const faabBalance = trpc.league.myFaabBalance.useQuery(undefined, { enabled: Boolean(owner?.franchise) });
   const myBids = trpc.league.myFaabBids.useQuery(undefined, { enabled: Boolean(owner?.franchise) });
-  const submit = trpc.league.submitFaabBid.useMutation({ onSuccess: async () => { setSelectedPlayerId(""); setAmount("1"); setMaxPlayersDesired("1"); setGroupByPosition(false); setDropPlayerId(""); await Promise.all([utils.league.myFaabBids.invalidate(), utils.league.myFaabBalance.invalidate(), utils.league.activity.invalidate()]); } });
+  // Claims are grouped by position automatically now (see resolveWaiverAssignments'
+  // groupKey server-side) -- max_players_desired is a per-position-group cap, so the
+  // Manage Bids page shows one control per position the owner has pending claims in,
+  // not one per claim. Shown value is the highest max_players_desired currently set
+  // among that position's pending claims (they're kept in sync going forward by
+  // setFaabBidGroupMaxPlayers, but could differ if some predate this feature).
+  const pendingBidsByPosition = useMemo(() => {
+    const map = new Map<string, any[]>();
+    for (const bid of myBids.data ?? []) {
+      if (bid.status !== "pending") continue;
+      const player = Array.isArray(bid.player) ? bid.player[0] : bid.player;
+      const position = player?.position ?? "—";
+      const list = map.get(position) ?? [];
+      list.push(bid);
+      map.set(position, list);
+    }
+    return map;
+  }, [myBids.data]);
+  const submit = trpc.league.submitFaabBid.useMutation({ onSuccess: async () => { setSelectedPlayerId(""); setAmount("1"); await Promise.all([utils.league.myFaabBids.invalidate(), utils.league.myFaabBalance.invalidate(), utils.league.activity.invalidate()]); } });
   const confirmClaim = trpc.league.confirmFreeAgentClaim.useMutation({ onSuccess: async () => { await utils.league.myFaabBids.invalidate(); }, onError: error => toast.error(error.message) });
   const cancelClaim = trpc.league.cancelFaabBid.useMutation({ onSuccess: async () => { await Promise.all([utils.league.myFaabBids.invalidate(), utils.league.myFaabBalance.invalidate()]); }, onError: error => toast.error(error.message) });
   const setPriority = trpc.league.setFaabBidPriority.useMutation({ onSuccess: async () => { await utils.league.myFaabBids.invalidate(); }, onError: error => toast.error(error.message) });
-  const setGroupBid = trpc.league.setFaabBidGroupByPosition.useMutation({ onSuccess: async () => { await utils.league.myFaabBids.invalidate(); }, onError: error => toast.error(error.message) });
+  const setGroupMaxPlayers = trpc.league.setFaabBidGroupMaxPlayers.useMutation({ onSuccess: async () => { await utils.league.myFaabBids.invalidate(); }, onError: error => toast.error(error.message) });
 
   const activePool = tab === "all-players" ? allPlayersPool : tab === "watchlist" ? watchlistPool : freeAgentsPool;
   const rawPlayers = activePool.data ?? [];
@@ -175,13 +191,6 @@ export function CvcFreeAgents() {
     return `${dayNames[date.getDay()]} ${time} ET`;
   }
 
-  const myRoster = trpc.league.franchiseRoster.useQuery({ franchiseId: owner?.franchise?.id ?? "00000000-0000-0000-0000-000000000000" }, { enabled: Boolean(owner?.franchise?.id) && Boolean(selectedPlayerId) });
-  // Must match server/waiverRules.ts's MAX_ROSTER_SIZE (22) -- server code can't be
-  // imported into the client bundle, so this constant is duplicated intentionally.
-  const MAX_ROSTER_SIZE = 22;
-  const myRosterPlayers = (myRoster.data?.players ?? []).filter((row: any) => row.player);
-  const rosterIsFull = myRosterPlayers.length >= MAX_ROSTER_SIZE;
-  const [dropPlayerId, setDropPlayerId] = useState("");
   const selectedPlayer = players.find((player: any) => player.id === selectedPlayerId);
 
   const colSpan = 6 + activeColumns.length;
@@ -204,7 +213,8 @@ export function CvcFreeAgents() {
 
     {tab === "manage-bids" ? (
       <div className="grid gap-5">
-        <section className="rounded-xl border border-white/10 bg-cvc-deep/60 p-5"><div className="flex items-center gap-2 text-cvc-accent"><DollarSign size={16} /><p className="font-display text-lg uppercase">My claim status</p></div>{(myBids.data?.filter((bid: any) => bid.status === "pending").length ?? 0) > 1 ? <p className="mt-2 text-xs text-cvc-muted">You have multiple pending claims this period. If they'd collectively push you past your roster limit, budget, or stated max, your lowest-numbered <b>priority</b> claims are kept first and the rest fall through to the next bidder -- set the order below. A claim with "max players" above 1 can also be set to <b>group by position</b>, so its cap only counts against your other claims at that same position instead of sharing one cap across everything.</p> : null}<div className="mt-4 space-y-2">{owner?.franchise ? myBids.data?.length ? myBids.data.map((bid: any) => { const period = Array.isArray(bid.period) ? bid.period[0] : bid.period; const needsConfirmation = bid.status === "pending" && period?.period_type === "free" && period?.status === "open" && !bid.confirmed_at; const isPending = bid.status === "pending"; return <div key={bid.id} className="flex items-center justify-between gap-3 rounded bg-white/5 px-3 py-2 text-sm text-white"><span><b>{bid.player?.[0]?.display_name ?? bid.player?.display_name}</b> · ${bid.amount} · <span className="uppercase text-cvc-accent">{needsConfirmation ? "unconfirmed" : bid.status}</span></span><span className="flex shrink-0 items-center gap-2">{isPending ? <label className="flex items-center gap-1 text-[10px] uppercase tracking-[.06em] text-cvc-muted">Priority<input type="number" min={1} max={99} defaultValue={bid.priority ?? 1} key={`${bid.id}-${bid.priority}`} onBlur={event => { const next = Number(event.target.value); if (Number.isInteger(next) && next >= 1 && next <= 99 && next !== bid.priority) setPriority.mutate({ bidId: bid.id, priority: next }); }} className="w-14 rounded border border-white/20 bg-black/20 px-2 py-1 text-center text-xs text-white" /></label> : null}{isPending && (bid.max_players_desired ?? 1) > 1 ? <label className="flex items-center gap-1 text-[10px] uppercase tracking-[.06em] text-cvc-muted" title={`Scope this claim's max-players cap to just ${bid.player?.[0]?.position ?? bid.player?.position ?? "this position"}, instead of sharing one cap across every pending claim.`}><input type="checkbox" checked={Boolean(bid.group_by_position)} disabled={setGroupBid.isPending} onChange={event => setGroupBid.mutate({ bidId: bid.id, groupByPosition: event.target.checked })} className="h-3.5 w-3.5" />Group by position</label> : null}{needsConfirmation ? <button onClick={() => confirmClaim.mutate({ bidId: bid.id })} disabled={confirmClaim.isPending} className="rounded bg-amber-500 px-2.5 py-1 text-xs font-bold text-white hover:bg-amber-600">Confirm claim</button> : null}{isPending ? <button onClick={() => cancelClaim.mutate({ bidId: bid.id })} disabled={cancelClaim.isPending} className="rounded bg-white/10 px-2.5 py-1 text-xs font-bold text-white hover:bg-white/20">Cancel</button> : null}</span></div>; }) : <p className="text-sm text-cvc-muted">No CVC waiver claims submitted.</p> : <p className="text-sm text-cvc-muted">Sign in with an owner account to submit and review claims.</p>}</div></section>
+        {owner?.franchise && pendingBidsByPosition.size ? <section className="rounded-xl border border-white/10 bg-cvc-deep/60 p-5"><div className="flex items-center gap-2 text-cvc-accent"><Users size={16} /><p className="font-display text-lg uppercase">Max players per position</p></div><p className="mt-2 text-xs text-cvc-muted">Claims are grouped by position automatically -- winning one RB claim never counts against your WR claims. Set how many you're willing to win at each position this cycle; it applies to every pending claim you have there.</p><div className="mt-4 space-y-2">{Array.from(pendingBidsByPosition.entries()).map(([position, bids]) => { const currentMax = Math.max(...bids.map((bid: any) => bid.max_players_desired ?? 1)); return <div key={position} className="flex items-center justify-between gap-3 rounded bg-white/5 px-3 py-2 text-sm text-white"><span><b>{position}</b> · {bids.length} pending claim{bids.length === 1 ? "" : "s"}</span><label className="flex items-center gap-2 text-[10px] uppercase tracking-[.06em] text-cvc-muted">Max to win<select value={currentMax} disabled={setGroupMaxPlayers.isPending} onChange={event => setGroupMaxPlayers.mutate({ position, maxPlayers: Number(event.target.value) })} className="rounded border border-white/20 bg-black/20 px-2 py-1 text-xs text-white">{Array.from({ length: 10 }, (_, index) => index + 1).map(value => <option key={value} value={value}>{value}</option>)}</select></label></div>; })}</div></section> : null}
+        <section className="rounded-xl border border-white/10 bg-cvc-deep/60 p-5"><div className="flex items-center gap-2 text-cvc-accent"><DollarSign size={16} /><p className="font-display text-lg uppercase">My claim status</p></div>{(myBids.data?.filter((bid: any) => bid.status === "pending").length ?? 0) > 1 ? <p className="mt-2 text-xs text-cvc-muted">You have multiple pending claims this period. If they'd collectively push you past your roster limit, budget, or a position's stated max, your lowest-numbered <b>priority</b> claims are kept first and the rest fall through to the next bidder -- set the order below.</p> : null}<div className="mt-4 space-y-2">{owner?.franchise ? myBids.data?.length ? myBids.data.map((bid: any) => { const period = Array.isArray(bid.period) ? bid.period[0] : bid.period; const needsConfirmation = bid.status === "pending" && period?.period_type === "free" && period?.status === "open" && !bid.confirmed_at; const isPending = bid.status === "pending"; return <div key={bid.id} className="flex items-center justify-between gap-3 rounded bg-white/5 px-3 py-2 text-sm text-white"><span><b>{bid.player?.[0]?.display_name ?? bid.player?.display_name}</b> · ${bid.amount} · <span className="uppercase text-cvc-accent">{needsConfirmation ? "unconfirmed" : bid.status}</span></span><span className="flex shrink-0 items-center gap-2">{isPending ? <label className="flex items-center gap-1 text-[10px] uppercase tracking-[.06em] text-cvc-muted">Priority<input type="number" min={1} max={99} defaultValue={bid.priority ?? 1} key={`${bid.id}-${bid.priority}`} onBlur={event => { const next = Number(event.target.value); if (Number.isInteger(next) && next >= 1 && next <= 99 && next !== bid.priority) setPriority.mutate({ bidId: bid.id, priority: next }); }} className="w-14 rounded border border-white/20 bg-black/20 px-2 py-1 text-center text-xs text-white" /></label> : null}{needsConfirmation ? <button onClick={() => confirmClaim.mutate({ bidId: bid.id })} disabled={confirmClaim.isPending} className="rounded bg-amber-500 px-2.5 py-1 text-xs font-bold text-white hover:bg-amber-600">Confirm claim</button> : null}{isPending ? <button onClick={() => cancelClaim.mutate({ bidId: bid.id })} disabled={cancelClaim.isPending} className="rounded bg-white/10 px-2.5 py-1 text-xs font-bold text-white hover:bg-white/20">Cancel</button> : null}</span></div>; }) : <p className="text-sm text-cvc-muted">No CVC waiver claims submitted.</p> : <p className="text-sm text-cvc-muted">Sign in with an owner account to submit and review claims.</p>}</div></section>
       </div>
     ) : (
       <section className="overflow-hidden rounded-xl bg-white shadow-xl">
@@ -236,7 +246,7 @@ export function CvcFreeAgents() {
                 : isError ? <tr><td colSpan={colSpan} className="px-5 py-8 text-center text-sm text-red-700">{activePool.error.message}</td></tr>
                 : players.length ? players.map((player: any) => <tr key={player.id} className="border-t border-slate-200 hover:bg-slate-50">
                     <td className="px-5 py-2.5"><PlayerCell player={player} /></td>
-                    <td className="px-2 py-2.5 text-center">{player.rosteredByFranchiseName ? <span className="text-[10px] font-black uppercase tracking-[.04em] text-slate-500" title={player.rosteredByFranchiseName}>{player.rosteredByFranchiseAbbreviation ?? player.rosteredByFranchiseName.split(/\s+/).map((word: string) => word[0]).join("").slice(0, 3).toUpperCase()}</span> : teamGameHasStarted(player.nfl_team) ? <span className="inline-flex items-center gap-1 rounded-md bg-slate-100 px-2.5 py-1.5 text-[10px] font-bold uppercase tracking-[.04em] text-slate-500" title="This player's game has started -- they can't be picked up until next week">Game started</span> : owner?.franchise && waiver.data?.period ? <button onClick={() => { setSelectedPlayerId(player.id); setDropPlayerId(""); }} className="inline-flex items-center gap-1 rounded-md bg-amber-500 px-2.5 py-1.5 text-xs font-bold text-white hover:bg-amber-600"><DollarSign size={11} /> {isFreePeriod ? "Claim ($1)" : "Bid"}</button> : <span className="text-[10px] font-bold uppercase tracking-[.06em] text-slate-400">{owner ? "Closed" : "Sign in"}</span>}</td>
+                    <td className="px-2 py-2.5 text-center">{player.rosteredByFranchiseName ? <span className="text-[10px] font-black uppercase tracking-[.04em] text-slate-500" title={player.rosteredByFranchiseName}>{player.rosteredByFranchiseAbbreviation ?? player.rosteredByFranchiseName.split(/\s+/).map((word: string) => word[0]).join("").slice(0, 3).toUpperCase()}</span> : teamGameHasStarted(player.nfl_team) ? <span className="inline-flex items-center gap-1 rounded-md bg-slate-100 px-2.5 py-1.5 text-[10px] font-bold uppercase tracking-[.04em] text-slate-500" title="This player's game has started -- they can't be picked up until next week">Game started</span> : owner?.franchise && waiver.data?.period ? <button onClick={() => setSelectedPlayerId(player.id)} className="inline-flex items-center gap-1 rounded-md bg-amber-500 px-2.5 py-1.5 text-xs font-bold text-white hover:bg-amber-600"><DollarSign size={11} /> {isFreePeriod ? "Claim ($1)" : "Bid"}</button> : <span className="text-[10px] font-bold uppercase tracking-[.06em] text-slate-400">{owner ? "Closed" : "Sign in"}</span>}</td>
                     <td className="px-2 py-2.5 text-center">{owner?.franchise ? <button onClick={() => toggleWatch.mutate({ playerId: player.id })} className="text-slate-300 hover:text-amber-500" aria-label={watchedIds.has(player.id) ? "Remove from watchlist" : "Add to watchlist"}><Star size={15} fill={watchedIds.has(player.id) ? "currentColor" : "none"} className={watchedIds.has(player.id) ? "text-amber-500" : ""} /></button> : null}</td>
                     {(() => { const schedule = schedules[(player.nfl_team ?? "").toUpperCase()]; return <>
                       <td className="whitespace-nowrap px-3 py-2.5 text-center text-xs font-bold text-amber-700">{schedule?.byeWeek ?? "—"}</td>
@@ -264,24 +274,13 @@ export function CvcFreeAgents() {
 
         <div className="mt-4 flex flex-wrap items-end gap-3">
           {isFreePeriod ? <div className="flex flex-col gap-1"><span className="text-[10px] font-black uppercase tracking-[.08em] text-cvc-muted">Claim price</span><span className="rounded-md border border-white/20 bg-black/20 px-3 py-2 text-sm text-white">$1 flat</span></div> : <label className="flex flex-col gap-1"><span className="text-[10px] font-black uppercase tracking-[.08em] text-cvc-muted">Bid ($1–$30)</span><input value={amount} onChange={event => setAmount(event.target.value.replace(/\D/g, ""))} className="w-28 rounded-md border border-white/20 bg-black/20 px-3 py-2 text-sm text-white" inputMode="numeric" placeholder="$0" /></label>}
-          <label className="flex flex-col gap-1"><span className="text-[10px] font-black uppercase tracking-[.08em] text-cvc-muted">Max players to win this cycle</span><input value={maxPlayersDesired} onChange={event => setMaxPlayersDesired(event.target.value.replace(/\D/g, ""))} className="w-20 rounded-md border border-white/20 bg-black/20 px-3 py-2 text-sm text-white" inputMode="numeric" placeholder="1" /></label>
-          {Number(maxPlayersDesired) > 1 ? <label className="flex items-center gap-2 pb-2 text-xs text-white"><input type="checkbox" checked={groupByPosition} onChange={event => setGroupByPosition(event.target.checked)} className="h-4 w-4" />Only cap {selectedPlayer?.position ?? "this position"} claims together</label> : null}
-        </div>
-
-        <div className="mt-4">
-          <p className="text-sm font-bold text-white">Drop player {rosterIsFull ? <span className="text-rose-300">(required — roster full)</span> : <span className="text-cvc-muted">(optional)</span>}</p>
-          <select value={dropPlayerId} onChange={event => setDropPlayerId(event.target.value)} className="mt-2 w-full rounded-md border border-white/20 bg-black/20 px-3 py-2 text-sm text-white">
-            <option value="">— No drop needed —</option>
-            {myRosterPlayers.map((row: any) => <option key={row.player.id} value={row.player.id}>{row.player.display_name} ({row.player.position})</option>)}
-          </select>
-          {myRoster.data ? <p className="mt-1.5 text-xs text-cvc-muted">Your roster has {myRosterPlayers.length}/{MAX_ROSTER_SIZE} players.{rosterIsFull ? " You must drop a player to add one." : ""}</p> : null}
         </div>
 
         <p className="mt-4 text-center text-xs text-cvc-muted">{waiver.data?.period?.label ?? "Waiver"} · Bids are blind until the commissioner's resolution runs</p>
         {submit.error ? <p className="mt-2 text-center text-sm text-red-300">{submit.error.message}</p> : null}
 
-        <div className="mt-4 flex gap-3"><button onClick={() => { setSelectedPlayerId(""); setGroupByPosition(false); }} className="flex-1 rounded-lg border border-white/20 py-2.5 text-sm font-bold text-white hover:bg-white/10">Cancel</button><button disabled={submit.isPending || (!isFreePeriod && (Number(amount) < 1 || Number(amount) > 30)) || (rosterIsFull && !dropPlayerId)} onClick={() => submit.mutate({ playerId: selectedPlayerId, amount: isFreePeriod ? 1 : Number(amount), maxPlayersDesired: Number(maxPlayersDesired) || 1, groupByPosition: Number(maxPlayersDesired) > 1 && groupByPosition, dropPlayerId: dropPlayerId || undefined })} className="cvc-button-compact flex-[2] justify-center disabled:opacity-50">{submit.isPending ? "Submitting…" : `Submit $${isFreePeriod ? 1 : Number(amount) || 0} ${isFreePeriod ? "claim" : "bid"}`}</button></div>
-        <p className="mt-3 text-[11px] leading-4 text-cvc-muted">If you submit several {isFreePeriod ? "claims" : "bids"} this cycle, "max players to win" caps how many of them you're actually willing to win at once — leave it at 1 unless you're prepared to trim your roster afterward.</p>
+        <div className="mt-4 flex gap-3"><button onClick={() => setSelectedPlayerId("")} className="flex-1 rounded-lg border border-white/20 py-2.5 text-sm font-bold text-white hover:bg-white/10">Cancel</button><button disabled={submit.isPending || (!isFreePeriod && (Number(amount) < 1 || Number(amount) > 30))} onClick={() => submit.mutate({ playerId: selectedPlayerId, amount: isFreePeriod ? 1 : Number(amount) })} className="cvc-button-compact flex-[2] justify-center disabled:opacity-50">{submit.isPending ? "Submitting…" : `Submit $${isFreePeriod ? 1 : Number(amount) || 0} ${isFreePeriod ? "claim" : "bid"}`}</button></div>
+        <p className="mt-3 text-[11px] leading-4 text-cvc-muted">You can raise how many you're willing to win at this position afterward on the Manage Bids tab.</p>
       </div>
     </div> : null}
   </div>;
