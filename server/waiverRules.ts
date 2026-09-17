@@ -192,14 +192,11 @@ export function resolveWaiverAssignments(
           changedThisRound = true;
           continue;
         }
-        const rosterAfter = rosterRunning - (bid.dropPlayerId ? 1 : 0) + 1;
-        if (rosterAfter > rosterCap) {
-          rejected.add(bid.id);
-          rejectionReasonByBid.set(bid.id, { type: "roster", cap: rosterCap });
-          changedThisRound = true;
-          continue;
-        }
-        rosterRunning = rosterAfter;
+        // Roster size is no longer a rejection reason (commissioner call, Sept 2026) --
+        // rosterRunning is still tracked for bookkeeping/future use but never caps a
+        // win anymore. Only max_players_desired and season FAAB budget can reject a
+        // claim now.
+        rosterRunning = rosterRunning - (bid.dropPlayerId ? 1 : 0) + 1;
         budgetRunning -= bid.cost;
         winsRunningByGroup.set(bid.groupKey, winsRunning + 1);
       }

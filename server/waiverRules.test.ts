@@ -116,35 +116,36 @@ describe("resolveWaiverAssignments (the cascade: an owner's own claims collide w
     expect(rejectionReasonByBid.size).toBe(0);
   });
 
-  it("uses the owner's own priority (not bid amount) to decide which of their OWN colliding claims survive a roster cap", () => {
-    // Same franchise leads on two different players, but only has 1 roster spot left.
-    // They bid MORE on playerY but marked playerX as their higher priority (1 < 2).
+  it("no longer treats a full roster as a blocker -- an owner's OWN colliding claims all win now even past the roster cap (roster size is no longer a rejection reason)", () => {
+    // Same franchise leads on two different players with only 1 nominal roster spot
+    // left (would need 2 to fit both) -- both should win now.
     const ranked = new Map([
       ["playerX", [candidate("bidX", "teamA", { cost: 5, priority: 1 })]],
       ["playerY", [candidate("bidY", "teamA", { cost: 20, priority: 2 })]],
     ]);
-    const capacity = new Map([["teamA", { rosterCount: 21, budget: 30 }]]); // exactly 1 spot left
+    const capacity = new Map([["teamA", { rosterCount: 21, budget: 30 }]]); // "only" 1 spot left, need 2
     const { winnerByPlayer, rejectionReasonByBid } = resolveWaiverAssignments(ranked, capacity, 22);
-    expect(winnerByPlayer.get("playerX")).toBe("bidX"); // kept: priority 1
-    expect(winnerByPlayer.has("playerY")).toBe(false); // bumped despite the bigger bid
-    expect(rejectionReasonByBid.get("bidY")).toEqual({ type: "roster", cap: 22 });
+    expect(winnerByPlayer.get("playerX")).toBe("bidX");
+    expect(winnerByPlayer.get("playerY")).toBe("bidY"); // no longer bumped -- roster size never rejects
+    expect(rejectionReasonByBid.size).toBe(0);
   });
 
   it("cascades a bumped claim to the next-highest outside bidder instead of leaving the player unclaimed", () => {
-    // teamA would win both playerX (priority 1) and playerY (priority 2), but only has
-    // room for one. playerY should fall through to teamB, the next-best bidder on it.
+    // teamA would win both playerX (priority 1) and playerY (priority 2), but their
+    // shared max_players_desired of 1 only allows one. playerY should fall through to
+    // teamB, the next-best bidder on it.
     const ranked = new Map([
-      ["playerX", [candidate("bidX", "teamA", { priority: 1 })]],
-      ["playerY", [candidate("bidY-teamA", "teamA", { priority: 2 }), candidate("bidY-teamB", "teamB", { priority: 1 })]],
+      ["playerX", [candidate("bidX", "teamA", { priority: 1, maxPlayersDesired: 1 })]],
+      ["playerY", [candidate("bidY-teamA", "teamA", { priority: 2, maxPlayersDesired: 1 }), candidate("bidY-teamB", "teamB", { priority: 1 })]],
     ]);
     const capacity = new Map([
-      ["teamA", { rosterCount: 21, budget: 30 }],
+      ["teamA", { rosterCount: 15, budget: 30 }],
       ["teamB", { rosterCount: 15, budget: 30 }],
     ]);
     const { winnerByPlayer, rejectionReasonByBid } = resolveWaiverAssignments(ranked, capacity, 22);
     expect(winnerByPlayer.get("playerX")).toBe("bidX");
     expect(winnerByPlayer.get("playerY")).toBe("bidY-teamB"); // cascaded, not left unclaimed
-    expect(rejectionReasonByBid.get("bidY-teamA")?.type).toBe("roster");
+    expect(rejectionReasonByBid.get("bidY-teamA")?.type).toBe("max_players_desired");
   });
 
   it("rejects a lower-priority claim once the season FAAB budget runs out, cheaper claims further down still get evaluated", () => {
@@ -173,11 +174,11 @@ describe("resolveWaiverAssignments (the cascade: an owner's own claims collide w
     expect(rejectionReasonByBid.get("bidY")).toEqual({ type: "max_players_desired", limit: 1 });
   });
 
-  it("a claim that includes a drop nets to zero roster change, so it doesn't get bumped by the roster cap", () => {
-    const ranked = new Map([["playerX", [candidate("bidX", "teamA", { dropPlayerId: "oldPlayer" })]]]);
-    const capacity = new Map([["teamA", { rosterCount: 22, budget: 30 }]]); // already at the cap
+  it("never rejects a claim for exceeding the roster cap -- roster size is no longer a rejection reason, even with no drop", () => {
+    const ranked = new Map([["playerX", [candidate("bidX", "teamA")]]]);
+    const capacity = new Map([["teamA", { rosterCount: 22, budget: 30 }]]); // already at the cap, no drop offered
     const { winnerByPlayer, rejectionReasonByBid } = resolveWaiverAssignments(ranked, capacity, 22);
-    expect(winnerByPlayer.get("playerX")).toBe("bidX"); // net roster change is 0 (drop one, add one)
+    expect(winnerByPlayer.get("playerX")).toBe("bidX"); // wins despite pushing the roster to 23
     expect(rejectionReasonByBid.size).toBe(0);
   });
 
