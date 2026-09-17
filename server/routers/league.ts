@@ -13,7 +13,7 @@ import { normalizePlayerName } from "@shared/playerNameMatch";
 import { syncNflTeamAssignments } from "../nflTeamAssignmentSync";
 import { getFaabBalance, MAX_ROSTER_SIZE, STARTING_FAAB } from "../waiverRules";
 import { resolveOpenWaiverPeriod } from "../waiverResolution";
-import { computeNextResolutionTime } from "../waiverResolutionTiming";
+import { computeNextResolutionTime, nextRosterCutDeadline } from "../waiverResolutionTiming";
 import { syncFantasyProsSnapshot, syncFantasyProsActiveFlags, syncFantasyProsRookieFlags } from "../fantasyProsSync";
 import { syncTank01SeasonStats } from "../tank01SeasonStatsSync";
 import { syncTank01Scores } from "../tank01ScoringSync";
@@ -1382,7 +1382,10 @@ export const leagueRouter = router({
     const { season } = await getCurrentLeagueAndSeason();
     const now = new Date().toISOString();
     const period = unwrap(await supabase.from("waiver_period").select("id, label, opens_at, closes_at, status, period_type").eq("season_id", season.id).eq("status", "open").lte("opens_at", now).gte("closes_at", now).order("closes_at").limit(1).maybeSingle());
-    return { period };
+    // The next of the two fixed weekly roster-cut deadlines (Thu 8pm / Sun 12:55pm ET)
+    // -- independent of this waiver_period row, just a pure time computation, so it's
+    // cheap to piggyback on this already-public, already-cheap query.
+    return { period, nextRosterCutDeadline: nextRosterCutDeadline(new Date()).toISOString() };
   }),
 
   createWaiverPeriod: protectedProcedure.input(z.object({ label: z.string().min(2).max(100), opensAt: z.string().datetime(), closesAt: z.string().datetime(), periodType: z.enum(["bid", "free"]).default("bid") }).refine(value => new Date(value.closesAt) > new Date(value.opensAt), { message: "A waiver period must close after it opens." })).mutation(async ({ ctx, input }) => {

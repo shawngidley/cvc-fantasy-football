@@ -49,6 +49,34 @@ export function nextEasternWeekdayAt(from: Date, weekday: number, hour: number):
   return fallback;
 }
 
+/** Next of two fixed weekly roster-cut deadlines strictly after `from`: Thursday
+ * 8:00pm ET or Sunday 12:55pm ET, whichever comes first. Independent of any specific
+ * waiver_period row -- these are the two weekly moments a roster must already be back
+ * at MAX_ROSTER_SIZE. easternWallClockToUtc only takes a whole hour, so the Sunday
+ * 12:55pm case is built as 12:00pm plus 55 minutes -- safe because the ET UTC offset
+ * is constant across that hour (nowhere near a DST transition, which only ever occurs
+ * in the 1-2am window). */
+export function nextRosterCutDeadline(from: Date): Date {
+  const start = getEasternDateParts(from);
+  for (let daysAhead = 0; daysAhead <= 8; daysAhead++) {
+    const noonUtcOnCandidateDate = Date.UTC(start.year, start.month - 1, start.day + daysAhead, 12);
+    const candidateDate = getEasternDateParts(new Date(noonUtcOnCandidateDate));
+    if (candidateDate.weekday === 4) {
+      const candidate = easternWallClockToUtc(candidateDate.year, candidateDate.month, candidateDate.day, 20);
+      if (candidate.getTime() > from.getTime()) return candidate;
+    }
+    if (candidateDate.weekday === 0) {
+      const candidate = new Date(easternWallClockToUtc(candidateDate.year, candidateDate.month, candidateDate.day, 12).getTime() + 55 * 60 * 1000);
+      if (candidate.getTime() > from.getTime()) return candidate;
+    }
+  }
+  // Unreachable given the 8-day window always contains both a Thursday and a Sunday,
+  // but keeps the return type non-nullable without an assertion.
+  const fallback = new Date(from);
+  fallback.setUTCDate(fallback.getUTCDate() + 7);
+  return fallback;
+}
+
 /** Next Thursday-or-Sunday 9:00am America/New_York strictly after `from`. Both the
  * cut-lock ("must stay on your roster until the next bid awarding occurs the following
  * Thursday or Sunday") and the next waiver_period's closes_at are computed with this

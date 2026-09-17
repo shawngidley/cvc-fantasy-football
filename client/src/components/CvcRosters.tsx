@@ -3,7 +3,8 @@ import { trpc } from "@/lib/trpc";
 import { useCvcOwnerAuth } from "@/hooks/useCvcOwnerAuth";
 import { Link } from "wouter";
 import { useState } from "react";
-import { UsersRound } from "lucide-react";
+import { toast } from "sonner";
+import { AlertTriangle, UsersRound } from "lucide-react";
 import { TeamLogo } from "@/components/TeamLogo";
 
 const posTone: Record<string, string> = { QB: "bg-violet-100 text-violet-800", RB: "bg-emerald-100 text-emerald-800", WR: "bg-sky-100 text-sky-800", TE: "bg-amber-100 text-amber-800", K: "bg-fuchsia-100 text-fuchsia-800", DST: "bg-slate-200 text-slate-700" };
@@ -37,16 +38,30 @@ function contractLabel(item: any) {
   return `${year}${KNOWN_SOURCE_MARKERS.has(marker) ? `-${marker}` : ""}`;
 }
 
+// Matches how CvcFreeAgents formats waiver-related deadlines -- "Thu 9/18, 8:00 PM ET".
+function formatDeadline(iso: string | null | undefined): string | null {
+  if (!iso) return null;
+  const date = new Date(iso);
+  const parts = new Intl.DateTimeFormat("en-US", { timeZone: "America/New_York", weekday: "short", month: "numeric", day: "numeric", hour: "numeric", minute: "2-digit", hour12: true }).formatToParts(date);
+  const get = (type: string) => parts.find(part => part.type === type)?.value ?? "";
+  return `${get("weekday")} ${get("month")}/${get("day")}, ${get("hour")}:${get("minute")} ${get("dayPeriod")} ET`;
+}
+
 function RosterCard({ franchise, mine }: { franchise: any; mine?: boolean }) {
+  const utils = trpc.useUtils();
   const roster = trpc.league.franchiseRoster.useQuery({ franchiseId: franchise.id });
+  const waiver = trpc.league.waiverStatus.useQuery();
+  const cutPlayer = trpc.league.cutContractPlayer.useMutation({ onSuccess: async () => { await Promise.all([utils.league.franchiseRoster.invalidate({ franchiseId: franchise.id }), utils.league.activity.invalidate(), utils.league.freeAgents.invalidate()]); }, onError: error => toast.error(error.message) });
   const players = [...(roster.data?.players ?? [])].sort((a, b) => (order[a.player?.position ?? ""] ?? 99) - (order[b.player?.position ?? ""] ?? 99) || Number(b.contract?.salary ?? -1) - Number(a.contract?.salary ?? -1) || (a.player?.display_name ?? "").localeCompare(b.player?.display_name ?? ""));
   const totalSalary = players.reduce((sum, item) => sum + (item.contract ? Number(item.contract.salary) : 0), 0);
+  const rosterGridCols = "grid-cols-[2.25rem_minmax(0,1fr)_2.25rem_3.75rem_4.5rem_2.75rem]";
   return <section className={mine ? "overflow-hidden rounded-xl bg-white shadow-xl ring-2 ring-cvc-accent" : "overflow-hidden rounded-xl bg-white shadow-xl"}>
     <div className="h-1.5 bg-cvc-accent" />
     <div className="flex items-center gap-3 px-4 pb-3 pt-4"><TeamLogo name={franchise.name} abbreviation={franchise.abbreviation} logoUrl={franchise.logo_url} size="md" className="rounded-lg border-cvc-deep/20"/><div className="min-w-0 flex-1"><p className="truncate font-display text-xl uppercase tracking-[.04em] text-cvc-deep">{franchise.name}</p><p className="mt-0.5 text-xs text-slate-500">{franchise.owner} · {players.length} players</p></div>{mine ? <span className="rounded bg-cvc-accent px-2 py-1 text-[9px] font-bold uppercase tracking-[.09em] text-cvc-deep">My team</span> : null}<Link href={`/lineup/${franchise.id}`} className="rounded bg-cvc-deep px-2 py-1.5 text-[9px] font-bold uppercase tracking-[.08em] text-white hover:bg-cvc-accent hover:text-cvc-deep">View lineup</Link></div>
+    {mine && players.length > 22 ? <div className="mx-4 mb-3 flex items-center gap-2 rounded-lg border border-red-300 bg-red-50 px-3 py-2 text-xs font-semibold text-red-800"><AlertTriangle size={14} className="shrink-0" /> Over the 22-player roster limit -- cut down to 22{formatDeadline(waiver.data?.nextRosterCutDeadline) ? ` by ${formatDeadline(waiver.data?.nextRosterCutDeadline)}` : ""}.</div> : null}
     <div className="border-t border-slate-200">
-      <div className="grid grid-cols-[2.25rem_minmax(0,1fr)_2.25rem_3.75rem_4.5rem] gap-2 bg-slate-100 px-4 py-2 text-[9px] font-black uppercase tracking-[.08em] text-slate-500"><span>Pos</span><span>Player</span><span>NFL</span><span className="text-right">Salary</span><span className="text-right">Contract</span></div>
-      {roster.isLoading ? <p className="px-4 py-8 text-center text-sm text-slate-400">Loading roster…</p> : players.length ? players.map((item, index) => <div className={index % 2 ? "grid grid-cols-[2.25rem_minmax(0,1fr)_2.25rem_3.75rem_4.5rem] items-center gap-2 bg-slate-50 px-4 py-2" : "grid grid-cols-[2.25rem_minmax(0,1fr)_2.25rem_3.75rem_4.5rem] items-center gap-2 bg-white px-4 py-2"} key={item.id}><span className={`rounded px-1.5 py-0.5 text-center text-[10px] font-bold ${posTone[item.player?.position] ?? "bg-slate-100 text-slate-700"}`}>{item.player?.position ?? "—"}</span><Link href={`/player/${item.player_id}`} className="min-w-0 truncate text-sm font-semibold text-cvc-deep hover:text-cvc-accent">{shortName(item.player?.display_name)}</Link><span className="text-xs font-semibold text-slate-500">{item.player?.nfl_team ?? "FA"}</span><span className="text-right text-[10px] font-bold text-cvc-deep">{item.contract ? `$${Number(item.contract.salary).toFixed(0)}` : "—"}</span><span className="text-right text-[10px] font-bold uppercase text-slate-600">{contractLabel(item)}</span></div>) : <p className="px-4 py-8 text-center text-sm text-slate-400">No active roster assignments.</p>}
+      <div className={`grid ${rosterGridCols} gap-2 bg-slate-100 px-4 py-2 text-[9px] font-black uppercase tracking-[.08em] text-slate-500`}><span>Pos</span><span>Player</span><span>NFL</span><span className="text-right">Salary</span><span className="text-right">Contract</span><span></span></div>
+      {roster.isLoading ? <p className="px-4 py-8 text-center text-sm text-slate-400">Loading roster…</p> : players.length ? players.map((item, index) => <div className={`grid ${rosterGridCols} items-center gap-2 px-4 py-2 ${index % 2 ? "bg-slate-50" : "bg-white"}`} key={item.id}><span className={`rounded px-1.5 py-0.5 text-center text-[10px] font-bold ${posTone[item.player?.position] ?? "bg-slate-100 text-slate-700"}`}>{item.player?.position ?? "—"}</span><Link href={`/player/${item.player_id}`} className="min-w-0 truncate text-sm font-semibold text-cvc-deep hover:text-cvc-accent">{shortName(item.player?.display_name)}</Link><span className="text-xs font-semibold text-slate-500">{item.player?.nfl_team ?? "FA"}</span><span className="text-right text-[10px] font-bold text-cvc-deep">{item.contract ? `$${Number(item.contract.salary).toFixed(0)}` : "—"}</span><span className="text-right text-[10px] font-bold uppercase text-slate-600">{contractLabel(item)}</span>{mine ? <button onClick={() => { if (window.confirm(`Cut ${item.player?.display_name ?? "this player"}? This is final, carries no contract penalty, and makes them an unrestricted free agent.`)) cutPlayer.mutate({ franchiseId: franchise.id, playerId: item.player_id }); }} disabled={cutPlayer.isPending} className="rounded bg-red-50 px-1.5 py-1 text-[9px] font-bold uppercase text-red-700 hover:bg-red-100 disabled:opacity-50" title="Cut this player">Cut</button> : <span />}</div>) : <p className="px-4 py-8 text-center text-sm text-slate-400">No active roster assignments.</p>}
       {!roster.isLoading && players.length ? <div className="flex items-center justify-between border-t-2 border-cvc-deep/15 bg-slate-100 px-4 py-2.5"><span className="text-[10px] font-black uppercase tracking-[.08em] text-slate-600">{players.length} player{players.length === 1 ? "" : "s"}</span><span className="text-sm font-black text-cvc-deep">${totalSalary.toFixed(0)} total salary</span></div> : null}
     </div>
   </section>;

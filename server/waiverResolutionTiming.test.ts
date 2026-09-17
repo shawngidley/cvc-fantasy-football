@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { computeNextResolutionTime, nextEasternWeekdayAt, sameEasternDayAt } from "./waiverResolutionTiming";
+import { computeNextResolutionTime, nextEasternWeekdayAt, nextRosterCutDeadline, sameEasternDayAt } from "./waiverResolutionTiming";
 
 // Helper: format a UTC instant as an America/New_York wall-clock string for readable
 // assertions.
@@ -79,6 +79,34 @@ describe("nextEasternWeekdayAt", () => {
     const tuesday10am = new Date("2026-09-08T14:00:00.000Z"); // Tue Sep 8 2026, 10am EDT (past 9am)
     const result = nextEasternWeekdayAt(tuesday10am, 2, 9);
     expect(easternString(result)).toBe("Tue, 09/15/2026, 09:00");
+  });
+});
+
+describe("nextRosterCutDeadline", () => {
+  it("finds the upcoming Thursday 8pm ET from a midweek date", () => {
+    const tuesday = new Date("2026-09-08T14:00:00.000Z"); // Tue Sep 8 2026, 10am EDT
+    const result = nextRosterCutDeadline(tuesday);
+    expect(easternString(result)).toBe("Thu, 09/10/2026, 20:00");
+    expect(result.toISOString()).toBe("2026-09-11T00:00:00.000Z"); // 8pm EDT = 00:00 UTC next day
+  });
+
+  it("finds the following Sunday 12:55pm ET when starting just after Thursday's 8pm deadline", () => {
+    const from = new Date("2026-09-11T00:00:00.000Z"); // exactly Thu Sep 10 2026, 8pm ET
+    const result = nextRosterCutDeadline(from);
+    expect(easternString(result)).toBe("Sun, 09/13/2026, 12:55");
+    expect(result.toISOString()).toBe("2026-09-13T16:55:00.000Z");
+  });
+
+  it("finds the next Thursday 8pm ET when starting just after Sunday's 12:55pm deadline", () => {
+    const from = new Date("2026-09-13T16:55:00.000Z"); // exactly Sun Sep 13 2026, 12:55pm ET
+    const result = nextRosterCutDeadline(from);
+    expect(easternString(result)).toBe("Thu, 09/17/2026, 20:00");
+  });
+
+  it("does not return a time at or before the input", () => {
+    const from = new Date("2026-09-13T16:55:00.000Z");
+    const result = nextRosterCutDeadline(from);
+    expect(result.getTime()).toBeGreaterThan(from.getTime());
   });
 });
 
