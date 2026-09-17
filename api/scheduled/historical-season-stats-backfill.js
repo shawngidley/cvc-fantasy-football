@@ -325,7 +325,8 @@ function extractEspnId(row) {
   const raw = row.espnID ?? row.espnId;
   return raw !== void 0 && raw !== null ? String(raw) : null;
 }
-async function backfillHistoricalSeasonStats(year, limit = 40) {
+async function backfillHistoricalSeasonStats(year, limit = 40, timeBudgetMs = 26e4) {
+  const startedAt = Date.now();
   const adapter2 = getNFLDataAdapter();
   if (!(adapter2 instanceof Tank01NFLDataAdapter)) throw new Error("Tank01 is not configured for the historical stats backfill.");
   const players = unwrap(await supabase.from("player").select("id, display_name, position, metadata").neq("provider", "placeholder").in("position", ELIGIBLE_POSITIONS).order("display_name")) ?? [];
@@ -336,10 +337,13 @@ async function backfillHistoricalSeasonStats(year, limit = 40) {
   const batch = pending.slice(0, limit);
   const currentSeason = unwrap(await supabase.from("season").select("id").eq("is_current", true).limit(1).maybeSingle()) ?? unwrap(await supabase.from("season").select("id").order("year", { ascending: false }).limit(1).maybeSingle());
   const rules = currentSeason ? unwrap(await supabase.from("scoring_rule").select("stat_key, value, applies_to_positions").eq("season_id", currentSeason.id)) ?? [] : [];
+  let attempted = 0;
   let updated = 0;
   let notFound = 0;
   for (let i = 0; i < batch.length; i += CONCURRENCY) {
+    if (Date.now() - startedAt > timeBudgetMs) break;
     const chunk = batch.slice(i, i + CONCURRENCY);
+    attempted += chunk.length;
     await Promise.all(chunk.map(async (player) => {
       try {
         const tank01Id = player.metadata?.tank01_id ? String(player.metadata.tank01_id) : null;
@@ -368,7 +372,7 @@ async function backfillHistoricalSeasonStats(year, limit = 40) {
       }
     }));
   }
-  return { status: pending.length > batch.length ? "in_progress" : "completed", attempted: batch.length, updated, notFound, remaining: pending.length - batch.length };
+  return { status: pending.length > attempted ? "in_progress" : "completed", attempted, updated, notFound, remaining: pending.length - attempted };
 }
 
 // server/_core/scheduledHandlers.ts

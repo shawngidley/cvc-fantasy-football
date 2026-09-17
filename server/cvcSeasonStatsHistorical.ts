@@ -27,11 +27,16 @@ export type HistoricalBackfillSummary = { status: "completed" | "in_progress"; a
  * stats from ESPN's gamelog. A past season's real stats never change once the season
  * is over, so once a player has a row for a given year, they're never re-attempted for
  * that same year -- unlike the current-season sync, there's no staleness concept here
- * at all. Batched the same way as the existing season-stats sync (limit players per
- * call), since this is commissioner-triggered from the same kind of "click until done"
- * button, not a scheduled job.
+ * at all. Resumable and bounded twice over: `limit` caps how many players one call may
+ * attempt, and `timeBudgetMs` stops the loop between chunks once the invocation has run
+ * long enough, so a call that cannot finish the year returns "in_progress" with an
+ * accurate `remaining` instead of being hard-killed by the serverless timeout. Keep
+ * `timeBudgetMs` comfortably below this function's maxDuration in vercel.json -- the
+ * budget is only checked between chunks, so the in-flight chunk still needs time to
+ * settle after the break.
  */
-export async function backfillHistoricalSeasonStats(year: number, limit = 40): Promise<HistoricalBackfillSummary> {
+export async function backfillHistoricalSeasonStats(year: number, limit = 40, timeBudgetMs = 260_000): Promise<HistoricalBackfillSummary> {
+  const startedAt = Date.now();
   const adapter = getNFLDataAdapter();
   if (!(adapter instanceof Tank01NFLDataAdapter)) throw new Error("Tank01 is not configured for the historical stats backfill.");
 
@@ -46,10 +51,18 @@ export async function backfillHistoricalSeasonStats(year: number, limit = 40): P
   const currentSeason = unwrap(await supabase.from("season").select("id").eq("is_current", true).limit(1).maybeSingle()) ?? unwrap(await supabase.from("season").select("id").order("year", { ascending: false }).limit(1).maybeSingle());
   const rules = currentSeason ? unwrap(await supabase.from("scoring_rule").select("stat_key, value, applies_to_positions").eq("season_id", currentSeason.id)) ?? [] : [];
 
+  let attempted = 0;
   let updated = 0;
   let notFound = 0;
   for (let i = 0; i < batch.length; i += CONCURRENCY) {
+    // Stop ourselves gracefully before Vercel's maxDuration hard-kills the invocation
+    // mid-chunk (a 504 FUNCTION_INVOCATION_TIMEOUT loses the whole response, even though
+    // the rows already upserted did persist). Whatever is left is simply reported as
+    // remaining and picked up by the next run -- the same resumable shape this function
+    // already had when `limit` cut the batch short.
+    if (Date.now() - startedAt > timeBudgetMs) break;
     const chunk = batch.slice(i, i + CONCURRENCY);
+    attempted += chunk.length;
     await Promise.all(chunk.map(async player => {
       try {
         const tank01Id = player.metadata?.tank01_id ? String(player.metadata.tank01_id) : null;
@@ -72,5 +85,5 @@ export async function backfillHistoricalSeasonStats(year: number, limit = 40): P
     }));
   }
 
-  return { status: pending.length > batch.length ? "in_progress" : "completed", attempted: batch.length, updated, notFound, remaining: pending.length - batch.length };
+  return { status: pending.length > attempted ? "in_progress" : "completed", attempted, updated, notFound, remaining: pending.length - attempted };
 }
