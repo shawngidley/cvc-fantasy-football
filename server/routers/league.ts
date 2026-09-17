@@ -1444,7 +1444,16 @@ export const leagueRouter = router({
         throw new TRPCError({ code: "BAD_REQUEST", message: `This player was just acquired via waivers and can't be cut until the next waiver resolution (${new Date(drop.locked_until).toLocaleString("en-US", { weekday: "short", hour: "numeric", minute: "2-digit", timeZoneName: "short" })}).` });
       }
     }
-    const bid = unwrap(await supabase.from("faab_bid").upsert({ waiver_period_id: period.id, franchise_id: franchise.id, player_id: input.playerId, drop_player_id: input.dropPlayerId ?? null, amount, priority: input.priority, max_players_desired: input.maxPlayersDesired, status: "pending", confirmed_at: isFreePeriod ? null : new Date().toISOString() }, { onConflict: "waiver_period_id,franchise_id,player_id" }).select("id, amount, priority, status, confirmed_at").single());
+    // A new (or re-pooled) bid-period claim inherits the default pool's CURRENT max
+    // instead of always starting at whatever the client sent (now always 1) -- keeps
+    // the stored value from drifting from what resolveOpenWaiverPeriod actually caps
+    // the pool at. Free-period claims don't have this pool concept.
+    let maxPlayersDesired = input.maxPlayersDesired;
+    if (!isFreePeriod) {
+      const existingPoolBids = unwrap(await supabase.from("faab_bid").select("max_players_desired").eq("waiver_period_id", period.id).eq("franchise_id", franchise.id).eq("status", "pending").is("bid_group_id", null)) ?? [];
+      maxPlayersDesired = existingPoolBids.length ? Math.max(...existingPoolBids.map(row => row.max_players_desired)) : 1;
+    }
+    const bid = unwrap(await supabase.from("faab_bid").upsert({ waiver_period_id: period.id, franchise_id: franchise.id, player_id: input.playerId, drop_player_id: input.dropPlayerId ?? null, amount, priority: input.priority, max_players_desired: maxPlayersDesired, status: "pending", confirmed_at: isFreePeriod ? null : new Date().toISOString() }, { onConflict: "waiver_period_id,franchise_id,player_id" }).select("id, amount, priority, status, confirmed_at").single());
     if (!bid) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "CVC waiver claim could not be saved." });
     await createAuditEvent(league.id, season.id, owner.id, "faab_bid", bid.id, "submitted", `Submitted ${period.label} claim for ${playerRow.display_name}`);
     return bid;
@@ -1583,7 +1592,7 @@ export const leagueRouter = router({
     if (!owner) throw new TRPCError({ code: "FORBIDDEN", message: "A CVC owner session is required to update a claim." });
     const franchise = unwrap(await supabase.from("franchise").select("id").eq("current_owner_id", owner.id).eq("is_active", true).limit(1).maybeSingle());
     if (!franchise) throw new TRPCError({ code: "FORBIDDEN", message: "Only an owner with an active CVC franchise may update a claim." });
-    const bid = unwrap(await supabase.from("faab_bid").select("id, franchise_id, status").eq("id", input.bidId).maybeSingle());
+    const bid = unwrap(await supabase.from("faab_bid").select("id, franchise_id, status, waiver_period_id").eq("id", input.bidId).maybeSingle());
     if (!bid) throw new TRPCError({ code: "NOT_FOUND", message: "That CVC claim was not found." });
     if (bid.franchise_id !== franchise.id) throw new TRPCError({ code: "FORBIDDEN", message: "You may only update your own CVC franchise's claims." });
     if (bid.status !== "pending") throw new TRPCError({ code: "BAD_REQUEST", message: "That claim has already been resolved and can no longer be updated." });
@@ -1591,8 +1600,16 @@ export const leagueRouter = router({
       const group = unwrap(await supabase.from("faab_bid_group").select("id, franchise_id").eq("id", input.groupId).maybeSingle());
       if (!group) throw new TRPCError({ code: "NOT_FOUND", message: "That CVC claim group was not found." });
       if (group.franchise_id !== franchise.id) throw new TRPCError({ code: "FORBIDDEN", message: "You may only move claims into your own CVC franchise's groups." });
+      unwrap(await supabase.from("faab_bid").update({ bid_group_id: input.groupId }).eq("id", input.bidId).select("id").single());
+    } else {
+      // Moving into the default pool: inherit the pool's CURRENT max instead of
+      // whatever this bid's own column happened to hold (same reasoning as
+      // submitFaabBid) -- keeps the stored value from drifting from what
+      // resolveOpenWaiverPeriod actually caps the pool at.
+      const existingPoolBids = unwrap(await supabase.from("faab_bid").select("max_players_desired").eq("waiver_period_id", bid.waiver_period_id).eq("franchise_id", franchise.id).eq("status", "pending").is("bid_group_id", null).neq("id", input.bidId)) ?? [];
+      const maxPlayersDesired = existingPoolBids.length ? Math.max(...existingPoolBids.map(row => row.max_players_desired)) : 1;
+      unwrap(await supabase.from("faab_bid").update({ bid_group_id: null, max_players_desired: maxPlayersDesired }).eq("id", input.bidId).select("id").single());
     }
-    unwrap(await supabase.from("faab_bid").update({ bid_group_id: input.groupId }).eq("id", input.bidId).select("id").single());
     return { updated: true };
   }),
 

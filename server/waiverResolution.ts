@@ -103,6 +103,18 @@ export async function resolveOpenWaiverPeriod(): Promise<WaiverResolutionSummary
   const playerById = new Map((unwrap(playersResult) ?? []).map(row => [row.id, row]));
   const seasonYear = unwrap(seasonResult)?.year ?? new Date().getFullYear();
   const groupById = new Map((unwrap(groupsResult as { data: { id: string; label: string; max_players_desired: number }[] | null; error: { message: string } | null }) ?? []).map(row => [row.id, row]));
+  // The default pool's max_players_desired is a per-franchise value the UI treats as
+  // shared (the highest value among an owner's ungrouped pending bids -- see
+  // setFaabBidGroupMaxPlayers), but it's still stored per individual bid row, so a bid
+  // added -- or moved back into the pool -- after the owner last raised the pool's max
+  // can carry a stale value. Recompute the true current pool max per franchise here so
+  // resolution always matches what the UI shows, regardless of what's stored on any
+  // one bid.
+  const defaultPoolMaxByFranchise = new Map<string, number>();
+  for (const bid of pendingBids) {
+    if (bid.bid_group_id) continue;
+    defaultPoolMaxByFranchise.set(bid.franchise_id, Math.max(defaultPoolMaxByFranchise.get(bid.franchise_id) ?? 1, bid.max_players_desired));
+  }
 
   const byPlayer = new Map<string, PendingBid[]>();
   for (const bid of pendingBids) {
@@ -156,12 +168,13 @@ export async function resolveOpenWaiverPeriod(): Promise<WaiverResolutionSummary
     // feature existed.
     rankedCandidatesByPlayer.set(playerId, ranked.map(bid => {
       const group = bid.bid_group_id ? groupById.get(bid.bid_group_id) : null;
+      const maxPlayersDesired = group ? group.max_players_desired : (defaultPoolMaxByFranchise.get(bid.franchise_id) ?? bid.max_players_desired);
       return {
         id: bid.id,
         franchiseId: bid.franchise_id,
         cost: periodType === "free" ? 1 : bid.amount,
         priority: bid.priority,
-        maxPlayersDesired: group ? group.max_players_desired : bid.max_players_desired,
+        maxPlayersDesired,
         dropPlayerId: bid.drop_player_id,
         groupKey: bid.bid_group_id ?? DEFAULT_GROUP_KEY,
       };
