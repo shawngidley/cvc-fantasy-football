@@ -137,6 +137,7 @@ export function CvcFreeAgents() {
   const confirmClaim = trpc.league.confirmFreeAgentClaim.useMutation({ onSuccess: async () => { await utils.league.myFaabBids.invalidate(); }, onError: error => toast.error(error.message) });
   const cancelClaim = trpc.league.cancelFaabBid.useMutation({ onSuccess: async () => { await Promise.all([utils.league.myFaabBids.invalidate(), utils.league.myFaabBalance.invalidate()]); }, onError: error => toast.error(error.message) });
   const setPriority = trpc.league.setFaabBidPriority.useMutation({ onSuccess: async () => { await utils.league.myFaabBids.invalidate(); }, onError: error => toast.error(error.message) });
+  const setBidAmount = trpc.league.setFaabBidAmount.useMutation({ onSuccess: async () => { await utils.league.myFaabBids.invalidate(); }, onError: error => toast.error(error.message) });
   const setGroupMaxPlayers = trpc.league.setFaabBidGroupMaxPlayers.useMutation({ onSuccess: invalidateBidsAndGroups, onError: error => toast.error(error.message) });
   const createGroup = trpc.league.createFaabBidGroup.useMutation({ onError: error => toast.error(error.message) });
   const deleteGroup = trpc.league.deleteFaabBidGroup.useMutation({ onSuccess: invalidateBidsAndGroups, onError: error => toast.error(error.message) });
@@ -210,12 +211,14 @@ export function CvcFreeAgents() {
   // "move to group" select.
   const renderClaimRow = (bid: any) => {
     const period = Array.isArray(bid.period) ? bid.period[0] : bid.period;
-    const needsConfirmation = bid.status === "pending" && period?.period_type === "free" && period?.status === "open" && !bid.confirmed_at;
+    const isFreePeriodClaim = period?.period_type === "free";
+    const needsConfirmation = bid.status === "pending" && isFreePeriodClaim && period?.status === "open" && !bid.confirmed_at;
     const isPending = bid.status === "pending";
     return <div key={bid.id} className="flex items-center justify-between gap-3 rounded bg-white/5 px-3 py-2 text-sm text-white">
       <span><b>{bid.player?.[0]?.display_name ?? bid.player?.display_name}</b> · ${bid.amount} · <span className="uppercase text-cvc-accent">{needsConfirmation ? "unconfirmed" : bid.status}</span></span>
       <span className="flex shrink-0 items-center gap-2">
         {isPending ? <select value={bid.bid_group_id ?? ""} disabled={assignToGroup.isPending || createGroup.isPending} onChange={event => { const value = event.target.value; if (value === "__new__") createGroupAndAssign(bid.id); else assignToGroup.mutate({ bidId: bid.id, groupId: value || null }); }} className="rounded border border-white/20 bg-black/20 px-2 py-1 text-[10px] uppercase tracking-[.04em] text-white"><option value="">Default pool</option>{(myGroups.data ?? []).map((group: any) => <option key={group.id} value={group.id}>{group.label}</option>)}<option value="__new__" style={{ color: "#e6a43b", backgroundColor: "#ffffff", fontWeight: 700 }}>+ Create new group</option></select> : null}
+        {isPending && !isFreePeriodClaim ? <label className="flex items-center gap-1 text-[10px] uppercase tracking-[.06em] text-cvc-muted">$<input type="number" min={1} max={30} defaultValue={bid.amount} key={`${bid.id}-amount-${bid.amount}`} onBlur={event => { const next = Number(event.target.value); if (Number.isInteger(next) && next >= 1 && next <= 30 && next !== bid.amount) setBidAmount.mutate({ bidId: bid.id, amount: next }); }} className="w-14 rounded border border-white/20 bg-black/20 px-2 py-1 text-center text-xs text-white" /></label> : null}
         {isPending ? <label className="flex items-center gap-1 text-[10px] uppercase tracking-[.06em] text-cvc-muted">Priority<input type="number" min={1} max={99} defaultValue={bid.priority ?? 1} key={`${bid.id}-${bid.priority}`} onBlur={event => { const next = Number(event.target.value); if (Number.isInteger(next) && next >= 1 && next <= 99 && next !== bid.priority) setPriority.mutate({ bidId: bid.id, priority: next }); }} className="w-14 rounded border border-white/20 bg-black/20 px-2 py-1 text-center text-xs text-white" /></label> : null}
         {needsConfirmation ? <button onClick={() => confirmClaim.mutate({ bidId: bid.id })} disabled={confirmClaim.isPending} className="rounded bg-amber-500 px-2.5 py-1 text-xs font-bold text-white hover:bg-amber-600">Confirm claim</button> : null}
         {isPending ? <button onClick={() => cancelClaim.mutate({ bidId: bid.id })} disabled={cancelClaim.isPending} className="rounded bg-white/10 px-2.5 py-1 text-xs font-bold text-white hover:bg-white/20">Cancel</button> : null}

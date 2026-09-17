@@ -1510,6 +1510,33 @@ export const leagueRouter = router({
     return { updated: true };
   }),
 
+  // Lets an owner change their own pending bid's amount -- only for bid-period claims;
+  // a free-period claim is always a flat $1, same distinction submitFaabBid makes at
+  // submission time. Re-runs the exact same $30 season-budget check submitFaabBid does
+  // (remaining balance minus every OTHER pending bid this period), just excluding this
+  // bid's own current amount from the "other pending" sum instead of excluding by the
+  // player being claimed.
+  setFaabBidAmount: protectedProcedure.input(z.object({ bidId: z.string().uuid(), amount: z.number().int().min(1).max(30) })).mutation(async ({ ctx, input }) => {
+    const owner = await getOwnerAccess({ openId: ctx.user.openId });
+    if (!owner) throw new TRPCError({ code: "FORBIDDEN", message: "A CVC owner session is required to update a claim." });
+    const franchise = unwrap(await supabase.from("franchise").select("id").eq("current_owner_id", owner.id).eq("is_active", true).limit(1).maybeSingle());
+    if (!franchise) throw new TRPCError({ code: "FORBIDDEN", message: "Only an owner with an active CVC franchise may update a claim." });
+    const bid = unwrap(await supabase.from("faab_bid").select("id, franchise_id, status, waiver_period_id, period:waiver_period_id(period_type)").eq("id", input.bidId).maybeSingle());
+    if (!bid) throw new TRPCError({ code: "NOT_FOUND", message: "That CVC claim was not found." });
+    if (bid.franchise_id !== franchise.id) throw new TRPCError({ code: "FORBIDDEN", message: "You may only update your own CVC franchise's claims." });
+    if (bid.status !== "pending") throw new TRPCError({ code: "BAD_REQUEST", message: "That claim has already been resolved and can no longer be updated." });
+    const period = Array.isArray(bid.period) ? bid.period[0] : bid.period;
+    if (period?.period_type === "free") throw new TRPCError({ code: "BAD_REQUEST", message: "Free agent period claims are a flat $1 and can't have their amount changed." });
+    const { season } = await getCurrentLeagueAndSeason();
+    const balance = await getFaabBalance(franchise.id, season.id);
+    const otherPendingThisPeriod = (unwrap(await supabase.from("faab_bid").select("amount").eq("waiver_period_id", bid.waiver_period_id).eq("franchise_id", franchise.id).eq("status", "pending").neq("id", input.bidId)) ?? []).reduce((total, row) => total + row.amount, 0);
+    if (input.amount > balance - otherPendingThisPeriod) {
+      throw new TRPCError({ code: "BAD_REQUEST", message: `This bid exceeds your remaining CVC FAAB budget. You have $${balance} left this season${otherPendingThisPeriod ? ` ($${otherPendingThisPeriod} already committed to other pending claims this period)` : ""}.` });
+    }
+    unwrap(await supabase.from("faab_bid").update({ amount: input.amount }).eq("id", input.bidId).select("id").single());
+    return { updated: true };
+  }),
+
   // Owner-defined custom claim groups (faab_bid_group). A pending claim with no
   // bid_group_id sits in the franchise's shared default pool (original pre-grouping
   // behavior -- one shared max_players_desired cap, off the bid's own column). A claim
