@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { selectFreeAgentCandidates, sortByWorstRecordFirst, type FranchiseStanding } from "./waiverRules";
+import { rankBidPeriodCandidates, resolveWaiverAssignments, selectFreeAgentCandidates, sortByWorstRecordFirst, type FranchiseStanding, type WaiverCandidateBid } from "./waiverRules";
 
 describe("selectFreeAgentCandidates (fix for a real gap: free-period claims were being auto-awarded exactly like bid-period FAAB claims, but per commissioner they must not be -- the claiming owner has to explicitly confirm their own claim first, and anything never confirmed by close time is dropped entirely, no award)", () => {
   it("excludes an unconfirmed claim from the candidate pool entirely -- it can never win", () => {
@@ -69,5 +69,115 @@ describe("sortByWorstRecordFirst (confirmed: fewest wins first, then fewest poin
       ["b", { franchiseId: "b", wins: 2, losses: 2, pointsFor: 120 }],
     ]);
     expect(sortByWorstRecordFirst(["a", "b"], standings)).toEqual(["b", "a"]);
+  });
+});
+
+describe("rankBidPeriodCandidates (exposes the FULL bidder ranking for a player, not just the top amount -- needed so a rejected top bid can cascade to the next-highest bidder instead of the player going unclaimed)", () => {
+  it("orders strictly by amount, highest first", () => {
+    const bids = [
+      { franchise_id: "a", amount: 5 },
+      { franchise_id: "b", amount: 15 },
+      { franchise_id: "c", amount: 10 },
+    ];
+    const ranked = rankBidPeriodCandidates(bids, new Map());
+    expect(ranked.map(bid => bid.franchise_id)).toEqual(["b", "c", "a"]);
+  });
+
+  it("breaks a tied amount by worst record first, then continues with the rest of the ranking", () => {
+    const bids = [
+      { franchise_id: "a", amount: 10 },
+      { franchise_id: "b", amount: 10 },
+      { franchise_id: "c", amount: 5 },
+    ];
+    const standings = new Map<string, FranchiseStanding>([
+      ["a", { franchiseId: "a", wins: 5, losses: 0, pointsFor: 100 }],
+      ["b", { franchiseId: "b", wins: 1, losses: 4, pointsFor: 100 }],
+    ]);
+    const ranked = rankBidPeriodCandidates(bids, standings);
+    expect(ranked.map(bid => bid.franchise_id)).toEqual(["b", "a", "c"]);
+  });
+});
+
+describe("resolveWaiverAssignments (the cascade: an owner's own claims collide with their roster cap, budget, or stated max -- their PRIORITY decides which of their own claims survive, not bid amount or processing order, and anything bumped falls through to the next candidate for that player)", () => {
+  function candidate(id: string, franchiseId: string, opts: Partial<WaiverCandidateBid> = {}): WaiverCandidateBid {
+    return { id, franchiseId, cost: 10, priority: 1, maxPlayersDesired: 10, dropPlayerId: null, ...opts };
+  }
+
+  it("awards the single top candidate for each player when nothing collides", () => {
+    const ranked = new Map([
+      ["playerX", [candidate("bid1", "teamA"), candidate("bid2", "teamB")]],
+    ]);
+    const capacity = new Map([
+      ["teamA", { rosterCount: 15, budget: 30 }],
+      ["teamB", { rosterCount: 15, budget: 30 }],
+    ]);
+    const { winnerByPlayer, rejectionReasonByBid } = resolveWaiverAssignments(ranked, capacity, 22);
+    expect(winnerByPlayer.get("playerX")).toBe("bid1");
+    expect(rejectionReasonByBid.size).toBe(0);
+  });
+
+  it("uses the owner's own priority (not bid amount) to decide which of their OWN colliding claims survive a roster cap", () => {
+    // Same franchise leads on two different players, but only has 1 roster spot left.
+    // They bid MORE on playerY but marked playerX as their higher priority (1 < 2).
+    const ranked = new Map([
+      ["playerX", [candidate("bidX", "teamA", { cost: 5, priority: 1 })]],
+      ["playerY", [candidate("bidY", "teamA", { cost: 20, priority: 2 })]],
+    ]);
+    const capacity = new Map([["teamA", { rosterCount: 21, budget: 30 }]]); // exactly 1 spot left
+    const { winnerByPlayer, rejectionReasonByBid } = resolveWaiverAssignments(ranked, capacity, 22);
+    expect(winnerByPlayer.get("playerX")).toBe("bidX"); // kept: priority 1
+    expect(winnerByPlayer.has("playerY")).toBe(false); // bumped despite the bigger bid
+    expect(rejectionReasonByBid.get("bidY")).toEqual({ type: "roster", cap: 22 });
+  });
+
+  it("cascades a bumped claim to the next-highest outside bidder instead of leaving the player unclaimed", () => {
+    // teamA would win both playerX (priority 1) and playerY (priority 2), but only has
+    // room for one. playerY should fall through to teamB, the next-best bidder on it.
+    const ranked = new Map([
+      ["playerX", [candidate("bidX", "teamA", { priority: 1 })]],
+      ["playerY", [candidate("bidY-teamA", "teamA", { priority: 2 }), candidate("bidY-teamB", "teamB", { priority: 1 })]],
+    ]);
+    const capacity = new Map([
+      ["teamA", { rosterCount: 21, budget: 30 }],
+      ["teamB", { rosterCount: 15, budget: 30 }],
+    ]);
+    const { winnerByPlayer, rejectionReasonByBid } = resolveWaiverAssignments(ranked, capacity, 22);
+    expect(winnerByPlayer.get("playerX")).toBe("bidX");
+    expect(winnerByPlayer.get("playerY")).toBe("bidY-teamB"); // cascaded, not left unclaimed
+    expect(rejectionReasonByBid.get("bidY-teamA")?.type).toBe("roster");
+  });
+
+  it("rejects a lower-priority claim once the season FAAB budget runs out, cheaper claims further down still get evaluated", () => {
+    const ranked = new Map([
+      ["playerX", [candidate("bidX", "teamA", { cost: 25, priority: 1 })]],
+      ["playerY", [candidate("bidY", "teamA", { cost: 10, priority: 2 })]],
+      ["playerZ", [candidate("bidZ", "teamA", { cost: 3, priority: 3 })]],
+    ]);
+    const capacity = new Map([["teamA", { rosterCount: 15, budget: 28 }]]); // affords X (25) then Z (3), not Y (10)
+    const { winnerByPlayer, rejectionReasonByBid } = resolveWaiverAssignments(ranked, capacity, 22);
+    expect(winnerByPlayer.get("playerX")).toBe("bidX");
+    expect(winnerByPlayer.get("playerZ")).toBe("bidZ"); // cheaper, lower-priority claim still fits
+    expect(winnerByPlayer.has("playerY")).toBe(false);
+    expect(rejectionReasonByBid.get("bidY")).toEqual({ type: "budget", cost: 10, remaining: 3 });
+  });
+
+  it("stops a franchise's wins at their own stated max_players_desired, keeping the higher-priority ones", () => {
+    const ranked = new Map([
+      ["playerX", [candidate("bidX", "teamA", { priority: 1, maxPlayersDesired: 1 })]],
+      ["playerY", [candidate("bidY", "teamA", { priority: 2, maxPlayersDesired: 1 })]],
+    ]);
+    const capacity = new Map([["teamA", { rosterCount: 15, budget: 30 }]]);
+    const { winnerByPlayer, rejectionReasonByBid } = resolveWaiverAssignments(ranked, capacity, 22);
+    expect(winnerByPlayer.get("playerX")).toBe("bidX");
+    expect(winnerByPlayer.has("playerY")).toBe(false);
+    expect(rejectionReasonByBid.get("bidY")).toEqual({ type: "max_players_desired", limit: 1 });
+  });
+
+  it("a claim that includes a drop nets to zero roster change, so it doesn't get bumped by the roster cap", () => {
+    const ranked = new Map([["playerX", [candidate("bidX", "teamA", { dropPlayerId: "oldPlayer" })]]]);
+    const capacity = new Map([["teamA", { rosterCount: 22, budget: 30 }]]); // already at the cap
+    const { winnerByPlayer, rejectionReasonByBid } = resolveWaiverAssignments(ranked, capacity, 22);
+    expect(winnerByPlayer.get("playerX")).toBe("bidX"); // net roster change is 0 (drop one, add one)
+    expect(rejectionReasonByBid.size).toBe(0);
   });
 });

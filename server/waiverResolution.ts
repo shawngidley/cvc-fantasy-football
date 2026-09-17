@@ -1,8 +1,8 @@
 import { supabase, unwrap } from "./supabase";
-import { computeFranchiseStandings, getFaabBalance, MAX_ROSTER_SIZE, selectFreeAgentCandidates, sortByWorstRecordFirst } from "./waiverRules";
+import { computeFranchiseStandings, getFaabBalance, MAX_ROSTER_SIZE, rankBidPeriodCandidates, resolveWaiverAssignments, selectFreeAgentCandidates, sortByWorstRecordFirst, type WaiverCandidateBid } from "./waiverRules";
 import { computeNextResolutionTime, nextEasternWeekdayAt, sameEasternDayAt } from "./waiverResolutionTiming";
 
-type PendingBid = { id: string; franchise_id: string; player_id: string; drop_player_id: string | null; amount: number; max_players_desired: number; confirmed_at: string | null };
+type PendingBid = { id: string; franchise_id: string; player_id: string; drop_player_id: string | null; amount: number; max_players_desired: number; priority: number; confirmed_at: string | null };
 
 export type WaiverAwardResult = { playerName: string; franchiseName: string; amount: number; droppedPlayerName: string | null };
 export type WaiverSkipResult = { playerName: string; franchiseName: string; reason: string };
@@ -80,7 +80,7 @@ export async function resolveOpenWaiverPeriod(): Promise<WaiverResolutionSummary
 
   const seasonId = period.season_id;
   const periodType = (period.period_type ?? "bid") as "bid" | "free";
-  const pendingBids = (unwrap(await supabase.from("faab_bid").select("id, franchise_id, player_id, drop_player_id, amount, max_players_desired, confirmed_at").eq("waiver_period_id", period.id).eq("status", "pending")) ?? []) as PendingBid[];
+  const pendingBids = (unwrap(await supabase.from("faab_bid").select("id, franchise_id, player_id, drop_player_id, amount, max_players_desired, priority, confirmed_at").eq("waiver_period_id", period.id).eq("status", "pending")) ?? []) as PendingBid[];
 
   if (periodType === "free" && pendingBids.length) await ensureWaiverPriorityBootstrapped(seasonId);
 
@@ -103,14 +103,11 @@ export async function resolveOpenWaiverPeriod(): Promise<WaiverResolutionSummary
     byPlayer.set(bid.player_id, list);
   }
 
-  // Bid cycles: resolve the highest-value/most-contested players first, so a
-  // franchise's roster cap and per-bid max_players_desired budget get consumed by
-  // their most important wins first. Free period: order doesn't affect fairness (winner
-  // is purely priority-based per player), so the same ordering is kept for simplicity.
+  // Deterministic display/commit order only -- the actual winner-per-player decision
+  // below comes from resolveWaiverAssignments, not from this ordering.
   const orderedPlayers = Array.from(byPlayer.entries()).sort((a, b) => Math.max(...b[1].map((bid: PendingBid) => bid.amount)) - Math.max(...a[1].map((bid: PendingBid) => bid.amount)));
 
   const rosterCount = new Map<string, number>();
-  const wonThisCycle = new Map<string, number>();
   const remainingBudget = new Map<string, number>();
   const priorityRotationOrder: string[] = []; // franchise ids, in the order they won a free-period claim this pass
   const nextResolutionAt = computeNextResolutionTime(period.closes_at ? new Date(period.closes_at) : now);
@@ -133,51 +130,53 @@ export async function resolveOpenWaiverPeriod(): Promise<WaiverResolutionSummary
     return balance;
   }
 
+  // Rank every player's full candidate list (best to worst -- not just the top bid),
+  // and give resolveWaiverAssignments each involved franchise's PRE-period roster/FAAB
+  // baseline so it can decide, all at once, whose claims fit once each owner's own
+  // priority order (not bid amount, not processing order) breaks any of their own
+  // internal collisions -- with rejected claims cascading to the next candidate in
+  // line for that specific player rather than going unclaimed.
+  const waiverPriorityByFranchiseId = new Map(franchiseRows.map(row => [row.id, row.waiver_priority]));
+  const rankedCandidatesByPlayer = new Map<string, WaiverCandidateBid[]>();
+  for (const [playerId, bidsForPlayer] of Array.from(byPlayer.entries())) {
+    const ranked = periodType === "free"
+      ? selectFreeAgentCandidates(bidsForPlayer, waiverPriorityByFranchiseId).orderedCandidateFranchiseIds.map(franchiseId => bidsForPlayer.find(bid => bid.franchise_id === franchiseId)).filter((bid): bid is PendingBid => Boolean(bid))
+      : rankBidPeriodCandidates<PendingBid>(bidsForPlayer, standings);
+    rankedCandidatesByPlayer.set(playerId, ranked.map(bid => ({
+      id: bid.id,
+      franchiseId: bid.franchise_id,
+      cost: periodType === "free" ? 1 : bid.amount,
+      priority: bid.priority,
+      maxPlayersDesired: bid.max_players_desired,
+      dropPlayerId: bid.drop_player_id,
+    })));
+  }
+
+  const involvedFranchiseIds = Array.from(new Set(pendingBids.map(bid => bid.franchise_id)));
+  const capacityByFranchise = new Map<string, { rosterCount: number; budget: number }>();
+  for (const franchiseId of involvedFranchiseIds) {
+    capacityByFranchise.set(franchiseId, { rosterCount: await getRosterCount(franchiseId), budget: await getRemainingBudget(franchiseId) });
+  }
+
+  const { winnerByPlayer, rejectionReasonByBid } = resolveWaiverAssignments(rankedCandidatesByPlayer, capacityByFranchise, MAX_ROSTER_SIZE);
+
   for (const [playerId, bidsForPlayer] of orderedPlayers) {
     const playerName = playerById.get(playerId)?.display_name ?? "Unknown player";
-    // Bid cycle: only the highest bid(s) actually contend, tie-broken by worst record.
-    // Free period: every franchise with a pending claim on this player contends, ordered
-    // purely by current waiver priority (lower number = higher priority = first).
-    let orderedCandidateFranchiseIds: string[];
-    let bidByFranchise: Map<string, PendingBid>;
-    if (periodType === "free") {
-      const waiverPriorityByFranchiseId = new Map(franchiseRows.map(row => [row.id, row.waiver_priority]));
-      ({ orderedCandidateFranchiseIds, bidByFranchise } = selectFreeAgentCandidates(bidsForPlayer, waiverPriorityByFranchiseId));
-    } else {
-      const highestAmount = Math.max(...bidsForPlayer.map((bid: PendingBid) => bid.amount));
-      const topBidderFranchiseIds = Array.from(new Set(bidsForPlayer.filter((bid: PendingBid) => bid.amount === highestAmount).map((bid: PendingBid) => bid.franchise_id)));
-      orderedCandidateFranchiseIds = topBidderFranchiseIds.length > 1 ? sortByWorstRecordFirst(topBidderFranchiseIds, standings) : topBidderFranchiseIds;
-      bidByFranchise = new Map(bidsForPlayer.filter((bid: PendingBid) => bid.amount === highestAmount).map((bid: PendingBid) => [bid.franchise_id, bid]));
-    }
-
-    let winner: PendingBid | null = null;
-    for (const franchiseId of orderedCandidateFranchiseIds) {
-      const candidateBid = bidByFranchise.get(franchiseId);
-      if (!candidateBid) continue;
-      const franchiseName = franchiseById.get(franchiseId)?.name ?? "Unknown franchise";
-      const awardAmount = periodType === "free" ? 1 : candidateBid.amount;
-      const alreadyWon = wonThisCycle.get(franchiseId) ?? 0;
-      if (alreadyWon >= candidateBid.max_players_desired) {
-        skipped.push({ playerName, franchiseName, reason: `Already won ${alreadyWon} player${alreadyWon === 1 ? "" : "s"} this period, at their stated max of ${candidateBid.max_players_desired}.` });
-        continue;
-      }
-      const remaining = await getRemainingBudget(franchiseId);
-      if (awardAmount > remaining) {
-        skipped.push({ playerName, franchiseName, reason: `Would cost $${awardAmount} but they have only $${remaining} left this season.` });
-        continue;
-      }
-      const currentCount = await getRosterCount(franchiseId);
-      const willDrop = candidateBid.drop_player_id ? 1 : 0;
-      if (currentCount - willDrop + alreadyWon + 1 > MAX_ROSTER_SIZE) {
-        skipped.push({ playerName, franchiseName, reason: `Awarding this player would exceed the ${MAX_ROSTER_SIZE}-player CVC roster limit.` });
-        continue;
-      }
-      winner = candidateBid;
-      break;
-    }
+    const winnerId = winnerByPlayer.get(playerId);
+    const winner = winnerId ? bidsForPlayer.find(bid => bid.id === winnerId) ?? null : null;
 
     for (const bid of bidsForPlayer) {
       if (winner && bid.id === winner.id) continue;
+      const rejection = rejectionReasonByBid.get(bid.id);
+      if (rejection) {
+        const franchiseName = franchiseById.get(bid.franchise_id)?.name ?? "Unknown franchise";
+        const reason = rejection.type === "max_players_desired"
+          ? `Already won ${rejection.limit} player${rejection.limit === 1 ? "" : "s"} this period, at their stated max of ${rejection.limit}.`
+          : rejection.type === "budget"
+          ? `Would cost $${rejection.cost} but they have only $${rejection.remaining} left this season.`
+          : `Awarding this player would exceed the ${rejection.cap}-player CVC roster limit.`;
+        skipped.push({ playerName, franchiseName, reason });
+      }
       unwrap(await supabase.from("faab_bid").update({ status: "lost", resolved_at: now.toISOString() }).eq("id", bid.id).select("id").single());
     }
     if (!winner) continue;
@@ -195,9 +194,6 @@ export async function resolveOpenWaiverPeriod(): Promise<WaiverResolutionSummary
     unwrap(await supabase.from("faab_bid").update({ status: "won", resolved_at: now.toISOString() }).eq("id", winner.id).select("id").single());
     unwrap(await supabase.from("transaction").insert({ season_id: seasonId, franchise_id: winner.franchise_id, transaction_type: "waiver", status: "final", summary: `${franchise?.name ?? "A CVC franchise"} ${periodType === "free" ? "claimed" : "won"} ${playerName} for $${awardAmount}${periodType === "free" ? " (free agent period)" : " FAAB"} (${period.label}).`, details: { faab_bid_id: winner.id, player_id: playerId, amount: awardAmount } }).select("id").single());
 
-    wonThisCycle.set(winner.franchise_id, (wonThisCycle.get(winner.franchise_id) ?? 0) + 1);
-    rosterCount.set(winner.franchise_id, (await getRosterCount(winner.franchise_id)) + 1 - (winner.drop_player_id ? 1 : 0));
-    remainingBudget.set(winner.franchise_id, (await getRemainingBudget(winner.franchise_id)) - awardAmount);
     if (periodType === "free") priorityRotationOrder.push(winner.franchise_id);
     awarded.push({ playerName, franchiseName: franchise?.name ?? "Unknown franchise", amount: awardAmount, droppedPlayerName: winner.drop_player_id ? (playerById.get(winner.drop_player_id)?.display_name ?? null) : null });
   }

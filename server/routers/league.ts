@@ -1490,6 +1490,26 @@ export const leagueRouter = router({
     return { cancelled: true };
   }),
 
+  // Lets an owner re-rank their OWN pending claims for a period -- this is what
+  // resolveOpenWaiverPeriod's cascade actually uses when an owner's claims collide
+  // with their own roster cap, season budget, or stated max-players-this-period:
+  // their lower-numbered (higher-priority) claims get kept first, and the rest cascade
+  // to the next-highest outside bidder rather than going unclaimed. Doesn't touch
+  // amount or max_players_desired, and doesn't require re-running the submit-time
+  // budget checks -- it's a pure preference reorder among the owner's own bids.
+  setFaabBidPriority: protectedProcedure.input(z.object({ bidId: z.string().uuid(), priority: z.number().int().min(1).max(99) })).mutation(async ({ ctx, input }) => {
+    const owner = await getOwnerAccess({ openId: ctx.user.openId });
+    if (!owner) throw new TRPCError({ code: "FORBIDDEN", message: "A CVC owner session is required to reorder a claim." });
+    const franchise = unwrap(await supabase.from("franchise").select("id").eq("current_owner_id", owner.id).eq("is_active", true).limit(1).maybeSingle());
+    if (!franchise) throw new TRPCError({ code: "FORBIDDEN", message: "Only an owner with an active CVC franchise may reorder a claim." });
+    const bid = unwrap(await supabase.from("faab_bid").select("id, franchise_id, status").eq("id", input.bidId).maybeSingle());
+    if (!bid) throw new TRPCError({ code: "NOT_FOUND", message: "That CVC claim was not found." });
+    if (bid.franchise_id !== franchise.id) throw new TRPCError({ code: "FORBIDDEN", message: "You may only reorder your own CVC franchise's claims." });
+    if (bid.status !== "pending") throw new TRPCError({ code: "BAD_REQUEST", message: "That claim has already been resolved and can no longer be reordered." });
+    unwrap(await supabase.from("faab_bid").update({ priority: input.priority }).eq("id", input.bidId).select("id").single());
+    return { updated: true };
+  }),
+
   myFaabBids: protectedProcedure.query(async ({ ctx }) => {
     const owner = await getOwnerAccess({ openId: ctx.user.openId });
     if (!owner) throw new TRPCError({ code: "FORBIDDEN", message: "A CVC owner session is required." });

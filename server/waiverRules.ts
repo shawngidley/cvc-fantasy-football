@@ -70,3 +70,134 @@ export function selectFreeAgentCandidates<T extends { franchise_id: string; conf
   const orderedCandidateFranchiseIds = Array.from(bidByFranchise.keys()).sort((a, b) => (waiverPriorityByFranchiseId.get(a) ?? Number.MAX_SAFE_INTEGER) - (waiverPriorityByFranchiseId.get(b) ?? Number.MAX_SAFE_INTEGER));
   return { orderedCandidateFranchiseIds, bidByFranchise };
 }
+
+/** Ranks EVERY bid-period claim on a single player from best to worst (not just the
+ * top-dollar group) -- highest amount first, ties broken worst-record-first. Exposing
+ * the full ranking (not just the winner) is what makes a cascade possible: if the top
+ * bidder gets bumped by their own roster/budget/max-players cap (see
+ * resolveWaiverAssignments below), the player needs to fall through to the next
+ * bidder in line rather than going unclaimed. */
+export function rankBidPeriodCandidates<T extends { franchise_id: string; amount: number }>(bidsForPlayer: T[], standings: Map<string, FranchiseStanding>): T[] {
+  const sorted = [...bidsForPlayer].sort((a, b) => b.amount - a.amount);
+  const result: T[] = [];
+  let i = 0;
+  while (i < sorted.length) {
+    let j = i;
+    while (j < sorted.length && sorted[j].amount === sorted[i].amount) j++;
+    const tierFranchiseIds = sorted.slice(i, j).map(bid => bid.franchise_id);
+    const orderedTierIds = tierFranchiseIds.length > 1 ? sortByWorstRecordFirst(tierFranchiseIds, standings) : tierFranchiseIds;
+    const byFranchiseThisTier = new Map(sorted.slice(i, j).map(bid => [bid.franchise_id, bid]));
+    for (const franchiseId of orderedTierIds) {
+      const bid = byFranchiseThisTier.get(franchiseId);
+      if (bid) result.push(bid);
+    }
+    i = j;
+  }
+  return result;
+}
+
+export type WaiverCandidateBid = {
+  id: string;
+  franchiseId: string;
+  cost: number; // amount for a bid-period claim, always 1 for a free-period claim
+  priority: number; // owner-stated priority among their own claims this period -- lower = more wanted
+  maxPlayersDesired: number;
+  dropPlayerId: string | null;
+};
+
+export type FranchiseCapacity = { rosterCount: number; budget: number };
+
+export type WaiverRejectionReason =
+  | { type: "max_players_desired"; limit: number }
+  | { type: "budget"; cost: number; remaining: number }
+  | { type: "roster"; cap: number };
+
+/** The actual cascade: decides, for a whole waiver period at once, which franchise
+ * wins each contested player.
+ *
+ * Each player's `rankedCandidatesByPlayer` list is already ordered best-to-worst
+ * (rankBidPeriodCandidates for bid periods, selectFreeAgentCandidates's ordering for
+ * free periods). Naively awarding each player to its #1 candidate can push a franchise
+ * over its own roster cap, season FAAB budget, or stated max-players-this-period --
+ * when an owner has multiple claims that collectively don't fit, THEY decide which of
+ * their own claims matter more via `priority` (lower number wins), not bid amount and
+ * not processing order. Whichever of their claims get bumped fall through to the next
+ * candidate in that player's list (which might belong to a different franchise, who
+ * may in turn now be over their own cap -- so this runs in rounds, stable-matching
+ * style, until nothing changes) rather than the player going unclaimed.
+ *
+ * `capacityByFranchise` holds each franchise's PRE-period roster count and remaining
+ * season FAAB budget (before anything in this period is awarded) -- this function
+ * computes cumulative usage against that baseline itself, in each franchise's own
+ * priority order, and never mutates the maps passed in. */
+export function resolveWaiverAssignments(
+  rankedCandidatesByPlayer: Map<string, WaiverCandidateBid[]>,
+  capacityByFranchise: Map<string, FranchiseCapacity>,
+  rosterCap: number,
+): { winnerByPlayer: Map<string, string>; rejectionReasonByBid: Map<string, WaiverRejectionReason> } {
+  const rejected = new Set<string>();
+  const rejectionReasonByBid = new Map<string, WaiverRejectionReason>();
+  const cursorByPlayer = new Map<string, number>();
+
+  function tentativeLeader(playerId: string): WaiverCandidateBid | null {
+    const list = rankedCandidatesByPlayer.get(playerId) ?? [];
+    let index = cursorByPlayer.get(playerId) ?? 0;
+    while (index < list.length && rejected.has(list[index].id)) index++;
+    cursorByPlayer.set(playerId, index);
+    return index < list.length ? list[index] : null;
+  }
+
+  let changedThisRound = true;
+  while (changedThisRound) {
+    changedThisRound = false;
+
+    const tentativeByFranchise = new Map<string, WaiverCandidateBid[]>();
+    for (const playerId of Array.from(rankedCandidatesByPlayer.keys())) {
+      const leader = tentativeLeader(playerId);
+      if (!leader) continue;
+      const list = tentativeByFranchise.get(leader.franchiseId) ?? [];
+      list.push(leader);
+      tentativeByFranchise.set(leader.franchiseId, list);
+    }
+
+    for (const [franchiseId, tentativeWins] of Array.from(tentativeByFranchise.entries())) {
+      const ordered = [...tentativeWins].sort((a, b) => a.priority - b.priority || b.cost - a.cost || a.id.localeCompare(b.id));
+      const capacity = capacityByFranchise.get(franchiseId) ?? { rosterCount: 0, budget: 0 };
+      let rosterRunning = capacity.rosterCount;
+      let budgetRunning = capacity.budget;
+      let winsRunning = 0;
+
+      for (const bid of ordered) {
+        if (winsRunning >= bid.maxPlayersDesired) {
+          rejected.add(bid.id);
+          rejectionReasonByBid.set(bid.id, { type: "max_players_desired", limit: bid.maxPlayersDesired });
+          changedThisRound = true;
+          continue;
+        }
+        if (bid.cost > budgetRunning) {
+          rejected.add(bid.id);
+          rejectionReasonByBid.set(bid.id, { type: "budget", cost: bid.cost, remaining: budgetRunning });
+          changedThisRound = true;
+          continue;
+        }
+        const rosterAfter = rosterRunning - (bid.dropPlayerId ? 1 : 0) + 1;
+        if (rosterAfter > rosterCap) {
+          rejected.add(bid.id);
+          rejectionReasonByBid.set(bid.id, { type: "roster", cap: rosterCap });
+          changedThisRound = true;
+          continue;
+        }
+        rosterRunning = rosterAfter;
+        budgetRunning -= bid.cost;
+        winsRunning += 1;
+      }
+    }
+  }
+
+  const winnerByPlayer = new Map<string, string>();
+  for (const playerId of Array.from(rankedCandidatesByPlayer.keys())) {
+    const leader = tentativeLeader(playerId);
+    if (leader) winnerByPlayer.set(playerId, leader.id);
+  }
+  return { winnerByPlayer, rejectionReasonByBid };
+}
