@@ -103,6 +103,12 @@ export type WaiverCandidateBid = {
   priority: number; // owner-stated priority among their own claims this period -- lower = more wanted
   maxPlayersDesired: number;
   dropPlayerId: string | null;
+  // Scopes maxPlayersDesired to bids sharing this same key, within one franchise.
+  // Ungrouped bids (the default) all share a single sentinel key ("__all__"), which is
+  // exactly today's behavior -- one shared cap across every claim. A bid opted into
+  // group_by_position instead uses its player's position as the key, so "1 RB, 1 WR"
+  // becomes two independent pools rather than one shared cap of 1.
+  groupKey: string;
 };
 
 export type FranchiseCapacity = { rosterCount: number; budget: number };
@@ -125,6 +131,12 @@ export type WaiverRejectionReason =
  * candidate in that player's list (which might belong to a different franchise, who
  * may in turn now be over their own cap -- so this runs in rounds, stable-matching
  * style, until nothing changes) rather than the player going unclaimed.
+ *
+ * The max-players-desired cap itself is scoped per-franchise by each bid's `groupKey`
+ * -- an ungrouped bid shares one pool with every other ungrouped bid from that owner
+ * (today's behavior), while a position-grouped bid's cap only counts against that
+ * owner's other bids at the same position. Roster cap and season FAAB budget are never
+ * grouped -- those are always shared across everything a franchise wins this period.
  *
  * `capacityByFranchise` holds each franchise's PRE-period roster count and remaining
  * season FAAB budget (before anything in this period is awarded) -- this function
@@ -165,9 +177,10 @@ export function resolveWaiverAssignments(
       const capacity = capacityByFranchise.get(franchiseId) ?? { rosterCount: 0, budget: 0 };
       let rosterRunning = capacity.rosterCount;
       let budgetRunning = capacity.budget;
-      let winsRunning = 0;
+      const winsRunningByGroup = new Map<string, number>(); // groupKey -> wins counted against it so far
 
       for (const bid of ordered) {
+        const winsRunning = winsRunningByGroup.get(bid.groupKey) ?? 0;
         if (winsRunning >= bid.maxPlayersDesired) {
           rejected.add(bid.id);
           rejectionReasonByBid.set(bid.id, { type: "max_players_desired", limit: bid.maxPlayersDesired });
@@ -189,7 +202,7 @@ export function resolveWaiverAssignments(
         }
         rosterRunning = rosterAfter;
         budgetRunning -= bid.cost;
-        winsRunning += 1;
+        winsRunningByGroup.set(bid.groupKey, winsRunning + 1);
       }
     }
   }
