@@ -129,6 +129,7 @@ export function CvcFreeAgents() {
       list.push(bid);
       map.set(key, list);
     }
+    for (const list of Array.from(map.values())) list.sort((a, b) => (a.priority ?? 1) - (b.priority ?? 1));
     return map;
   }, [myBids.data]);
   const invalidateBidsAndGroups = async () => { await Promise.all([utils.league.myFaabBids.invalidate(), utils.league.myFaabBidGroups.invalidate()]); };
