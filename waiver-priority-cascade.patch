@@ -1,0 +1,461 @@
+diff --git a/client/src/components/CvcFreeAgents.tsx b/client/src/components/CvcFreeAgents.tsx
+index 25b4931..3341a0c 100644
+--- a/client/src/components/CvcFreeAgents.tsx
++++ b/client/src/components/CvcFreeAgents.tsx
+@@ -119,6 +119,7 @@ export function CvcFreeAgents() {
+   const submit = trpc.league.submitFaabBid.useMutation({ onSuccess: async () => { setSelectedPlayerId(""); setAmount("1"); setMaxPlayersDesired("1"); setDropPlayerId(""); await Promise.all([utils.league.myFaabBids.invalidate(), utils.league.myFaabBalance.invalidate(), utils.league.activity.invalidate()]); } });
+   const confirmClaim = trpc.league.confirmFreeAgentClaim.useMutation({ onSuccess: async () => { await utils.league.myFaabBids.invalidate(); }, onError: error => toast.error(error.message) });
+   const cancelClaim = trpc.league.cancelFaabBid.useMutation({ onSuccess: async () => { await Promise.all([utils.league.myFaabBids.invalidate(), utils.league.myFaabBalance.invalidate()]); }, onError: error => toast.error(error.message) });
++  const setPriority = trpc.league.setFaabBidPriority.useMutation({ onSuccess: async () => { await utils.league.myFaabBids.invalidate(); }, onError: error => toast.error(error.message) });
+
+   const activePool = tab === "all-players" ? allPlayersPool : tab === "watchlist" ? watchlistPool : freeAgentsPool;
+   const rawPlayers = activePool.data ?? [];
+@@ -201,7 +202,7 @@ export function CvcFreeAgents() {
+
+     {tab === "manage-bids" ? (
+       <div className="grid gap-5">
+-        <section className="rounded-xl border border-white/10 bg-cvc-deep/60 p-5"><div className="flex items-center gap-2 text-cvc-accent"><DollarSign size={16} /><p className="font-display text-lg uppercase">My claim status</p></div><div className="mt-4 space-y-2">{owner?.franchise ? myBids.data?.length ? myBids.data.map((bid: any) => { const period = Array.isArray(bid.period) ? bid.period[0] : bid.period; const needsConfirmation = bid.status === "pending" && period?.period_type === "free" && period?.status === "open" && !bid.confirmed_at; const isPending = bid.status === "pending"; return <div key={bid.id} className="flex items-center justify-between gap-3 rounded bg-white/5 px-3 py-2 text-sm text-white"><span><b>{bid.player?.[0]?.display_name ?? bid.player?.display_name}</b> · ${bid.amount} · <span className="uppercase text-cvc-accent">{needsConfirmation ? "unconfirmed" : bid.status}</span></span><span className="flex shrink-0 gap-2">{needsConfirmation ? <button onClick={() => confirmClaim.mutate({ bidId: bid.id })} disabled={confirmClaim.isPending} className="rounded bg-amber-500 px-2.5 py-1 text-xs font-bold text-white hover:bg-amber-600">Confirm claim</button> : null}{isPending ? <button onClick={() => cancelClaim.mutate({ bidId: bid.id })} disabled={cancelClaim.isPending} className="rounded bg-white/10 px-2.5 py-1 text-xs font-bold text-white hover:bg-white/20">Cancel</button> : null}</span></div>; }) : <p className="text-sm text-cvc-muted">No CVC waiver claims submitted.</p> : <p className="text-sm text-cvc-muted">Sign in with an owner account to submit and review claims.</p>}</div></section>
++        <section className="rounded-xl border border-white/10 bg-cvc-deep/60 p-5"><div className="flex items-center gap-2 text-cvc-accent"><DollarSign size={16} /><p className="font-display text-lg uppercase">My claim status</p></div>{(myBids.data?.filter((bid: any) => bid.status === "pending").length ?? 0) > 1 ? <p className="mt-2 text-xs text-cvc-muted">You have multiple pending claims this period. If they'd collectively push you past your roster limit, budget, or stated max, your lowest-numbered <b>priority</b> claims are kept first and the rest fall through to the next bidder -- set the order below.</p> : null}<div className="mt-4 space-y-2">{owner?.franchise ? myBids.data?.length ? myBids.data.map((bid: any) => { const period = Array.isArray(bid.period) ? bid.period[0] : bid.period; const needsConfirmation = bid.status === "pending" && period?.period_type === "free" && period?.status === "open" && !bid.confirmed_at; const isPending = bid.status === "pending"; return <div key={bid.id} className="flex items-center justify-between gap-3 rounded bg-white/5 px-3 py-2 text-sm text-white"><span><b>{bid.player?.[0]?.display_name ?? bid.player?.display_name}</b> · ${bid.amount} · <span className="uppercase text-cvc-accent">{needsConfirmation ? "unconfirmed" : bid.status}</span></span><span className="flex shrink-0 items-center gap-2">{isPending ? <label className="flex items-center gap-1 text-[10px] uppercase tracking-[.06em] text-cvc-muted">Priority<input type="number" min={1} max={99} defaultValue={bid.priority ?? 1} key={`${bid.id}-${bid.priority}`} onBlur={event => { const next = Number(event.target.value); if (Number.isInteger(next) && next >= 1 && next <= 99 && next !== bid.priority) setPriority.mutate({ bidId: bid.id, priority: next }); }} className="w-14 rounded border border-white/20 bg-black/20 px-2 py-1 text-center text-xs text-white" /></label> : null}{needsConfirmation ? <button onClick={() => confirmClaim.mutate({ bidId: bid.id })} disabled={confirmClaim.isPending} className="rounded bg-amber-500 px-2.5 py-1 text-xs font-bold text-white hover:bg-amber-600">Confirm claim</button> : null}{isPending ? <button onClick={() => cancelClaim.mutate({ bidId: bid.id })} disabled={cancelClaim.isPending} className="rounded bg-white/10 px-2.5 py-1 text-xs font-bold text-white hover:bg-white/20">Cancel</button> : null}</span></div>; }) : <p className="text-sm text-cvc-muted">No CVC waiver claims submitted.</p> : <p className="text-sm text-cvc-muted">Sign in with an owner account to submit and review claims.</p>}</div></section>
+       </div>
+     ) : (
+       <section className="overflow-hidden rounded-xl bg-white shadow-xl">
+diff --git a/server/routers/league.ts b/server/routers/league.ts
+index 82d72d6..a9c914d 100644
+--- a/server/routers/league.ts
++++ b/server/routers/league.ts
+@@ -1490,6 +1490,26 @@ export const leagueRouter = router({
+     return { cancelled: true };
+   }),
+
++  // Lets an owner re-rank their OWN pending claims for a period -- this is what
++  // resolveOpenWaiverPeriod's cascade actually uses when an owner's claims collide
++  // with their own roster cap, season budget, or stated max-players-this-period:
++  // their lower-numbered (higher-priority) claims get kept first, and the rest cascade
++  // to the next-highest outside bidder rather than going unclaimed. Doesn't touch
++  // amount or max_players_desired, and doesn't require re-running the submit-time
++  // budget checks -- it's a pure preference reorder among the owner's own bids.
++  setFaabBidPriority: protectedProcedure.input(z.object({ bidId: z.string().uuid(), priority: z.number().int().min(1).max(99) })).mutation(async ({ ctx, input }) => {
++    const owner = await getOwnerAccess({ openId: ctx.user.openId });
++    if (!owner) throw new TRPCError({ code: "FORBIDDEN", message: "A CVC owner session is required to reorder a claim." });
++    const franchise = unwrap(await supabase.from("franchise").select("id").eq("current_owner_id", owner.id).eq("is_active", true).limit(1).maybeSingle());
++    if (!franchise) throw new TRPCError({ code: "FORBIDDEN", message: "Only an owner with an active CVC franchise may reorder a claim." });
++    const bid = unwrap(await supabase.from("faab_bid").select("id, franchise_id, status").eq("id", input.bidId).maybeSingle());
++    if (!bid) throw new TRPCError({ code: "NOT_FOUND", message: "That CVC claim was not found." });
++    if (bid.franchise_id !== franchise.id) throw new TRPCError({ code: "FORBIDDEN", message: "You may only reorder your own CVC franchise's claims." });
++    if (bid.status !== "pending") throw new TRPCError({ code: "BAD_REQUEST", message: "That claim has already been resolved and can no longer be reordered." });
++    unwrap(await supabase.from("faab_bid").update({ priority: input.priority }).eq("id", input.bidId).select("id").single());
++    return { updated: true };
++  }),
++
+   myFaabBids: protectedProcedure.query(async ({ ctx }) => {
+     const owner = await getOwnerAccess({ openId: ctx.user.openId });
+     if (!owner) throw new TRPCError({ code: "FORBIDDEN", message: "A CVC owner session is required." });
+diff --git a/server/waiverResolution.ts b/server/waiverResolution.ts
+index 663ca00..6ff0f1b 100644
+--- a/server/waiverResolution.ts
++++ b/server/waiverResolution.ts
+@@ -1,8 +1,8 @@
+ import { supabase, unwrap } from "./supabase";
+-import { computeFranchiseStandings, getFaabBalance, MAX_ROSTER_SIZE, selectFreeAgentCandidates, sortByWorstRecordFirst } from "./waiverRules";
++import { computeFranchiseStandings, getFaabBalance, MAX_ROSTER_SIZE, rankBidPeriodCandidates, resolveWaiverAssignments, selectFreeAgentCandidates, sortByWorstRecordFirst, type WaiverCandidateBid } from "./waiverRules";
+ import { computeNextResolutionTime, nextEasternWeekdayAt, sameEasternDayAt } from "./waiverResolutionTiming";
+
+-type PendingBid = { id: string; franchise_id: string; player_id: string; drop_player_id: string | null; amount: number; max_players_desired: number; confirmed_at: string | null };
++type PendingBid = { id: string; franchise_id: string; player_id: string; drop_player_id: string | null; amount: number; max_players_desired: number; priority: number; confirmed_at: string | null };
+
+ export type WaiverAwardResult = { playerName: string; franchiseName: string; amount: number; droppedPlayerName: string | null };
+ export type WaiverSkipResult = { playerName: string; franchiseName: string; reason: string };
+@@ -80,7 +80,7 @@ export async function resolveOpenWaiverPeriod(): Promise<WaiverResolutionSummary
+
+   const seasonId = period.season_id;
+   const periodType = (period.period_type ?? "bid") as "bid" | "free";
+-  const pendingBids = (unwrap(await supabase.from("faab_bid").select("id, franchise_id, player_id, drop_player_id, amount, max_players_desired, confirmed_at").eq("waiver_period_id", period.id).eq("status", "pending")) ?? []) as PendingBid[];
++  const pendingBids = (unwrap(await supabase.from("faab_bid").select("id, franchise_id, player_id, drop_player_id, amount, max_players_desired, priority, confirmed_at").eq("waiver_period_id", period.id).eq("status", "pending")) ?? []) as PendingBid[];
+
+   if (periodType === "free" && pendingBids.length) await ensureWaiverPriorityBootstrapped(seasonId);
+
+@@ -103,14 +103,11 @@ export async function resolveOpenWaiverPeriod(): Promise<WaiverResolutionSummary
+     byPlayer.set(bid.player_id, list);
+   }
+
+-  // Bid cycles: resolve the highest-value/most-contested players first, so a
+-  // franchise's roster cap and per-bid max_players_desired budget get consumed by
+-  // their most important wins first. Free period: order doesn't affect fairness (winner
+-  // is purely priority-based per player), so the same ordering is kept for simplicity.
++  // Deterministic display/commit order only -- the actual winner-per-player decision
++  // below comes from resolveWaiverAssignments, not from this ordering.
+   const orderedPlayers = Array.from(byPlayer.entries()).sort((a, b) => Math.max(...b[1].map((bid: PendingBid) => bid.amount)) - Math.max(...a[1].map((bid: PendingBid) => bid.amount)));
+
+   const rosterCount = new Map<string, number>();
+-  const wonThisCycle = new Map<string, number>();
+   const remainingBudget = new Map<string, number>();
+   const priorityRotationOrder: string[] = []; // franchise ids, in the order they won a free-period claim this pass
+   const nextResolutionAt = computeNextResolutionTime(period.closes_at ? new Date(period.closes_at) : now);
+@@ -133,51 +130,53 @@ export async function resolveOpenWaiverPeriod(): Promise<WaiverResolutionSummary
+     return balance;
+   }
+
++  // Rank every player's full candidate list (best to worst -- not just the top bid),
++  // and give resolveWaiverAssignments each involved franchise's PRE-period roster/FAAB
++  // baseline so it can decide, all at once, whose claims fit once each owner's own
++  // priority order (not bid amount, not processing order) breaks any of their own
++  // internal collisions -- with rejected claims cascading to the next candidate in
++  // line for that specific player rather than going unclaimed.
++  const waiverPriorityByFranchiseId = new Map(franchiseRows.map(row => [row.id, row.waiver_priority]));
++  const rankedCandidatesByPlayer = new Map<string, WaiverCandidateBid[]>();
++  for (const [playerId, bidsForPlayer] of Array.from(byPlayer.entries())) {
++    const ranked = periodType === "free"
++      ? selectFreeAgentCandidates(bidsForPlayer, waiverPriorityByFranchiseId).orderedCandidateFranchiseIds.map(franchiseId => bidsForPlayer.find(bid => bid.franchise_id === franchiseId)).filter((bid): bid is PendingBid => Boolean(bid))
++      : rankBidPeriodCandidates<PendingBid>(bidsForPlayer, standings);
++    rankedCandidatesByPlayer.set(playerId, ranked.map(bid => ({
++      id: bid.id,
++      franchiseId: bid.franchise_id,
++      cost: periodType === "free" ? 1 : bid.amount,
++      priority: bid.priority,
++      maxPlayersDesired: bid.max_players_desired,
++      dropPlayerId: bid.drop_player_id,
++    })));
++  }
++
++  const involvedFranchiseIds = Array.from(new Set(pendingBids.map(bid => bid.franchise_id)));
++  const capacityByFranchise = new Map<string, { rosterCount: number; budget: number }>();
++  for (const franchiseId of involvedFranchiseIds) {
++    capacityByFranchise.set(franchiseId, { rosterCount: await getRosterCount(franchiseId), budget: await getRemainingBudget(franchiseId) });
++  }
++
++  const { winnerByPlayer, rejectionReasonByBid } = resolveWaiverAssignments(rankedCandidatesByPlayer, capacityByFranchise, MAX_ROSTER_SIZE);
++
+   for (const [playerId, bidsForPlayer] of orderedPlayers) {
+     const playerName = playerById.get(playerId)?.display_name ?? "Unknown player";
+-    // Bid cycle: only the highest bid(s) actually contend, tie-broken by worst record.
+-    // Free period: every franchise with a pending claim on this player contends, ordered
+-    // purely by current waiver priority (lower number = higher priority = first).
+-    let orderedCandidateFranchiseIds: string[];
+-    let bidByFranchise: Map<string, PendingBid>;
+-    if (periodType === "free") {
+-      const waiverPriorityByFranchiseId = new Map(franchiseRows.map(row => [row.id, row.waiver_priority]));
+-      ({ orderedCandidateFranchiseIds, bidByFranchise } = selectFreeAgentCandidates(bidsForPlayer, waiverPriorityByFranchiseId));
+-    } else {
+-      const highestAmount = Math.max(...bidsForPlayer.map((bid: PendingBid) => bid.amount));
+-      const topBidderFranchiseIds = Array.from(new Set(bidsForPlayer.filter((bid: PendingBid) => bid.amount === highestAmount).map((bid: PendingBid) => bid.franchise_id)));
+-      orderedCandidateFranchiseIds = topBidderFranchiseIds.length > 1 ? sortByWorstRecordFirst(topBidderFranchiseIds, standings) : topBidderFranchiseIds;
+-      bidByFranchise = new Map(bidsForPlayer.filter((bid: PendingBid) => bid.amount === highestAmount).map((bid: PendingBid) => [bid.franchise_id, bid]));
+-    }
+-
+-    let winner: PendingBid | null = null;
+-    for (const franchiseId of orderedCandidateFranchiseIds) {
+-      const candidateBid = bidByFranchise.get(franchiseId);
+-      if (!candidateBid) continue;
+-      const franchiseName = franchiseById.get(franchiseId)?.name ?? "Unknown franchise";
+-      const awardAmount = periodType === "free" ? 1 : candidateBid.amount;
+-      const alreadyWon = wonThisCycle.get(franchiseId) ?? 0;
+-      if (alreadyWon >= candidateBid.max_players_desired) {
+-        skipped.push({ playerName, franchiseName, reason: `Already won ${alreadyWon} player${alreadyWon === 1 ? "" : "s"} this period, at their stated max of ${candidateBid.max_players_desired}.` });
+-        continue;
+-      }
+-      const remaining = await getRemainingBudget(franchiseId);
+-      if (awardAmount > remaining) {
+-        skipped.push({ playerName, franchiseName, reason: `Would cost $${awardAmount} but they have only $${remaining} left this season.` });
+-        continue;
+-      }
+-      const currentCount = await getRosterCount(franchiseId);
+-      const willDrop = candidateBid.drop_player_id ? 1 : 0;
+-      if (currentCount - willDrop + alreadyWon + 1 > MAX_ROSTER_SIZE) {
+-        skipped.push({ playerName, franchiseName, reason: `Awarding this player would exceed the ${MAX_ROSTER_SIZE}-player CVC roster limit.` });
+-        continue;
+-      }
+-      winner = candidateBid;
+-      break;
+-    }
++    const winnerId = winnerByPlayer.get(playerId);
++    const winner = winnerId ? bidsForPlayer.find(bid => bid.id === winnerId) ?? null : null;
+
+     for (const bid of bidsForPlayer) {
+       if (winner && bid.id === winner.id) continue;
++      const rejection = rejectionReasonByBid.get(bid.id);
++      if (rejection) {
++        const franchiseName = franchiseById.get(bid.franchise_id)?.name ?? "Unknown franchise";
++        const reason = rejection.type === "max_players_desired"
++          ? `Already won ${rejection.limit} player${rejection.limit === 1 ? "" : "s"} this period, at their stated max of ${rejection.limit}.`
++          : rejection.type === "budget"
++          ? `Would cost $${rejection.cost} but they have only $${rejection.remaining} left this season.`
++          : `Awarding this player would exceed the ${rejection.cap}-player CVC roster limit.`;
++        skipped.push({ playerName, franchiseName, reason });
++      }
+       unwrap(await supabase.from("faab_bid").update({ status: "lost", resolved_at: now.toISOString() }).eq("id", bid.id).select("id").single());
+     }
+     if (!winner) continue;
+@@ -195,9 +194,6 @@ export async function resolveOpenWaiverPeriod(): Promise<WaiverResolutionSummary
+     unwrap(await supabase.from("faab_bid").update({ status: "won", resolved_at: now.toISOString() }).eq("id", winner.id).select("id").single());
+     unwrap(await supabase.from("transaction").insert({ season_id: seasonId, franchise_id: winner.franchise_id, transaction_type: "waiver", status: "final", summary: `${franchise?.name ?? "A CVC franchise"} ${periodType === "free" ? "claimed" : "won"} ${playerName} for $${awardAmount}${periodType === "free" ? " (free agent period)" : " FAAB"} (${period.label}).`, details: { faab_bid_id: winner.id, player_id: playerId, amount: awardAmount } }).select("id").single());
+
+-    wonThisCycle.set(winner.franchise_id, (wonThisCycle.get(winner.franchise_id) ?? 0) + 1);
+-    rosterCount.set(winner.franchise_id, (await getRosterCount(winner.franchise_id)) + 1 - (winner.drop_player_id ? 1 : 0));
+-    remainingBudget.set(winner.franchise_id, (await getRemainingBudget(winner.franchise_id)) - awardAmount);
+     if (periodType === "free") priorityRotationOrder.push(winner.franchise_id);
+     awarded.push({ playerName, franchiseName: franchise?.name ?? "Unknown franchise", amount: awardAmount, droppedPlayerName: winner.drop_player_id ? (playerById.get(winner.drop_player_id)?.display_name ?? null) : null });
+   }
+diff --git a/server/waiverRules.test.ts b/server/waiverRules.test.ts
+index b265157..8d5973f 100644
+--- a/server/waiverRules.test.ts
++++ b/server/waiverRules.test.ts
+@@ -1,5 +1,5 @@
+ import { describe, expect, it } from "vitest";
+-import { selectFreeAgentCandidates, sortByWorstRecordFirst, type FranchiseStanding } from "./waiverRules";
++import { rankBidPeriodCandidates, resolveWaiverAssignments, selectFreeAgentCandidates, sortByWorstRecordFirst, type FranchiseStanding, type WaiverCandidateBid } from "./waiverRules";
+
+ describe("selectFreeAgentCandidates (fix for a real gap: free-period claims were being auto-awarded exactly like bid-period FAAB claims, but per commissioner they must not be -- the claiming owner has to explicitly confirm their own claim first, and anything never confirmed by close time is dropped entirely, no award)", () => {
+   it("excludes an unconfirmed claim from the candidate pool entirely -- it can never win", () => {
+@@ -71,3 +71,113 @@ describe("sortByWorstRecordFirst (confirmed: fewest wins first, then fewest poin
+     expect(sortByWorstRecordFirst(["a", "b"], standings)).toEqual(["b", "a"]);
+   });
+ });
++
++describe("rankBidPeriodCandidates (exposes the FULL bidder ranking for a player, not just the top amount -- needed so a rejected top bid can cascade to the next-highest bidder instead of the player going unclaimed)", () => {
++  it("orders strictly by amount, highest first", () => {
++    const bids = [
++      { franchise_id: "a", amount: 5 },
++      { franchise_id: "b", amount: 15 },
++      { franchise_id: "c", amount: 10 },
++    ];
++    const ranked = rankBidPeriodCandidates(bids, new Map());
++    expect(ranked.map(bid => bid.franchise_id)).toEqual(["b", "c", "a"]);
++  });
++
++  it("breaks a tied amount by worst record first, then continues with the rest of the ranking", () => {
++    const bids = [
++      { franchise_id: "a", amount: 10 },
++      { franchise_id: "b", amount: 10 },
++      { franchise_id: "c", amount: 5 },
++    ];
++    const standings = new Map<string, FranchiseStanding>([
++      ["a", { franchiseId: "a", wins: 5, losses: 0, pointsFor: 100 }],
++      ["b", { franchiseId: "b", wins: 1, losses: 4, pointsFor: 100 }],
++    ]);
++    const ranked = rankBidPeriodCandidates(bids, standings);
++    expect(ranked.map(bid => bid.franchise_id)).toEqual(["b", "a", "c"]);
++  });
++});
++
++describe("resolveWaiverAssignments (the cascade: an owner's own claims collide with their roster cap, budget, or stated max -- their PRIORITY decides which of their own claims survive, not bid amount or processing order, and anything bumped falls through to the next candidate for that player)", () => {
++  function candidate(id: string, franchiseId: string, opts: Partial<WaiverCandidateBid> = {}): WaiverCandidateBid {
++    return { id, franchiseId, cost: 10, priority: 1, maxPlayersDesired: 10, dropPlayerId: null, ...opts };
++  }
++
++  it("awards the single top candidate for each player when nothing collides", () => {
++    const ranked = new Map([
++      ["playerX", [candidate("bid1", "teamA"), candidate("bid2", "teamB")]],
++    ]);
++    const capacity = new Map([
++      ["teamA", { rosterCount: 15, budget: 30 }],
++      ["teamB", { rosterCount: 15, budget: 30 }],
++    ]);
++    const { winnerByPlayer, rejectionReasonByBid } = resolveWaiverAssignments(ranked, capacity, 22);
++    expect(winnerByPlayer.get("playerX")).toBe("bid1");
++    expect(rejectionReasonByBid.size).toBe(0);
++  });
++
++  it("uses the owner's own priority (not bid amount) to decide which of their OWN colliding claims survive a roster cap", () => {
++    // Same franchise leads on two different players, but only has 1 roster spot left.
++    // They bid MORE on playerY but marked playerX as their higher priority (1 < 2).
++    const ranked = new Map([
++      ["playerX", [candidate("bidX", "teamA", { cost: 5, priority: 1 })]],
++      ["playerY", [candidate("bidY", "teamA", { cost: 20, priority: 2 })]],
++    ]);
++    const capacity = new Map([["teamA", { rosterCount: 21, budget: 30 }]]); // exactly 1 spot left
++    const { winnerByPlayer, rejectionReasonByBid } = resolveWaiverAssignments(ranked, capacity, 22);
++    expect(winnerByPlayer.get("playerX")).toBe("bidX"); // kept: priority 1
++    expect(winnerByPlayer.has("playerY")).toBe(false); // bumped despite the bigger bid
++    expect(rejectionReasonByBid.get("bidY")).toEqual({ type: "roster", cap: 22 });
++  });
++
++  it("cascades a bumped claim to the next-highest outside bidder instead of leaving the player unclaimed", () => {
++    // teamA would win both playerX (priority 1) and playerY (priority 2), but only has
++    // room for one. playerY should fall through to teamB, the next-best bidder on it.
++    const ranked = new Map([
++      ["playerX", [candidate("bidX", "teamA", { priority: 1 })]],
++      ["playerY", [candidate("bidY-teamA", "teamA", { priority: 2 }), candidate("bidY-teamB", "teamB", { priority: 1 })]],
++    ]);
++    const capacity = new Map([
++      ["teamA", { rosterCount: 21, budget: 30 }],
++      ["teamB", { rosterCount: 15, budget: 30 }],
++    ]);
++    const { winnerByPlayer, rejectionReasonByBid } = resolveWaiverAssignments(ranked, capacity, 22);
++    expect(winnerByPlayer.get("playerX")).toBe("bidX");
++    expect(winnerByPlayer.get("playerY")).toBe("bidY-teamB"); // cascaded, not left unclaimed
++    expect(rejectionReasonByBid.get("bidY-teamA")?.type).toBe("roster");
++  });
++
++  it("rejects a lower-priority claim once the season FAAB budget runs out, cheaper claims further down still get evaluated", () => {
++    const ranked = new Map([
++      ["playerX", [candidate("bidX", "teamA", { cost: 25, priority: 1 })]],
++      ["playerY", [candidate("bidY", "teamA", { cost: 10, priority: 2 })]],
++      ["playerZ", [candidate("bidZ", "teamA", { cost: 3, priority: 3 })]],
++    ]);
++    const capacity = new Map([["teamA", { rosterCount: 15, budget: 28 }]]); // affords X (25) then Z (3), not Y (10)
++    const { winnerByPlayer, rejectionReasonByBid } = resolveWaiverAssignments(ranked, capacity, 22);
++    expect(winnerByPlayer.get("playerX")).toBe("bidX");
++    expect(winnerByPlayer.get("playerZ")).toBe("bidZ"); // cheaper, lower-priority claim still fits
++    expect(winnerByPlayer.has("playerY")).toBe(false);
++    expect(rejectionReasonByBid.get("bidY")).toEqual({ type: "budget", cost: 10, remaining: 3 });
++  });
++
++  it("stops a franchise's wins at their own stated max_players_desired, keeping the higher-priority ones", () => {
++    const ranked = new Map([
++      ["playerX", [candidate("bidX", "teamA", { priority: 1, maxPlayersDesired: 1 })]],
++      ["playerY", [candidate("bidY", "teamA", { priority: 2, maxPlayersDesired: 1 })]],
++    ]);
++    const capacity = new Map([["teamA", { rosterCount: 15, budget: 30 }]]);
++    const { winnerByPlayer, rejectionReasonByBid } = resolveWaiverAssignments(ranked, capacity, 22);
++    expect(winnerByPlayer.get("playerX")).toBe("bidX");
++    expect(winnerByPlayer.has("playerY")).toBe(false);
++    expect(rejectionReasonByBid.get("bidY")).toEqual({ type: "max_players_desired", limit: 1 });
++  });
++
++  it("a claim that includes a drop nets to zero roster change, so it doesn't get bumped by the roster cap", () => {
++    const ranked = new Map([["playerX", [candidate("bidX", "teamA", { dropPlayerId: "oldPlayer" })]]]);
++    const capacity = new Map([["teamA", { rosterCount: 22, budget: 30 }]]); // already at the cap
++    const { winnerByPlayer, rejectionReasonByBid } = resolveWaiverAssignments(ranked, capacity, 22);
++    expect(winnerByPlayer.get("playerX")).toBe("bidX"); // net roster change is 0 (drop one, add one)
++    expect(rejectionReasonByBid.size).toBe(0);
++  });
++});
+diff --git a/server/waiverRules.ts b/server/waiverRules.ts
+index c9a28a9..8881df5 100644
+--- a/server/waiverRules.ts
++++ b/server/waiverRules.ts
+@@ -70,3 +70,134 @@ export function selectFreeAgentCandidates<T extends { franchise_id: string; conf
+   const orderedCandidateFranchiseIds = Array.from(bidByFranchise.keys()).sort((a, b) => (waiverPriorityByFranchiseId.get(a) ?? Number.MAX_SAFE_INTEGER) - (waiverPriorityByFranchiseId.get(b) ?? Number.MAX_SAFE_INTEGER));
+   return { orderedCandidateFranchiseIds, bidByFranchise };
+ }
++
++/** Ranks EVERY bid-period claim on a single player from best to worst (not just the
++ * top-dollar group) -- highest amount first, ties broken worst-record-first. Exposing
++ * the full ranking (not just the winner) is what makes a cascade possible: if the top
++ * bidder gets bumped by their own roster/budget/max-players cap (see
++ * resolveWaiverAssignments below), the player needs to fall through to the next
++ * bidder in line rather than going unclaimed. */
++export function rankBidPeriodCandidates<T extends { franchise_id: string; amount: number }>(bidsForPlayer: T[], standings: Map<string, FranchiseStanding>): T[] {
++  const sorted = [...bidsForPlayer].sort((a, b) => b.amount - a.amount);
++  const result: T[] = [];
++  let i = 0;
++  while (i < sorted.length) {
++    let j = i;
++    while (j < sorted.length && sorted[j].amount === sorted[i].amount) j++;
++    const tierFranchiseIds = sorted.slice(i, j).map(bid => bid.franchise_id);
++    const orderedTierIds = tierFranchiseIds.length > 1 ? sortByWorstRecordFirst(tierFranchiseIds, standings) : tierFranchiseIds;
++    const byFranchiseThisTier = new Map(sorted.slice(i, j).map(bid => [bid.franchise_id, bid]));
++    for (const franchiseId of orderedTierIds) {
++      const bid = byFranchiseThisTier.get(franchiseId);
++      if (bid) result.push(bid);
++    }
++    i = j;
++  }
++  return result;
++}
++
++export type WaiverCandidateBid = {
++  id: string;
++  franchiseId: string;
++  cost: number; // amount for a bid-period claim, always 1 for a free-period claim
++  priority: number; // owner-stated priority among their own claims this period -- lower = more wanted
++  maxPlayersDesired: number;
++  dropPlayerId: string | null;
++};
++
++export type FranchiseCapacity = { rosterCount: number; budget: number };
++
++export type WaiverRejectionReason =
++  | { type: "max_players_desired"; limit: number }
++  | { type: "budget"; cost: number; remaining: number }
++  | { type: "roster"; cap: number };
++
++/** The actual cascade: decides, for a whole waiver period at once, which franchise
++ * wins each contested player.
++ *
++ * Each player's `rankedCandidatesByPlayer` list is already ordered best-to-worst
++ * (rankBidPeriodCandidates for bid periods, selectFreeAgentCandidates's ordering for
++ * free periods). Naively awarding each player to its #1 candidate can push a franchise
++ * over its own roster cap, season FAAB budget, or stated max-players-this-period --
++ * when an owner has multiple claims that collectively don't fit, THEY decide which of
++ * their own claims matter more via `priority` (lower number wins), not bid amount and
++ * not processing order. Whichever of their claims get bumped fall through to the next
++ * candidate in that player's list (which might belong to a different franchise, who
++ * may in turn now be over their own cap -- so this runs in rounds, stable-matching
++ * style, until nothing changes) rather than the player going unclaimed.
++ *
++ * `capacityByFranchise` holds each franchise's PRE-period roster count and remaining
++ * season FAAB budget (before anything in this period is awarded) -- this function
++ * computes cumulative usage against that baseline itself, in each franchise's own
++ * priority order, and never mutates the maps passed in. */
++export function resolveWaiverAssignments(
++  rankedCandidatesByPlayer: Map<string, WaiverCandidateBid[]>,
++  capacityByFranchise: Map<string, FranchiseCapacity>,
++  rosterCap: number,
++): { winnerByPlayer: Map<string, string>; rejectionReasonByBid: Map<string, WaiverRejectionReason> } {
++  const rejected = new Set<string>();
++  const rejectionReasonByBid = new Map<string, WaiverRejectionReason>();
++  const cursorByPlayer = new Map<string, number>();
++
++  function tentativeLeader(playerId: string): WaiverCandidateBid | null {
++    const list = rankedCandidatesByPlayer.get(playerId) ?? [];
++    let index = cursorByPlayer.get(playerId) ?? 0;
++    while (index < list.length && rejected.has(list[index].id)) index++;
++    cursorByPlayer.set(playerId, index);
++    return index < list.length ? list[index] : null;
++  }
++
++  let changedThisRound = true;
++  while (changedThisRound) {
++    changedThisRound = false;
++
++    const tentativeByFranchise = new Map<string, WaiverCandidateBid[]>();
++    for (const playerId of Array.from(rankedCandidatesByPlayer.keys())) {
++      const leader = tentativeLeader(playerId);
++      if (!leader) continue;
++      const list = tentativeByFranchise.get(leader.franchiseId) ?? [];
++      list.push(leader);
++      tentativeByFranchise.set(leader.franchiseId, list);
++    }
++
++    for (const [franchiseId, tentativeWins] of Array.from(tentativeByFranchise.entries())) {
++      const ordered = [...tentativeWins].sort((a, b) => a.priority - b.priority || b.cost - a.cost || a.id.localeCompare(b.id));
++      const capacity = capacityByFranchise.get(franchiseId) ?? { rosterCount: 0, budget: 0 };
++      let rosterRunning = capacity.rosterCount;
++      let budgetRunning = capacity.budget;
++      let winsRunning = 0;
++
++      for (const bid of ordered) {
++        if (winsRunning >= bid.maxPlayersDesired) {
++          rejected.add(bid.id);
++          rejectionReasonByBid.set(bid.id, { type: "max_players_desired", limit: bid.maxPlayersDesired });
++          changedThisRound = true;
++          continue;
++        }
++        if (bid.cost > budgetRunning) {
++          rejected.add(bid.id);
++          rejectionReasonByBid.set(bid.id, { type: "budget", cost: bid.cost, remaining: budgetRunning });
++          changedThisRound = true;
++          continue;
++        }
++        const rosterAfter = rosterRunning - (bid.dropPlayerId ? 1 : 0) + 1;
++        if (rosterAfter > rosterCap) {
++          rejected.add(bid.id);
++          rejectionReasonByBid.set(bid.id, { type: "roster", cap: rosterCap });
++          changedThisRound = true;
++          continue;
++        }
++        rosterRunning = rosterAfter;
++        budgetRunning -= bid.cost;
++        winsRunning += 1;
++      }
++    }
++  }
++
++  const winnerByPlayer = new Map<string, string>();
++  for (const playerId of Array.from(rankedCandidatesByPlayer.keys())) {
++    const leader = tentativeLeader(playerId);
++    if (leader) winnerByPlayer.set(playerId, leader.id);
++  }
++  return { winnerByPlayer, rejectionReasonByBid };
++}
