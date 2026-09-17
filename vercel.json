@@ -13,7 +13,7 @@
     "api/scheduled/dst-season-stats-sync.js": { "maxDuration": 60 },
     "api/scheduled/team-schedule-sync.js": { "maxDuration": 60 },
     "api/scheduled/fantasypros-archive.js": { "maxDuration": 60 },
-    "api/scheduled/historical-season-stats-backfill.js": { "maxDuration": 60 },
+    "api/scheduled/historical-season-stats-backfill.js": { "maxDuration": 300 },
     "api/scheduled/season-stats-current-rebuild.js": { "maxDuration": 60 }
   },
   "crons": [

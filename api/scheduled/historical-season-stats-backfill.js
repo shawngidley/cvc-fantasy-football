@@ -320,7 +320,7 @@ function toCvcSeasonStatsShape(row) {
 
 // server/cvcSeasonStatsHistorical.ts
 var ELIGIBLE_POSITIONS = ["QB", "RB", "WR", "TE", "K"];
-var CONCURRENCY = 5;
+var CONCURRENCY = 10;
 function extractEspnId(row) {
   const raw = row.espnID ?? row.espnId;
   return raw !== void 0 && raw !== null ? String(raw) : null;
@@ -392,7 +392,7 @@ async function runHistoricalSeasonStatsBackfill(req, res) {
       res.status(400).json({ error: "A valid ?year= query parameter is required." });
       return;
     }
-    const result = await backfillHistoricalSeasonStats(year, 40);
+    const result = await backfillHistoricalSeasonStats(year, 1e3);
     res.json({ ok: true, year, ...result });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);

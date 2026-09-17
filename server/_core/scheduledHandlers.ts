@@ -159,7 +159,7 @@ export async function runHistoricalSeasonStatsBackfill(req: Request, res: Respon
       res.status(400).json({ error: "A valid ?year= query parameter is required." });
       return;
     }
-    const result = await backfillHistoricalSeasonStats(year, 40);
+    const result = await backfillHistoricalSeasonStats(year, 1000);
     res.json({ ok: true, year, ...result });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);

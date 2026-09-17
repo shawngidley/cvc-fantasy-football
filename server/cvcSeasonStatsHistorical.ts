@@ -8,7 +8,7 @@ import { supabase, unwrap } from "./supabase";
 // ID to look up at all. This is a pre-existing gap (the Player Profile page's own
 // historical stats tab has the same limitation), not something new here.
 const ELIGIBLE_POSITIONS = ["QB", "RB", "WR", "TE", "K"];
-const CONCURRENCY = 5;
+const CONCURRENCY = 10;
 
 type CvcPlayer = { id: string; display_name: string; position: string | null; metadata: Record<string, unknown> | null };
 
