@@ -7,6 +7,10 @@ import { ArrowDownUp, DollarSign, Search, ShieldCheck, Star, Users, X } from "lu
 import { useMemo, useState } from "react";
 import { teamLogoUrl as scheduleTeamLogoUrl, shortenTeamName } from "@/lib/nflSchedule";
 import { computeKickoffUtc } from "@/hooks/useCvcTank01LiveScores";
+import { useConfirmDialog } from "@/hooks/useConfirmDialog";
+import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Button } from "@/components/ui/button";
 
 const POSITIONS = ["FLEX", "QB", "RB", "WR", "TE", "K", "DST"];
 const FLEX_POSITIONS = new Set(["QB", "RB", "WR", "TE"]);
@@ -143,14 +147,29 @@ export function CvcFreeAgents() {
   const deleteGroup = trpc.league.deleteFaabBidGroup.useMutation({ onSuccess: invalidateBidsAndGroups, onError: error => toast.error(error.message) });
   const assignToGroup = trpc.league.assignFaabBidToGroup.useMutation({ onSuccess: invalidateBidsAndGroups, onError: error => toast.error(error.message) });
 
-  // Prompts for a new group's name/max (simple inline prompt -- no separate modal),
-  // creates it, then immediately moves the given claim into it.
-  const createGroupAndAssign = (bidId: string) => {
-    const label = window.prompt("Name this group (e.g. \"Handcuffs\"):");
-    if (!label) return;
-    const maxInput = window.prompt("Max players to win in this group?", "1");
-    const maxPlayers = Math.min(10, Math.max(1, Math.round(Number(maxInput)) || 1));
-    createGroup.mutate({ label, maxPlayers }, { onSuccess: group => assignToGroup.mutate({ bidId, groupId: group.id }) });
+  const confirmDialog = useConfirmDialog();
+
+  // In-app "create a new group" dialog state (replaces the old window.prompt flow,
+  // which is silently suppressed in some browsers/installed-app modes). Opening it
+  // remembers which claim to move once the group is created.
+  const [newGroupBidId, setNewGroupBidId] = useState("");
+  const [newGroupLabel, setNewGroupLabel] = useState("");
+  const [newGroupMax, setNewGroupMax] = useState("1");
+  const [newGroupError, setNewGroupError] = useState("");
+  const createGroupAndAssign = (bidId: string) => { setNewGroupBidId(bidId); setNewGroupLabel(""); setNewGroupMax("1"); setNewGroupError(""); };
+  const closeNewGroupDialog = () => { if (createGroup.isPending || assignToGroup.isPending) return; setNewGroupBidId(""); setNewGroupError(""); };
+  const submitNewGroup = async () => {
+    const label = newGroupLabel.trim();
+    if (!label) { setNewGroupError("Enter a name for the group."); return; }
+    const maxPlayers = Math.min(10, Math.max(1, Math.round(Number(newGroupMax)) || 1));
+    setNewGroupError("");
+    try {
+      const group = await createGroup.mutateAsync({ label, maxPlayers });
+      await assignToGroup.mutateAsync({ bidId: newGroupBidId, groupId: group.id });
+      setNewGroupBidId("");
+    } catch (err) {
+      setNewGroupError(err?.message ?? "Something went wrong. Please try again.");
+    }
   };
 
   const activePool = tab === "all-players" ? allPlayersPool : tab === "watchlist" ? watchlistPool : freeAgentsPool;
@@ -271,7 +290,7 @@ export function CvcFreeAgents() {
                     <span className="text-sm text-white"><b>{group.label}</b> · {groupBids.length} pending claim{groupBids.length === 1 ? "" : "s"}</span>
                     <span className="flex items-center gap-2">
                       <label className="flex items-center gap-2 text-[10px] uppercase tracking-[.06em] text-cvc-muted">Max to win<select value={group.max_players_desired} disabled={setGroupMaxPlayers.isPending} onChange={event => setGroupMaxPlayers.mutate({ groupId: group.id, maxPlayers: Number(event.target.value) })} className="rounded border border-white/20 bg-black/20 px-2 py-1 text-xs text-white">{Array.from({ length: 10 }, (_, index) => index + 1).map(value => <option key={value} value={value}>{value}</option>)}</select></label>
-                      <button onClick={() => { if (window.confirm(`Delete "${group.label}"? Its claims move back to the default pool.`)) deleteGroup.mutate({ groupId: group.id }); }} disabled={deleteGroup.isPending} className="rounded bg-white/10 px-2.5 py-1 text-[10px] font-bold uppercase tracking-[.04em] text-white hover:bg-white/20">Delete</button>
+                      <button onClick={() => confirmDialog.confirm({ title: `Delete "${group.label}"?`, description: "Its claims move back to the default pool.", confirmLabel: "Delete", destructive: true, onConfirm: () => deleteGroup.mutateAsync({ groupId: group.id }) })} disabled={deleteGroup.isPending} className="rounded bg-white/10 px-2.5 py-1 text-[10px] font-bold uppercase tracking-[.04em] text-white hover:bg-white/20">Delete</button>
                     </span>
                   </div>
                   <div className="mt-2 space-y-2">{groupBids.length ? groupBids.map(renderClaimRow) : <p className="text-xs text-cvc-muted">No claims in this group yet.</p>}</div>
@@ -348,5 +367,23 @@ export function CvcFreeAgents() {
         <p className="mt-3 text-[11px] leading-4 text-cvc-muted">You can raise how many you're willing to win at this position afterward on the Manage Bids tab.</p>
       </div>
     </div> : null}
+    {confirmDialog.dialog}
+    <Dialog open={Boolean(newGroupBidId)} onOpenChange={open => { if (!open) closeNewGroupDialog(); }}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>Create a new claim group</DialogTitle>
+          <DialogDescription>Give it a name and a max players to win -- this claim moves into it once created.</DialogDescription>
+        </DialogHeader>
+        <div className="grid gap-3">
+          <label className="grid gap-1.5 text-sm font-medium text-slate-700">Group name<Input value={newGroupLabel} onChange={event => setNewGroupLabel(event.target.value)} placeholder="e.g. Handcuffs" autoFocus /></label>
+          <label className="grid gap-1.5 text-sm font-medium text-slate-700">Max players to win<Input type="number" min={1} max={10} value={newGroupMax} onChange={event => setNewGroupMax(event.target.value)} /></label>
+        </div>
+        {newGroupError ? <p className="text-sm font-medium text-red-600">{newGroupError}</p> : null}
+        <DialogFooter>
+          <Button type="button" variant="outline" disabled={createGroup.isPending || assignToGroup.isPending} onClick={closeNewGroupDialog}>Cancel</Button>
+          <Button type="button" disabled={createGroup.isPending || assignToGroup.isPending} onClick={submitNewGroup}>{createGroup.isPending || assignToGroup.isPending ? "Creating…" : "Create group"}</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   </div>;
 }

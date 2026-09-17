@@ -3,6 +3,7 @@ import { toast } from "sonner";
 import { Radio, ShieldCheck, Sparkles, Timer, Trophy } from "lucide-react";
 import { trpc } from "@/lib/trpc";
 import { useCvcOwnerAuth } from "@/hooks/useCvcOwnerAuth";
+import { useConfirmDialog } from "@/hooks/useConfirmDialog";
 
 const pad = (value: number) => String(Math.max(0, value)).padStart(2, "0");
 
@@ -46,6 +47,7 @@ export function CvcRookieLottery({ roundNumber = 2 }: { roundNumber?: number }) 
   const pause = trpc.league.pauseRookieLottery.useMutation({ onSuccess: refresh, onError: error => toast.error(error.message) });
   const resume = trpc.league.resumeRookieLottery.useMutation({ onSuccess: refresh, onError: error => toast.error(error.message) });
   const abort = trpc.league.abortRookieLottery.useMutation({ onSuccess: () => { setAbortReason(""); refresh(); }, onError: error => toast.error(error.message) });
+  const confirmDialog = useConfirmDialog();
 
   const data = lottery.data;
   const latest = data?.reveals[data.reveals.length - 1];
@@ -65,10 +67,11 @@ export function CvcRookieLottery({ roundNumber = 2 }: { roundNumber?: number }) 
         <h2 className="mt-2 font-display text-2xl font-extrabold uppercase">{isCommissioner ? "Not started yet" : "Coming soon"}</h2>
         <p className="mx-auto mt-3 max-w-lg text-sm leading-6 text-stone-300">{isCommissioner ? `Shuffles all round ${roundNumber} picks with a server-side cryptographic draw, locked in with a commitment hash before anything is revealed. Positions reveal automatically every 20 seconds, in reverse — last pick first, first pick last.` : `The commissioner hasn't started the round ${roundNumber} lottery yet. Check back here once it's underway — positions reveal live, one every 20 seconds.`}</p>
         {isCommissioner ? <>
-          <button type="button" disabled={start.isPending} onClick={() => { if (window.confirm(`Start the round ${roundNumber} lottery? The draw locks in immediately and can't be changed once started (only aborted).`)) start.mutate({ roundNumber }); }} className="mt-6 rounded-lg bg-[#e2b23d] px-5 py-2.5 text-xs font-black uppercase tracking-[0.1em] text-[#100d0a] disabled:opacity-50">{start.isPending ? "Starting…" : `Start round ${roundNumber} lottery`}</button>
+          <button type="button" disabled={start.isPending} onClick={() => confirmDialog.confirm({ title: `Start the round ${roundNumber} lottery?`, description: "The draw locks in immediately and can't be changed once started (only aborted).", confirmLabel: "Start lottery", destructive: true, onConfirm: () => start.mutateAsync({ roundNumber }) })} className="mt-6 rounded-lg bg-[#e2b23d] px-5 py-2.5 text-xs font-black uppercase tracking-[0.1em] text-[#100d0a] disabled:opacity-50">{start.isPending ? "Starting…" : `Start round ${roundNumber} lottery`}</button>
           {start.error ? <p className="mt-2 text-sm text-red-300">{start.error.message}</p> : null}
         </> : null}
       </div>
+      {confirmDialog.dialog}
     </section>;
   }
 
@@ -109,7 +112,7 @@ export function CvcRookieLottery({ roundNumber = 2 }: { roundNumber?: number }) 
         {data.status === "PAUSED" ? <button type="button" disabled={resume.isPending} onClick={() => resume.mutate({ roundNumber })} className="rounded-lg bg-[#e2b23d] px-4 py-2 text-xs font-black uppercase tracking-[.1em] text-[#100d0a] disabled:opacity-50">{resume.isPending ? "Resuming…" : "Resume"}</button> : null}
         <div className="flex items-center gap-2">
           <input value={abortReason} onChange={event => setAbortReason(event.target.value)} placeholder="Reason for aborting" className="rounded-md border border-white/20 bg-white/5 px-3 py-2 text-xs text-white placeholder:text-stone-500" />
-          <button type="button" disabled={abortReason.trim().length < 4 || abort.isPending} onClick={() => { if (window.confirm(`Abort the round ${roundNumber} lottery? This cannot be undone — you'll need to start a fresh draw.`)) abort.mutate({ roundNumber, reason: abortReason.trim() }); }} className="rounded-lg border border-red-400/40 px-4 py-2 text-xs font-black uppercase tracking-[.1em] text-red-300 disabled:opacity-50">{abort.isPending ? "Aborting…" : "Abort"}</button>
+          <button type="button" disabled={abortReason.trim().length < 4 || abort.isPending} onClick={() => confirmDialog.confirm({ title: `Abort the round ${roundNumber} lottery?`, description: "This cannot be undone — you'll need to start a fresh draw.", confirmLabel: "Abort", destructive: true, onConfirm: () => abort.mutateAsync({ roundNumber, reason: abortReason.trim() }) })} className="rounded-lg border border-red-400/40 px-4 py-2 text-xs font-black uppercase tracking-[.1em] text-red-300 disabled:opacity-50">{abort.isPending ? "Aborting…" : "Abort"}</button>
         </div>
       </div> : null}
       {data.status === "COMPLETE" ? <p className="mt-6 text-center text-sm font-semibold text-emerald-300">Round {roundNumber} order is set — the CVC Draft Board below reflects the final results.</p> : null}
@@ -120,5 +123,6 @@ export function CvcRookieLottery({ roundNumber = 2 }: { roundNumber?: number }) 
         {completedRows.length ? <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">{completedRows.map(reveal => <div key={reveal.revealIndex} className="flex items-center gap-3 rounded-xl border border-white/10 bg-white/[.035] p-3"><div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-[#e2b23d]/30 bg-[#e2b23d]/10 font-display text-sm font-extrabold text-[#e2b23d]">{reveal.draftPosition}</div><p className="truncate font-semibold text-white">{reveal.franchiseName}</p></div>)}</div> : <p className="py-6 text-center text-sm text-stone-400">The first pick will appear here shortly.</p>}
       </div>
     </div>
+    {confirmDialog.dialog}
   </section>;
 }

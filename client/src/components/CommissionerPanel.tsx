@@ -3,6 +3,7 @@ import { cn } from "@/lib/utils";
 import { ChevronRight, Plus, Save, Scissors, Upload } from "lucide-react";
 import { FormEvent, useMemo, useState } from "react";
 import { toast } from "sonner";
+import { useConfirmDialog } from "@/hooks/useConfirmDialog";
 
 type Module = "teams" | "owners" | "scoring" | "roster" | "schedule" | "rules" | "finance" | "protections" | "stats" | "auction";
 
@@ -91,30 +92,32 @@ function PendingCutsModule() {
   });
   const processCut = trpc.league.processPendingCut.useMutation({ onSuccess: refresh, onError: error => toast.error(error.message) });
   const exemptCut = trpc.league.exemptPendingCut.useMutation({ onSuccess: refresh, onError: error => toast.error(error.message) });
+  const confirmDialog = useConfirmDialog();
   const busy = processCut.isPending || exemptCut.isPending;
   const items = pendingCuts.data ?? [];
 
-  const processAll = async () => {
-    if (!items.length || !window.confirm(`Process all ${items.length} pending cuts? Each will be released and logged as a standard drop transaction.`)) return;
+  const runAllPendingCuts = async () => {
     for (const item of items) {
       try { await processCut.mutateAsync({ franchiseId: item.franchiseId, playerId: item.playerId }); } catch { /* surfaced via onError toast; continue with the rest */ }
     }
   };
 
   return <div className="grid gap-4">
-    <button type="button" className="cvc-button-compact w-fit" disabled={sweep.isPending} onClick={() => { if (window.confirm("Run the protection deadline sweep now? Every rostered player leaguewide whose contract expires this season with no protection decision on file will be flagged for cut review below. No one is released yet.")) sweep.mutate(); }}><Scissors size={14} /> {sweep.isPending ? "Flagging…" : "Run protection deadline sweep"}</button>
+    <button type="button" className="cvc-button-compact w-fit" disabled={sweep.isPending} onClick={() => confirmDialog.confirm({ title: "Run the protection deadline sweep now?", description: "Every rostered player leaguewide whose contract expires this season with no protection decision on file will be flagged for cut review below. No one is released yet.", confirmLabel: "Run sweep", onConfirm: () => sweep.mutateAsync() })}><Scissors size={14} /> {sweep.isPending ? "Flagging…" : "Run protection deadline sweep"}</button>
     <div className="rounded-lg border border-dashed border-cvc-deep/20 bg-cvc-tint p-4">
       <div className="mb-3 flex items-center justify-between"><p className="text-sm font-semibold text-cvc-deep">Pending cuts</p><span className="text-xs font-bold uppercase tracking-[0.08em] text-slate-500">{items.length}</span></div>
       {pendingCuts.isLoading ? <p className="text-sm text-slate-500">Loading pending cuts…</p> : items.length ? <>
-        <button type="button" className="cvc-button-secondary mb-3" disabled={busy} onClick={processAll}><Scissors size={14} /> Process all pending cuts</button>
-        <div className="space-y-2">{items.map(item => <div key={`${item.franchiseId}-${item.playerId}`} className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-slate-200 bg-white p-3"><div><p className="font-semibold text-cvc-deep">{item.playerName} <span className="font-normal text-slate-500">· {item.franchiseName}</span></p><p className="text-xs text-slate-500">{item.position ?? "—"} · {item.nflTeam ?? "FA"} · ${item.salary.toFixed(0)} · expires {item.expiresYear ?? "—"}</p></div><div className="flex gap-2"><button type="button" disabled={busy} className="rounded-md bg-cvc-deep px-3 py-1.5 text-xs font-bold uppercase tracking-[0.06em] text-white disabled:opacity-50" onClick={() => { if (window.confirm(`Process the cut for ${item.playerName}? This releases them and logs a drop transaction.`)) processCut.mutate({ franchiseId: item.franchiseId, playerId: item.playerId }); }}>Process cut</button><button type="button" disabled={busy} className="rounded-md border border-cvc-deep/20 px-3 py-1.5 text-xs font-bold uppercase tracking-[0.06em] text-cvc-deep disabled:opacity-50" onClick={() => { if (window.confirm(`Exempt ${item.playerName} from this cut cycle? No transaction will be created and they remain rostered.`)) exemptCut.mutate({ franchiseId: item.franchiseId, playerId: item.playerId }); }}>Exempt</button></div></div>)}</div>
+        <button type="button" className="cvc-button-secondary mb-3" disabled={busy} onClick={() => confirmDialog.confirm({ title: `Process all ${items.length} pending cuts?`, description: "Each will be released and logged as a standard drop transaction.", confirmLabel: "Process all", destructive: true, onConfirm: runAllPendingCuts })}><Scissors size={14} /> Process all pending cuts</button>
+        <div className="space-y-2">{items.map(item => <div key={`${item.franchiseId}-${item.playerId}`} className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-slate-200 bg-white p-3"><div><p className="font-semibold text-cvc-deep">{item.playerName} <span className="font-normal text-slate-500">· {item.franchiseName}</span></p><p className="text-xs text-slate-500">{item.position ?? "—"} · {item.nflTeam ?? "FA"} · ${item.salary.toFixed(0)} · expires {item.expiresYear ?? "—"}</p></div><div className="flex gap-2"><button type="button" disabled={busy} className="rounded-md bg-cvc-deep px-3 py-1.5 text-xs font-bold uppercase tracking-[0.06em] text-white disabled:opacity-50" onClick={() => confirmDialog.confirm({ title: `Process the cut for ${item.playerName}?`, description: "This releases them and logs a drop transaction.", confirmLabel: "Process cut", destructive: true, onConfirm: () => processCut.mutateAsync({ franchiseId: item.franchiseId, playerId: item.playerId }) })}>Process cut</button><button type="button" disabled={busy} className="rounded-md border border-cvc-deep/20 px-3 py-1.5 text-xs font-bold uppercase tracking-[0.06em] text-cvc-deep disabled:opacity-50" onClick={() => confirmDialog.confirm({ title: `Exempt ${item.playerName} from this cut cycle?`, description: "No transaction will be created and they remain rostered.", confirmLabel: "Exempt", onConfirm: () => exemptCut.mutateAsync({ franchiseId: item.franchiseId, playerId: item.playerId }) })}>Exempt</button></div></div>)}</div>
       </> : <p className="text-sm text-slate-500">No players are currently pending a cut decision.</p>}
     </div>
+    {confirmDialog.dialog}
   </div>;
 }
 
 function SeasonStatsSyncModule() {
   const utils = trpc.useUtils();
+  const confirmDialog = useConfirmDialog();
   const sync = trpc.league.syncSeasonStats.useMutation({
     onSuccess: data => {
       if (data.status === "skipped") { toast.error(data.reason ?? "Season stats sync is unavailable."); return; }
@@ -303,7 +306,7 @@ function SeasonStatsSyncModule() {
       <p className="mt-2 text-xs leading-5 text-rose-700"><strong>If a week's official score is wrong because its frozen lineup snapshot itself has the wrong players on it</strong> (not just a scoring formula bug), tap "Reset week N's snapshot" FIRST -- this permanently deletes that week's locked-in lineup record so the recompute below can re-capture it fresh from the current roster. Only do this if you've confirmed the current roster is actually correct for that week (e.g. no waiver moves have happened since).</p>
       <div className="mt-3 flex items-center gap-2">
         <input type="number" min={1} value={forceWeekNumber} onChange={event => setForceWeekNumber(Number(event.target.value) || 1)} className="w-20 rounded border border-slate-300 px-2 py-1.5 text-sm" aria-label="Week number"/>
-        <button type="button" className="cvc-button-compact border-rose-300 bg-rose-100 text-rose-800" disabled={resetWeekSnapshot.isPending} onClick={() => { if (window.confirm(`This permanently deletes week ${forceWeekNumber}'s locked-in lineup snapshot. Only do this if you've confirmed the current roster is correct for that week. Continue?`)) resetWeekSnapshot.mutate({ weekNumber: forceWeekNumber }); }}>{resetWeekSnapshot.isPending ? "Resetting…" : `Reset week ${forceWeekNumber}'s snapshot`}</button>
+        <button type="button" className="cvc-button-compact border-rose-300 bg-rose-100 text-rose-800" disabled={resetWeekSnapshot.isPending} onClick={() => confirmDialog.confirm({ title: `Reset week ${forceWeekNumber}'s snapshot?`, description: "This permanently deletes that week's locked-in lineup snapshot. Only do this if you've confirmed the current roster is correct for that week.", confirmLabel: "Reset snapshot", destructive: true, onConfirm: () => resetWeekSnapshot.mutateAsync({ weekNumber: forceWeekNumber }) })}>{resetWeekSnapshot.isPending ? "Resetting…" : `Reset week ${forceWeekNumber}'s snapshot`}</button>
         <button type="button" className="cvc-button-compact" disabled={forceRecomputeWeek.isPending} onClick={() => forceRecomputeWeek.mutate({ weekNumber: forceWeekNumber })}><Save size={14} /> {forceRecomputeWeek.isPending ? "Recomputing…" : `Recompute week ${forceWeekNumber}`}</button>
       </div>
     </div>
@@ -401,7 +404,7 @@ function SeasonStatsSyncModule() {
     <div className="rounded-lg border border-dashed border-red-300 bg-red-50 p-4">
       <p className="text-sm font-semibold text-cvc-deep">End of season: terminate waiver contracts</p>
       <p className="mt-1 text-xs leading-5 text-slate-500">Releases every remaining waiver-acquired ('W') contract that's reached its expiration this season, except for each franchise's one protected player (assigned via the "waiver right" option on the Protections page — run that per franchise first). This is the automatic "terminate the rest" half of the season-end waiver rule; run it once, after every owner has had a chance to make their one restricted-rights designation.</p>
-      <button type="button" className="cvc-button-compact mt-3 bg-red-600 hover:bg-red-700" disabled={terminateWaiverContracts.isPending} onClick={() => { if (window.confirm("This releases every remaining waiver-acquired contract league-wide, except each franchise's one protected player. Are you sure everyone has made their designation?")) terminateWaiverContracts.mutate(); }}><Save size={14} /> {terminateWaiverContracts.isPending ? "Terminating…" : "Terminate expired waiver contracts"}</button>
+      <button type="button" className="cvc-button-compact mt-3 bg-red-600 hover:bg-red-700" disabled={terminateWaiverContracts.isPending} onClick={() => confirmDialog.confirm({ title: "Terminate expired waiver contracts?", description: "This releases every remaining waiver-acquired contract league-wide, except each franchise's one protected player. Are you sure everyone has made their designation?", confirmLabel: "Terminate", destructive: true, onConfirm: () => terminateWaiverContracts.mutateAsync() })}><Save size={14} /> {terminateWaiverContracts.isPending ? "Terminating…" : "Terminate expired waiver contracts"}</button>
       {waiverTerminationResult ? <div className="mt-3 rounded-md border border-slate-200 bg-white p-3 text-xs text-slate-600">
         <p><b className="text-cvc-deep">Terminated:</b> {waiverTerminationResult.terminated.length}</p>
         {waiverTerminationResult.terminated.length ? <ul className="mt-2 space-y-0.5">{waiverTerminationResult.terminated.map((item, index) => <li key={index}>{item.franchiseName}: {item.playerName}</li>)}</ul> : null}
@@ -410,7 +413,7 @@ function SeasonStatsSyncModule() {
     <div className="rounded-lg border border-dashed border-red-300 bg-red-50 p-4">
       <p className="text-sm font-semibold text-cvc-deep">Rookie flag sync <span className="font-normal text-red-700">— experimental, not recommended</span></p>
       <p className="mt-1 text-xs leading-5 text-slate-500">Attempts to flag rookies via FantasyPros' rookie-rankings endpoint using a guessed ranking-type parameter that's been confirmed to return incorrect results (it returned Josh Allen as a "rookie" QB in testing). The season's actual rookie flags were instead set correctly via a one-time manual match against FantasyPros' real rookie-rankings CSV export. Running this again would overwrite those correct flags with wrong data — only use it if you're deliberately re-attempting the API approach for a future season, not as routine maintenance.</p>
-      <button type="button" className="cvc-button-compact mt-3 bg-red-600 hover:bg-red-700" disabled={syncRookies.isPending} onClick={() => { if (window.confirm("This will overwrite the currently-correct rookie flags with results from a guessed, previously-wrong API parameter. Are you sure?")) syncRookies.mutate(); }}><Save size={14} /> {syncRookies.isPending ? "Syncing…" : "Attempt rookie flag sync anyway"}</button>
+      <button type="button" className="cvc-button-compact mt-3 bg-red-600 hover:bg-red-700" disabled={syncRookies.isPending} onClick={() => confirmDialog.confirm({ title: "Attempt rookie flag sync anyway?", description: "This will overwrite the currently-correct rookie flags with results from a guessed, previously-wrong API parameter. Are you sure?", confirmLabel: "Sync anyway", destructive: true, onConfirm: () => syncRookies.mutateAsync() })}><Save size={14} /> {syncRookies.isPending ? "Syncing…" : "Attempt rookie flag sync anyway"}</button>
       {rookieResult ? <div className="mt-3 rounded-md border border-slate-200 bg-white p-3 text-xs text-slate-600">
         <p><b className="text-cvc-deep">Rookies found on FantasyPros by position:</b> {Object.entries(rookieResult.countByPosition).map(([pos, count]) => `${pos}: ${count}`).join(", ") || "none"}</p>
         <p className="mt-1"><b className="text-cvc-deep">Matched to a synced CVC player:</b> {rookieResult.matchedInDb} · <b className="text-cvc-deep">Not yet in CVC's player list:</b> {rookieResult.notYetSynced}</p>
@@ -419,6 +422,7 @@ function SeasonStatsSyncModule() {
         {rookieResult.samplePlayers ? <details className="mt-2"><summary className="cursor-pointer text-cvc-deep">Raw sample player per position (for checking a draft-year field)</summary><pre className="mt-1 max-h-64 overflow-auto rounded bg-slate-50 p-2 text-[10px]">{JSON.stringify(rookieResult.samplePlayers, null, 2)}</pre></details> : null}
       </div> : null}
     </div>
+    {confirmDialog.dialog}
   </div>;
 }
 
