@@ -181,41 +181,41 @@ describe("resolveWaiverAssignments (the cascade: an owner's own claims collide w
     expect(rejectionReasonByBid.size).toBe(0);
   });
 
-  it("claims at different positions get independent caps -- '1 RB, 1 WR' wins both instead of sharing one shared pool of 1 (grouping is automatic now, not opt-in)", () => {
+  it("claims in different groups get independent caps -- two separate groups of 1 both win instead of sharing one shared pool of 1 (groupKey is an arbitrary caller-defined string -- owner-defined custom groups, a default-pool sentinel, whatever the caller wants)", () => {
     const ranked = new Map([
-      ["rb1", [candidate("bid-rb1", "teamA", { priority: 1, maxPlayersDesired: 1, groupKey: "RB" })]],
-      ["wr1", [candidate("bid-wr1", "teamA", { priority: 2, maxPlayersDesired: 1, groupKey: "WR" })]],
+      ["playerA", [candidate("bid-a1", "teamA", { priority: 1, maxPlayersDesired: 1, groupKey: "groupA" })]],
+      ["playerB", [candidate("bid-b1", "teamA", { priority: 2, maxPlayersDesired: 1, groupKey: "groupB" })]],
     ]);
     const capacity = new Map([["teamA", { rosterCount: 15, budget: 30 }]]);
     const { winnerByPlayer, rejectionReasonByBid } = resolveWaiverAssignments(ranked, capacity, 22);
-    expect(winnerByPlayer.get("rb1")).toBe("bid-rb1");
-    expect(winnerByPlayer.get("wr1")).toBe("bid-wr1"); // independent pool, not bumped
+    expect(winnerByPlayer.get("playerA")).toBe("bid-a1");
+    expect(winnerByPlayer.get("playerB")).toBe("bid-b1"); // independent pool, not bumped
     expect(rejectionReasonByBid.size).toBe(0);
   });
 
-  it("a second grouped claim at the SAME position still gets bumped by its own group's cap", () => {
+  it("a second claim in the SAME group still gets bumped by that group's cap", () => {
     const ranked = new Map([
-      ["rb1", [candidate("bid-rb1", "teamA", { priority: 1, maxPlayersDesired: 1, groupKey: "RB" })]],
-      ["rb2", [candidate("bid-rb2", "teamA", { priority: 2, maxPlayersDesired: 1, groupKey: "RB" })]],
-      ["wr1", [candidate("bid-wr1", "teamA", { priority: 3, maxPlayersDesired: 1, groupKey: "WR" })]],
+      ["playerA", [candidate("bid-a1", "teamA", { priority: 1, maxPlayersDesired: 1, groupKey: "groupA" })]],
+      ["playerA2", [candidate("bid-a2", "teamA", { priority: 2, maxPlayersDesired: 1, groupKey: "groupA" })]],
+      ["playerB", [candidate("bid-b1", "teamA", { priority: 3, maxPlayersDesired: 1, groupKey: "groupB" })]],
     ]);
     const capacity = new Map([["teamA", { rosterCount: 15, budget: 30 }]]);
     const { winnerByPlayer, rejectionReasonByBid } = resolveWaiverAssignments(ranked, capacity, 22);
-    expect(winnerByPlayer.get("rb1")).toBe("bid-rb1"); // RB group: priority 1 kept
-    expect(winnerByPlayer.has("rb2")).toBe(false); // RB group: priority 2 bumped by the same group's cap
-    expect(winnerByPlayer.get("wr1")).toBe("bid-wr1"); // WR group: untouched, independent cap
-    expect(rejectionReasonByBid.get("bid-rb2")).toEqual({ type: "max_players_desired", limit: 1 });
+    expect(winnerByPlayer.get("playerA")).toBe("bid-a1"); // groupA: priority 1 kept
+    expect(winnerByPlayer.has("playerA2")).toBe(false); // groupA: priority 2 bumped by the same group's cap
+    expect(winnerByPlayer.get("playerB")).toBe("bid-b1"); // groupB: untouched, independent cap
+    expect(rejectionReasonByBid.get("bid-a2")).toEqual({ type: "max_players_desired", limit: 1 });
   });
 
-  it("roster cap and season budget stay shared even across grouped claims -- only max_players_desired is scoped", () => {
+  it("roster cap and season budget stay shared even across different groups -- only max_players_desired is scoped", () => {
     const ranked = new Map([
-      ["rb1", [candidate("bid-rb1", "teamA", { priority: 1, cost: 20, maxPlayersDesired: 1, groupKey: "RB" })]],
-      ["wr1", [candidate("bid-wr1", "teamA", { priority: 2, cost: 20, maxPlayersDesired: 1, groupKey: "WR" })]],
+      ["playerA", [candidate("bid-a1", "teamA", { priority: 1, cost: 20, maxPlayersDesired: 1, groupKey: "groupA" })]],
+      ["playerB", [candidate("bid-b1", "teamA", { priority: 2, cost: 20, maxPlayersDesired: 1, groupKey: "groupB" })]],
     ]);
     const capacity = new Map([["teamA", { rosterCount: 15, budget: 30 }]]); // only enough budget for one $20 claim
     const { winnerByPlayer, rejectionReasonByBid } = resolveWaiverAssignments(ranked, capacity, 22);
-    expect(winnerByPlayer.get("rb1")).toBe("bid-rb1");
-    expect(winnerByPlayer.has("wr1")).toBe(false); // independent max-players pool, but budget is still shared
-    expect(rejectionReasonByBid.get("bid-wr1")).toEqual({ type: "budget", cost: 20, remaining: 10 });
+    expect(winnerByPlayer.get("playerA")).toBe("bid-a1");
+    expect(winnerByPlayer.has("playerB")).toBe(false); // independent max-players pool, but budget is still shared
+    expect(rejectionReasonByBid.get("bid-b1")).toEqual({ type: "budget", cost: 20, remaining: 10 });
   });
 });

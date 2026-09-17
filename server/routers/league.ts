@@ -1510,24 +1510,99 @@ export const leagueRouter = router({
     return { updated: true };
   }),
 
-  // Claims are always grouped by position now (see resolveWaiverAssignments' groupKey
-  // in server/waiverResolution.ts) -- max_players_desired is a per-position-group cap,
-  // not a per-claim one. Bulk-updates every pending claim this franchise has at the
-  // given position, within the currently open period, to the same new cap at once.
-  setFaabBidGroupMaxPlayers: protectedProcedure.input(z.object({ position: z.string().min(1).max(10), maxPlayers: z.number().int().min(1).max(10) })).mutation(async ({ ctx, input }) => {
+  // Owner-defined custom claim groups (faab_bid_group). A pending claim with no
+  // bid_group_id sits in the franchise's shared default pool (original pre-grouping
+  // behavior -- one shared max_players_desired cap, off the bid's own column). A claim
+  // assigned to a group instead shares that group's own max_players_desired cap with
+  // every other claim in it, independent of the default pool and any other group. See
+  // resolveOpenWaiverPeriod in server/waiverResolution.ts for how groupKey/
+  // maxPlayersDesired get computed from this at resolution time.
+  createFaabBidGroup: protectedProcedure.input(z.object({ label: z.string().min(1).max(60), maxPlayers: z.number().int().min(1).max(10) })).mutation(async ({ ctx, input }) => {
     const owner = await getOwnerAccess({ openId: ctx.user.openId });
-    if (!owner) throw new TRPCError({ code: "FORBIDDEN", message: "A CVC owner session is required to update a claim." });
+    if (!owner) throw new TRPCError({ code: "FORBIDDEN", message: "A CVC owner session is required to create a claim group." });
     const franchise = unwrap(await supabase.from("franchise").select("id").eq("current_owner_id", owner.id).eq("is_active", true).limit(1).maybeSingle());
-    if (!franchise) throw new TRPCError({ code: "FORBIDDEN", message: "Only an owner with an active CVC franchise may update a claim." });
+    if (!franchise) throw new TRPCError({ code: "FORBIDDEN", message: "Only an owner with an active CVC franchise may create a claim group." });
     const { season } = await getCurrentLeagueAndSeason();
     const now = new Date().toISOString();
     const period = unwrap(await supabase.from("waiver_period").select("id").eq("season_id", season.id).eq("status", "open").lte("opens_at", now).gte("closes_at", now).order("closes_at").limit(1).maybeSingle());
     if (!period) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "There is no open CVC waiver period." });
-    const pendingBids = unwrap(await supabase.from("faab_bid").select("id, player:player_id(position)").eq("waiver_period_id", period.id).eq("franchise_id", franchise.id).eq("status", "pending")) ?? [];
-    const bidIds = pendingBids.filter(bid => { const player = Array.isArray(bid.player) ? bid.player[0] : bid.player; return player?.position === input.position; }).map(bid => bid.id);
-    if (!bidIds.length) throw new TRPCError({ code: "NOT_FOUND", message: `You have no pending ${input.position} claims this period.` });
+    const group = unwrap(await supabase.from("faab_bid_group").insert({ waiver_period_id: period.id, franchise_id: franchise.id, label: input.label, max_players_desired: input.maxPlayers }).select("id, label, max_players_desired").single());
+    if (!group) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "CVC claim group could not be created." });
+    return group;
+  }),
+
+  // Moves every claim currently in the group back to the default pool (bid_group_id =
+  // null) before deleting it, so nothing is left orphaned or silently dropped.
+  deleteFaabBidGroup: protectedProcedure.input(z.object({ groupId: z.string().uuid() })).mutation(async ({ ctx, input }) => {
+    const owner = await getOwnerAccess({ openId: ctx.user.openId });
+    if (!owner) throw new TRPCError({ code: "FORBIDDEN", message: "A CVC owner session is required to delete a claim group." });
+    const franchise = unwrap(await supabase.from("franchise").select("id").eq("current_owner_id", owner.id).eq("is_active", true).limit(1).maybeSingle());
+    if (!franchise) throw new TRPCError({ code: "FORBIDDEN", message: "Only an owner with an active CVC franchise may delete a claim group." });
+    const group = unwrap(await supabase.from("faab_bid_group").select("id, franchise_id").eq("id", input.groupId).maybeSingle());
+    if (!group) throw new TRPCError({ code: "NOT_FOUND", message: "That CVC claim group was not found." });
+    if (group.franchise_id !== franchise.id) throw new TRPCError({ code: "FORBIDDEN", message: "You may only delete your own CVC franchise's claim groups." });
+    unwrap(await supabase.from("faab_bid").update({ bid_group_id: null }).eq("bid_group_id", input.groupId).select("id"));
+    unwrap(await supabase.from("faab_bid_group").delete().eq("id", input.groupId).select("id"));
+    return { deleted: true };
+  }),
+
+  // Moves a single pending claim into a group (or back to the default pool when
+  // groupId is null). Doesn't touch amount or priority -- a pure grouping reassignment.
+  assignFaabBidToGroup: protectedProcedure.input(z.object({ bidId: z.string().uuid(), groupId: z.string().uuid().nullable() })).mutation(async ({ ctx, input }) => {
+    const owner = await getOwnerAccess({ openId: ctx.user.openId });
+    if (!owner) throw new TRPCError({ code: "FORBIDDEN", message: "A CVC owner session is required to update a claim." });
+    const franchise = unwrap(await supabase.from("franchise").select("id").eq("current_owner_id", owner.id).eq("is_active", true).limit(1).maybeSingle());
+    if (!franchise) throw new TRPCError({ code: "FORBIDDEN", message: "Only an owner with an active CVC franchise may update a claim." });
+    const bid = unwrap(await supabase.from("faab_bid").select("id, franchise_id, status").eq("id", input.bidId).maybeSingle());
+    if (!bid) throw new TRPCError({ code: "NOT_FOUND", message: "That CVC claim was not found." });
+    if (bid.franchise_id !== franchise.id) throw new TRPCError({ code: "FORBIDDEN", message: "You may only update your own CVC franchise's claims." });
+    if (bid.status !== "pending") throw new TRPCError({ code: "BAD_REQUEST", message: "That claim has already been resolved and can no longer be updated." });
+    if (input.groupId) {
+      const group = unwrap(await supabase.from("faab_bid_group").select("id, franchise_id").eq("id", input.groupId).maybeSingle());
+      if (!group) throw new TRPCError({ code: "NOT_FOUND", message: "That CVC claim group was not found." });
+      if (group.franchise_id !== franchise.id) throw new TRPCError({ code: "FORBIDDEN", message: "You may only move claims into your own CVC franchise's groups." });
+    }
+    unwrap(await supabase.from("faab_bid").update({ bid_group_id: input.groupId }).eq("id", input.bidId).select("id").single());
+    return { updated: true };
+  }),
+
+  // groupId null updates the shared default pool's cap (bulk-applies to every pending,
+  // ungrouped claim this franchise has this period); a real groupId updates that
+  // group's own cap instead.
+  setFaabBidGroupMaxPlayers: protectedProcedure.input(z.object({ groupId: z.string().uuid().nullable(), maxPlayers: z.number().int().min(1).max(10) })).mutation(async ({ ctx, input }) => {
+    const owner = await getOwnerAccess({ openId: ctx.user.openId });
+    if (!owner) throw new TRPCError({ code: "FORBIDDEN", message: "A CVC owner session is required to update a claim." });
+    const franchise = unwrap(await supabase.from("franchise").select("id").eq("current_owner_id", owner.id).eq("is_active", true).limit(1).maybeSingle());
+    if (!franchise) throw new TRPCError({ code: "FORBIDDEN", message: "Only an owner with an active CVC franchise may update a claim." });
+    if (input.groupId) {
+      const group = unwrap(await supabase.from("faab_bid_group").select("id, franchise_id").eq("id", input.groupId).maybeSingle());
+      if (!group) throw new TRPCError({ code: "NOT_FOUND", message: "That CVC claim group was not found." });
+      if (group.franchise_id !== franchise.id) throw new TRPCError({ code: "FORBIDDEN", message: "You may only update your own CVC franchise's claim groups." });
+      unwrap(await supabase.from("faab_bid_group").update({ max_players_desired: input.maxPlayers }).eq("id", input.groupId).select("id").single());
+      return { updated: 1 };
+    }
+    const { season } = await getCurrentLeagueAndSeason();
+    const now = new Date().toISOString();
+    const period = unwrap(await supabase.from("waiver_period").select("id").eq("season_id", season.id).eq("status", "open").lte("opens_at", now).gte("closes_at", now).order("closes_at").limit(1).maybeSingle());
+    if (!period) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "There is no open CVC waiver period." });
+    const bidIds = (unwrap(await supabase.from("faab_bid").select("id").eq("waiver_period_id", period.id).eq("franchise_id", franchise.id).eq("status", "pending").is("bid_group_id", null)) ?? []).map(row => row.id);
+    if (!bidIds.length) throw new TRPCError({ code: "NOT_FOUND", message: "You have no pending claims in the default pool this period." });
     unwrap(await supabase.from("faab_bid").update({ max_players_desired: input.maxPlayers }).in("id", bidIds).select("id"));
     return { updated: bidIds.length };
+  }),
+
+  // The caller's own custom groups for the currently open period, so the UI can render
+  // a card and "move to group" choice for a group even before it has any claims in it.
+  myFaabBidGroups: protectedProcedure.query(async ({ ctx }) => {
+    const owner = await getOwnerAccess({ openId: ctx.user.openId });
+    if (!owner) throw new TRPCError({ code: "FORBIDDEN", message: "A CVC owner session is required." });
+    const franchise = unwrap(await supabase.from("franchise").select("id").eq("current_owner_id", owner.id).eq("is_active", true).limit(1).maybeSingle());
+    if (!franchise) return [];
+    const { season } = await getCurrentLeagueAndSeason();
+    const now = new Date().toISOString();
+    const period = unwrap(await supabase.from("waiver_period").select("id").eq("season_id", season.id).eq("status", "open").lte("opens_at", now).gte("closes_at", now).order("closes_at").limit(1).maybeSingle());
+    if (!period) return [];
+    return unwrap(await supabase.from("faab_bid_group").select("id, label, max_players_desired").eq("waiver_period_id", period.id).eq("franchise_id", franchise.id).order("created_at")) ?? [];
   }),
 
   myFaabBids: protectedProcedure.query(async ({ ctx }) => {
@@ -1535,7 +1610,7 @@ export const leagueRouter = router({
     if (!owner) throw new TRPCError({ code: "FORBIDDEN", message: "A CVC owner session is required." });
     const franchise = unwrap(await supabase.from("franchise").select("id").eq("current_owner_id", owner.id).eq("is_active", true).limit(1).maybeSingle());
     if (!franchise) return [];
-    return unwrap(await supabase.from("faab_bid").select("id, amount, priority, max_players_desired, status, submitted_at, confirmed_at, player:player_id(id, display_name, position, nfl_team), period:waiver_period_id(label, closes_at, status, period_type)").eq("franchise_id", franchise.id).order("submitted_at", { ascending: false }).limit(100)) ?? [];
+    return unwrap(await supabase.from("faab_bid").select("id, amount, priority, max_players_desired, bid_group_id, status, submitted_at, confirmed_at, player:player_id(id, display_name, position, nfl_team), period:waiver_period_id(label, closes_at, status, period_type)").eq("franchise_id", franchise.id).order("submitted_at", { ascending: false }).limit(100)) ?? [];
   }),
 
   // CVC's real season FAAB budget: $30 per franchise, spent in $1 increments across the

@@ -115,29 +115,41 @@ export function CvcFreeAgents() {
   const isFreePeriod = waiver.data?.period?.period_type === "free";
   const faabBalance = trpc.league.myFaabBalance.useQuery(undefined, { enabled: Boolean(owner?.franchise) });
   const myBids = trpc.league.myFaabBids.useQuery(undefined, { enabled: Boolean(owner?.franchise) });
-  // Claims are grouped by position automatically now (see resolveWaiverAssignments'
-  // groupKey server-side) -- max_players_desired is a per-position-group cap, so the
-  // Manage Bids page shows one control per position the owner has pending claims in,
-  // not one per claim. Shown value is the highest max_players_desired currently set
-  // among that position's pending claims (they're kept in sync going forward by
-  // setFaabBidGroupMaxPlayers, but could differ if some predate this feature).
-  const pendingBidsByPosition = useMemo(() => {
-    const map = new Map<string, any[]>();
+  const myGroups = trpc.league.myFaabBidGroups.useQuery(undefined, { enabled: Boolean(owner?.franchise) });
+  // Owner-defined custom groups (faab_bid_group), not automatic -- a claim with no
+  // bid_group_id sits in the shared default pool (null key here); everything else is
+  // keyed by the group it's been moved into. See resolveOpenWaiverPeriod server-side
+  // for how this maps to groupKey/maxPlayersDesired at resolution time.
+  const pendingBidsByGroup = useMemo(() => {
+    const map = new Map<string | null, any[]>();
     for (const bid of myBids.data ?? []) {
       if (bid.status !== "pending") continue;
-      const player = Array.isArray(bid.player) ? bid.player[0] : bid.player;
-      const position = player?.position ?? "—";
-      const list = map.get(position) ?? [];
+      const key = bid.bid_group_id ?? null;
+      const list = map.get(key) ?? [];
       list.push(bid);
-      map.set(position, list);
+      map.set(key, list);
     }
     return map;
   }, [myBids.data]);
+  const invalidateBidsAndGroups = async () => { await Promise.all([utils.league.myFaabBids.invalidate(), utils.league.myFaabBidGroups.invalidate()]); };
   const submit = trpc.league.submitFaabBid.useMutation({ onSuccess: async () => { setSelectedPlayerId(""); setAmount("1"); await Promise.all([utils.league.myFaabBids.invalidate(), utils.league.myFaabBalance.invalidate(), utils.league.activity.invalidate()]); } });
   const confirmClaim = trpc.league.confirmFreeAgentClaim.useMutation({ onSuccess: async () => { await utils.league.myFaabBids.invalidate(); }, onError: error => toast.error(error.message) });
   const cancelClaim = trpc.league.cancelFaabBid.useMutation({ onSuccess: async () => { await Promise.all([utils.league.myFaabBids.invalidate(), utils.league.myFaabBalance.invalidate()]); }, onError: error => toast.error(error.message) });
   const setPriority = trpc.league.setFaabBidPriority.useMutation({ onSuccess: async () => { await utils.league.myFaabBids.invalidate(); }, onError: error => toast.error(error.message) });
-  const setGroupMaxPlayers = trpc.league.setFaabBidGroupMaxPlayers.useMutation({ onSuccess: async () => { await utils.league.myFaabBids.invalidate(); }, onError: error => toast.error(error.message) });
+  const setGroupMaxPlayers = trpc.league.setFaabBidGroupMaxPlayers.useMutation({ onSuccess: invalidateBidsAndGroups, onError: error => toast.error(error.message) });
+  const createGroup = trpc.league.createFaabBidGroup.useMutation({ onError: error => toast.error(error.message) });
+  const deleteGroup = trpc.league.deleteFaabBidGroup.useMutation({ onSuccess: invalidateBidsAndGroups, onError: error => toast.error(error.message) });
+  const assignToGroup = trpc.league.assignFaabBidToGroup.useMutation({ onSuccess: invalidateBidsAndGroups, onError: error => toast.error(error.message) });
+
+  // Prompts for a new group's name/max (simple inline prompt -- no separate modal),
+  // creates it, then immediately moves the given claim into it.
+  const createGroupAndAssign = (bidId: string) => {
+    const label = window.prompt("Name this group (e.g. \"Handcuffs\"):");
+    if (!label) return;
+    const maxInput = window.prompt("Max players to win in this group?", "1");
+    const maxPlayers = Math.min(10, Math.max(1, Math.round(Number(maxInput)) || 1));
+    createGroup.mutate({ label, maxPlayers }, { onSuccess: group => assignToGroup.mutate({ bidId, groupId: group.id }) });
+  };
 
   const activePool = tab === "all-players" ? allPlayersPool : tab === "watchlist" ? watchlistPool : freeAgentsPool;
   const rawPlayers = activePool.data ?? [];
@@ -191,6 +203,25 @@ export function CvcFreeAgents() {
     return `${dayNames[date.getDay()]} ${time} ET`;
   }
 
+  // Shared row renderer for a single pending (or resolved) claim, used inside both the
+  // default-pool card and every custom-group card on Manage Bids -- identical to how
+  // each claim already rendered before groups had their own cards, plus the new
+  // "move to group" select.
+  const renderClaimRow = (bid: any) => {
+    const period = Array.isArray(bid.period) ? bid.period[0] : bid.period;
+    const needsConfirmation = bid.status === "pending" && period?.period_type === "free" && period?.status === "open" && !bid.confirmed_at;
+    const isPending = bid.status === "pending";
+    return <div key={bid.id} className="flex items-center justify-between gap-3 rounded bg-white/5 px-3 py-2 text-sm text-white">
+      <span><b>{bid.player?.[0]?.display_name ?? bid.player?.display_name}</b> · ${bid.amount} · <span className="uppercase text-cvc-accent">{needsConfirmation ? "unconfirmed" : bid.status}</span></span>
+      <span className="flex shrink-0 items-center gap-2">
+        {isPending ? <select value={bid.bid_group_id ?? ""} disabled={assignToGroup.isPending || createGroup.isPending} onChange={event => { const value = event.target.value; if (value === "__new__") createGroupAndAssign(bid.id); else assignToGroup.mutate({ bidId: bid.id, groupId: value || null }); }} className="rounded border border-white/20 bg-black/20 px-2 py-1 text-[10px] uppercase tracking-[.04em] text-white"><option value="">Default pool</option>{(myGroups.data ?? []).map((group: any) => <option key={group.id} value={group.id}>{group.label}</option>)}<option value="__new__">+ Create new group</option></select> : null}
+        {isPending ? <label className="flex items-center gap-1 text-[10px] uppercase tracking-[.06em] text-cvc-muted">Priority<input type="number" min={1} max={99} defaultValue={bid.priority ?? 1} key={`${bid.id}-${bid.priority}`} onBlur={event => { const next = Number(event.target.value); if (Number.isInteger(next) && next >= 1 && next <= 99 && next !== bid.priority) setPriority.mutate({ bidId: bid.id, priority: next }); }} className="w-14 rounded border border-white/20 bg-black/20 px-2 py-1 text-center text-xs text-white" /></label> : null}
+        {needsConfirmation ? <button onClick={() => confirmClaim.mutate({ bidId: bid.id })} disabled={confirmClaim.isPending} className="rounded bg-amber-500 px-2.5 py-1 text-xs font-bold text-white hover:bg-amber-600">Confirm claim</button> : null}
+        {isPending ? <button onClick={() => cancelClaim.mutate({ bidId: bid.id })} disabled={cancelClaim.isPending} className="rounded bg-white/10 px-2.5 py-1 text-xs font-bold text-white hover:bg-white/20">Cancel</button> : null}
+      </span>
+    </div>;
+  };
+
   const selectedPlayer = players.find((player: any) => player.id === selectedPlayerId);
 
   const colSpan = 6 + activeColumns.length;
@@ -215,32 +246,34 @@ export function CvcFreeAgents() {
       <div className="grid gap-5">
         <section className="rounded-xl border border-white/10 bg-cvc-deep/60 p-5">
           <div className="flex items-center gap-2 text-cvc-accent"><DollarSign size={16} /><p className="font-display text-lg uppercase">My claim status</p></div>
-          <p className="mt-2 text-xs text-cvc-muted">Claims are grouped by position automatically -- winning one RB claim never counts against your WR claims. Set how many you're willing to win at each position below.{(myBids.data?.filter((bid: any) => bid.status === "pending").length ?? 0) > 1 ? " If they'd collectively push you past your roster limit, budget, or a position's stated max, your lowest-numbered priority claims are kept first and the rest fall through to the next bidder -- set the order within each group below." : ""}</p>
+          <p className="mt-2 text-xs text-cvc-muted">Every claim starts in the shared default pool below. Create a group to give some of your claims their own independent max instead -- move any claim into it with the dropdown on that claim.{(myBids.data?.filter((bid: any) => bid.status === "pending").length ?? 0) > 1 ? " If a pool's claims would collectively exceed your roster limit, budget, or its stated max, your lowest-numbered priority claims are kept first and the rest fall through to the next bidder." : ""}</p>
           <div className="mt-4 space-y-4">
-            {owner?.franchise ? (pendingBidsByPosition.size ? Array.from(pendingBidsByPosition.entries()).map(([position, bids]) => {
-              const currentMax = Math.max(...bids.map((bid: any) => bid.max_players_desired ?? 1));
-              return <div key={position} className="rounded-lg border border-white/10 bg-black/10 p-3">
-                <div className="flex items-center justify-between gap-3">
-                  <span className="text-sm text-white"><b>{position}</b> · {bids.length} pending claim{bids.length === 1 ? "" : "s"}</span>
-                  <label className="flex items-center gap-2 text-[10px] uppercase tracking-[.06em] text-cvc-muted">Max to win<select value={currentMax} disabled={setGroupMaxPlayers.isPending} onChange={event => setGroupMaxPlayers.mutate({ position, maxPlayers: Number(event.target.value) })} className="rounded border border-white/20 bg-black/20 px-2 py-1 text-xs text-white">{Array.from({ length: 10 }, (_, index) => index + 1).map(value => <option key={value} value={value}>{value}</option>)}</select></label>
-                </div>
-                <div className="mt-2 space-y-2">
-                  {bids.map((bid: any) => {
-                    const period = Array.isArray(bid.period) ? bid.period[0] : bid.period;
-                    const needsConfirmation = bid.status === "pending" && period?.period_type === "free" && period?.status === "open" && !bid.confirmed_at;
-                    const isPending = bid.status === "pending";
-                    return <div key={bid.id} className="flex items-center justify-between gap-3 rounded bg-white/5 px-3 py-2 text-sm text-white">
-                      <span><b>{bid.player?.[0]?.display_name ?? bid.player?.display_name}</b> · ${bid.amount} · <span className="uppercase text-cvc-accent">{needsConfirmation ? "unconfirmed" : bid.status}</span></span>
-                      <span className="flex shrink-0 items-center gap-2">
-                        {isPending ? <label className="flex items-center gap-1 text-[10px] uppercase tracking-[.06em] text-cvc-muted">Priority<input type="number" min={1} max={99} defaultValue={bid.priority ?? 1} key={`${bid.id}-${bid.priority}`} onBlur={event => { const next = Number(event.target.value); if (Number.isInteger(next) && next >= 1 && next <= 99 && next !== bid.priority) setPriority.mutate({ bidId: bid.id, priority: next }); }} className="w-14 rounded border border-white/20 bg-black/20 px-2 py-1 text-center text-xs text-white" /></label> : null}
-                        {needsConfirmation ? <button onClick={() => confirmClaim.mutate({ bidId: bid.id })} disabled={confirmClaim.isPending} className="rounded bg-amber-500 px-2.5 py-1 text-xs font-bold text-white hover:bg-amber-600">Confirm claim</button> : null}
-                        {isPending ? <button onClick={() => cancelClaim.mutate({ bidId: bid.id })} disabled={cancelClaim.isPending} className="rounded bg-white/10 px-2.5 py-1 text-xs font-bold text-white hover:bg-white/20">Cancel</button> : null}
-                      </span>
-                    </div>;
-                  })}
-                </div>
-              </div>;
-            }) : <p className="text-sm text-cvc-muted">No pending CVC waiver claims this period.</p>) : <p className="text-sm text-cvc-muted">Sign in with an owner account to submit and review claims.</p>}
+            {owner?.franchise ? ((pendingBidsByGroup.size || myGroups.data?.length) ? <>
+              {(() => {
+                const defaultBids = pendingBidsByGroup.get(null) ?? [];
+                const defaultMax = defaultBids.length ? Math.max(...defaultBids.map((bid: any) => bid.max_players_desired ?? 1)) : 1;
+                return <div className="rounded-lg border border-white/10 bg-black/10 p-3">
+                  <div className="flex items-center justify-between gap-3">
+                    <span className="text-sm text-white"><b>Default pool</b> · {defaultBids.length} pending claim{defaultBids.length === 1 ? "" : "s"}</span>
+                    <label className="flex items-center gap-2 text-[10px] uppercase tracking-[.06em] text-cvc-muted">Max to win<select value={defaultMax} disabled={setGroupMaxPlayers.isPending} onChange={event => setGroupMaxPlayers.mutate({ groupId: null, maxPlayers: Number(event.target.value) })} className="rounded border border-white/20 bg-black/20 px-2 py-1 text-xs text-white">{Array.from({ length: 10 }, (_, index) => index + 1).map(value => <option key={value} value={value}>{value}</option>)}</select></label>
+                  </div>
+                  <div className="mt-2 space-y-2">{defaultBids.length ? defaultBids.map(renderClaimRow) : <p className="text-xs text-cvc-muted">No claims in the default pool.</p>}</div>
+                </div>;
+              })()}
+              {(myGroups.data ?? []).map((group: any) => {
+                const groupBids = pendingBidsByGroup.get(group.id) ?? [];
+                return <div key={group.id} className="rounded-lg border border-white/10 bg-black/10 p-3">
+                  <div className="flex items-center justify-between gap-3">
+                    <span className="text-sm text-white"><b>{group.label}</b> · {groupBids.length} pending claim{groupBids.length === 1 ? "" : "s"}</span>
+                    <span className="flex items-center gap-2">
+                      <label className="flex items-center gap-2 text-[10px] uppercase tracking-[.06em] text-cvc-muted">Max to win<select value={group.max_players_desired} disabled={setGroupMaxPlayers.isPending} onChange={event => setGroupMaxPlayers.mutate({ groupId: group.id, maxPlayers: Number(event.target.value) })} className="rounded border border-white/20 bg-black/20 px-2 py-1 text-xs text-white">{Array.from({ length: 10 }, (_, index) => index + 1).map(value => <option key={value} value={value}>{value}</option>)}</select></label>
+                      <button onClick={() => { if (window.confirm(`Delete "${group.label}"? Its claims move back to the default pool.`)) deleteGroup.mutate({ groupId: group.id }); }} disabled={deleteGroup.isPending} className="rounded bg-white/10 px-2.5 py-1 text-[10px] font-bold uppercase tracking-[.04em] text-white hover:bg-white/20">Delete</button>
+                    </span>
+                  </div>
+                  <div className="mt-2 space-y-2">{groupBids.length ? groupBids.map(renderClaimRow) : <p className="text-xs text-cvc-muted">No claims in this group yet.</p>}</div>
+                </div>;
+              })}
+            </> : <p className="text-sm text-cvc-muted">No pending CVC waiver claims this period.</p>) : <p className="text-sm text-cvc-muted">Sign in with an owner account to submit and review claims.</p>}
           </div>
         </section>
       </div>

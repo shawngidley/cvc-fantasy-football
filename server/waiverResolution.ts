@@ -2,7 +2,12 @@ import { supabase, unwrap } from "./supabase";
 import { computeFranchiseStandings, getFaabBalance, MAX_ROSTER_SIZE, rankBidPeriodCandidates, resolveWaiverAssignments, selectFreeAgentCandidates, sortByWorstRecordFirst, type WaiverCandidateBid } from "./waiverRules";
 import { computeNextResolutionTime, nextEasternWeekdayAt, sameEasternDayAt } from "./waiverResolutionTiming";
 
-type PendingBid = { id: string; franchise_id: string; player_id: string; drop_player_id: string | null; amount: number; max_players_desired: number; priority: number; confirmed_at: string | null };
+type PendingBid = { id: string; franchise_id: string; player_id: string; drop_player_id: string | null; amount: number; max_players_desired: number; priority: number; bid_group_id: string | null; confirmed_at: string | null };
+
+// Every ungrouped ("default pool") bid shares this one sentinel group -- matches the
+// original pre-grouping behavior exactly: one shared cap, off the bid's own
+// max_players_desired column.
+const DEFAULT_GROUP_KEY = "__default__";
 
 export type WaiverAwardResult = { playerName: string; franchiseName: string; amount: number; droppedPlayerName: string | null };
 export type WaiverSkipResult = { playerName: string; franchiseName: string; reason: string };
@@ -80,21 +85,24 @@ export async function resolveOpenWaiverPeriod(): Promise<WaiverResolutionSummary
 
   const seasonId = period.season_id;
   const periodType = (period.period_type ?? "bid") as "bid" | "free";
-  const pendingBids = (unwrap(await supabase.from("faab_bid").select("id, franchise_id, player_id, drop_player_id, amount, max_players_desired, priority, confirmed_at").eq("waiver_period_id", period.id).eq("status", "pending")) ?? []) as PendingBid[];
+  const pendingBids = (unwrap(await supabase.from("faab_bid").select("id, franchise_id, player_id, drop_player_id, amount, max_players_desired, priority, bid_group_id, confirmed_at").eq("waiver_period_id", period.id).eq("status", "pending")) ?? []) as PendingBid[];
 
   if (periodType === "free" && pendingBids.length) await ensureWaiverPriorityBootstrapped(seasonId);
 
   const involvedPlayerIds = pendingBids.length ? Array.from(new Set(pendingBids.map(bid => bid.player_id))) : ["00000000-0000-0000-0000-000000000000"];
-  const [franchisesResult, playersResult, seasonResult, standings] = await Promise.all([
+  const involvedGroupIds = Array.from(new Set(pendingBids.map(bid => bid.bid_group_id).filter((id): id is string => Boolean(id))));
+  const [franchisesResult, playersResult, seasonResult, standings, groupsResult] = await Promise.all([
     supabase.from("franchise").select("id, name, waiver_priority").eq("is_active", true),
-    supabase.from("player").select("id, display_name, position").in("id", involvedPlayerIds),
+    supabase.from("player").select("id, display_name").in("id", involvedPlayerIds),
     supabase.from("season").select("year").eq("id", seasonId).single(),
     computeFranchiseStandings(seasonId),
+    involvedGroupIds.length ? supabase.from("faab_bid_group").select("id, label, max_players_desired").in("id", involvedGroupIds) : Promise.resolve({ data: [], error: null }),
   ]);
   const franchiseRows = unwrap(franchisesResult) ?? [];
   const franchiseById = new Map(franchiseRows.map(row => [row.id, row]));
   const playerById = new Map((unwrap(playersResult) ?? []).map(row => [row.id, row]));
   const seasonYear = unwrap(seasonResult)?.year ?? new Date().getFullYear();
+  const groupById = new Map((unwrap(groupsResult as { data: { id: string; label: string; max_players_desired: number }[] | null; error: { message: string } | null }) ?? []).map(row => [row.id, row]));
 
   const byPlayer = new Map<string, PendingBid[]>();
   for (const bid of pendingBids) {
@@ -142,20 +150,22 @@ export async function resolveOpenWaiverPeriod(): Promise<WaiverResolutionSummary
     const ranked = periodType === "free"
       ? selectFreeAgentCandidates(bidsForPlayer, waiverPriorityByFranchiseId).orderedCandidateFranchiseIds.map(franchiseId => bidsForPlayer.find(bid => bid.franchise_id === franchiseId)).filter((bid): bid is PendingBid => Boolean(bid))
       : rankBidPeriodCandidates<PendingBid>(bidsForPlayer, standings);
-    // Every claim's max-players cap is scoped to the player's own position -- an
-    // owner's claims at different positions never share a pool. Falls back to the
-    // player's own id if position is somehow missing, so it still only groups with
-    // itself rather than silently joining another position's pool.
-    const playerPosition = playerById.get(playerId)?.position ?? playerId;
-    rankedCandidatesByPlayer.set(playerId, ranked.map(bid => ({
-      id: bid.id,
-      franchiseId: bid.franchise_id,
-      cost: periodType === "free" ? 1 : bid.amount,
-      priority: bid.priority,
-      maxPlayersDesired: bid.max_players_desired,
-      dropPlayerId: bid.drop_player_id,
-      groupKey: playerPosition,
-    })));
+    // A claim in an owner-defined group shares that group's own max_players_desired
+    // cap with every other claim in it; an ungrouped claim shares the one default-pool
+    // cap (its own max_players_desired column), exactly like before any grouping
+    // feature existed.
+    rankedCandidatesByPlayer.set(playerId, ranked.map(bid => {
+      const group = bid.bid_group_id ? groupById.get(bid.bid_group_id) : null;
+      return {
+        id: bid.id,
+        franchiseId: bid.franchise_id,
+        cost: periodType === "free" ? 1 : bid.amount,
+        priority: bid.priority,
+        maxPlayersDesired: group ? group.max_players_desired : bid.max_players_desired,
+        dropPlayerId: bid.drop_player_id,
+        groupKey: bid.bid_group_id ?? DEFAULT_GROUP_KEY,
+      };
+    }));
   }
 
   const involvedFranchiseIds = Array.from(new Set(pendingBids.map(bid => bid.franchise_id)));
@@ -177,7 +187,7 @@ export async function resolveOpenWaiverPeriod(): Promise<WaiverResolutionSummary
       if (rejection) {
         const franchiseName = franchiseById.get(bid.franchise_id)?.name ?? "Unknown franchise";
         const reason = rejection.type === "max_players_desired"
-          ? `Already won ${rejection.limit} player${rejection.limit === 1 ? "" : "s"} at ${playerById.get(playerId)?.position ?? "this position"} this period, at their stated max of ${rejection.limit}.`
+          ? `Already won ${rejection.limit} player${rejection.limit === 1 ? "" : "s"}${bid.bid_group_id ? ` in their "${groupById.get(bid.bid_group_id)?.label ?? "custom"}" group` : ""} this period, at their stated max of ${rejection.limit}.`
           : rejection.type === "budget"
           ? `Would cost $${rejection.cost} but they have only $${rejection.remaining} left this season.`
           : `Awarding this player would exceed the ${rejection.cap}-player CVC roster limit.`;
