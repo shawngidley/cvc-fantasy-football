@@ -242,7 +242,7 @@ export function CvcFreeAgents() {
     <div className="mb-5 flex gap-1 overflow-x-auto border-b border-white/15">
       {[["free-agents", "Free Agents"], ["all-players", "All Players"], ["watchlist", "Watchlist"], ["manage-bids", "Manage Bids"]].map(([key, label]) => (
         (key === "watchlist" && !owner?.franchise) ? null :
-        <button key={key} onClick={() => setTab(key as typeof tab)} className={tab === key ? "border-b-[3px] border-cvc-accent px-4 py-3 font-display text-sm uppercase tracking-[.08em] text-cvc-accent" : "border-b-[3px] border-transparent px-4 py-3 font-display text-sm uppercase tracking-[.08em] text-white/60 hover:text-white"}>{label}{key === "manage-bids" ? ` (${myBids.data?.length ?? 0})` : key === "watchlist" ? ` (${watchlist.data?.length ?? 0})` : ""}</button>
+        <button key={key} onClick={() => setTab(key as typeof tab)} className={tab === key ? "border-b-[3px] border-cvc-accent px-4 py-3 font-display text-sm uppercase tracking-[.08em] text-cvc-accent" : "border-b-[3px] border-transparent px-4 py-3 font-display text-sm uppercase tracking-[.08em] text-white/60 hover:text-white"}>{label}{key === "manage-bids" ? ` (${myBids.data?.filter(bid => bid.status === "pending").length ?? 0})` : key === "watchlist" ? ` (${watchlist.data?.length ?? 0})` : ""}</button>
       ))}
     </div>
 
