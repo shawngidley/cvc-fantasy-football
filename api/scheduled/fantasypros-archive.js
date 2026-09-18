@@ -179,8 +179,34 @@ function attachFantasyProsPlayerNames(items, ranks) {
 }
 
 // server/fantasyProsNews.ts
-var API_BASE = "https://api.fantasypros.com/public/v2/json";
+var FEED_BASE = "https://wrcfantasyfootball.com/api/fantasypros/feed";
+var LOCAL_CACHE_TTL_MS = 5 * 6e4;
 var cache = /* @__PURE__ */ new Map();
+async function requestFeed(key) {
+  const existing = cache.get(key);
+  if (existing && existing.expiresAt > Date.now()) return existing.value;
+  const secret2 = process.env.FANTASYPROS_FEED_SECRET;
+  if (!secret2) {
+    console.warn(`[FantasyPros feed] FANTASYPROS_FEED_SECRET is not configured -- returning an empty result for key "${key}".`);
+    return null;
+  }
+  try {
+    const response = await fetch(`${FEED_BASE}?key=${encodeURIComponent(key)}`, {
+      headers: { "x-feed-secret": secret2 },
+      signal: AbortSignal.timeout(15e3)
+    });
+    if (!response.ok) {
+      console.warn(`[FantasyPros feed] Request for key "${key}" failed with status ${response.status} -- returning an empty result.`);
+      return null;
+    }
+    const value = await response.json();
+    cache.set(key, { value, expiresAt: Date.now() + LOCAL_CACHE_TTL_MS });
+    return value;
+  } catch (error) {
+    console.warn(`[FantasyPros feed] Request for key "${key}" threw -- returning an empty result.`, error instanceof Error ? error.message : error);
+    return null;
+  }
+}
 function asRecord(value) {
   return value && typeof value === "object" ? value : {};
 }
@@ -194,24 +220,9 @@ function asNumber(value) {
 function asArray(value) {
   return Array.isArray(value) ? value : [];
 }
-async function request(path, cacheTtlMs) {
-  const existing = cache.get(path);
-  if (existing && existing.expiresAt > Date.now()) return existing.value;
-  const apiKey = process.env.FANTASYPROS_API_KEY;
-  if (!apiKey) throw new Error("FantasyPros is not configured for CVC.");
-  const response = await fetch(`${API_BASE}${path}`, {
-    headers: { "x-api-key": apiKey },
-    signal: AbortSignal.timeout(15e3)
-  });
-  if (!response.ok) throw new Error(`FantasyPros request failed with status ${response.status}`);
-  const value = await response.json();
-  cache.set(path, { value, expiresAt: Date.now() + cacheTtlMs });
-  return value;
-}
 async function getFantasyProsNews(limit = 50) {
-  const query = new URLSearchParams({ limit: String(Math.min(Math.max(limit, 1), 100)), order_by: "updated" });
-  const data = asRecord(await request(`/nfl/news?${query.toString()}`, 15 * 6e4));
-  return asArray(data.items).map((item) => {
+  const data = asRecord(await requestFeed("news"));
+  const items = asArray(data.items).map((item) => {
     const row = asRecord(item);
     return {
       id: asNumber(row.id) ?? 0,
@@ -226,10 +237,11 @@ async function getFantasyProsNews(limit = 50) {
       link: asString(row.link)
     };
   }).filter((item) => item.title);
+  return items.slice(0, Math.min(Math.max(limit, 1), 100));
 }
 async function getFantasyProsRanks(year, position, week) {
-  const query = new URLSearchParams({ position, scoring: "PPR", type: week > 0 ? "WEEKLY" : "DRAFT", week: String(week) });
-  const data = asRecord(await request(`/nfl/${year}/consensus-rankings?${query.toString()}`, 60 * 6e4));
+  if (position === "OP") return [];
+  const data = asRecord(await requestFeed(`ranks:${position}:week:${week}`));
   return asArray(data.players).map((item) => {
     const row = asRecord(item);
     return {

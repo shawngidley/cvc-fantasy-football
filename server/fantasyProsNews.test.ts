@@ -3,7 +3,7 @@ import { getFantasyProsProjections, matchPlayerNameFromTitle } from "./fantasyPr
 
 describe("getFantasyProsProjections (using the real confirmed Matthew Stafford data)", () => {
   beforeEach(() => {
-    process.env.FANTASYPROS_API_KEY = "test-key";
+    process.env.FANTASYPROS_FEED_SECRET = "test-secret";
     vi.restoreAllMocks();
   });
 

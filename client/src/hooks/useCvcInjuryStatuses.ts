@@ -28,6 +28,6 @@ export function buildInjuryStatusMap(items: CvcInjuryItem[]): Map<string, CvcInj
  * available, not that everyone's healthy). Callers should show that distinction
  * somewhere, rather than letting the absence of badges imply a clean bill of health. */
 export function useCvcInjuryStatuses() {
-  const { data, isError } = trpc.league.fantasyProsInjuries.useQuery();
+  const { data, isError } = trpc.league.fantasyProsInjuries.useQuery(undefined, { staleTime: 15 * 60_000 });
   return { statuses: buildInjuryStatusMap(data?.items ?? []), isError };
 }

@@ -367,6 +367,7 @@ function SeasonStatsSyncModule() {
     <div className="rounded-lg border border-dashed border-cvc-deep/20 bg-cvc-tint p-4">
       <p className="text-sm font-semibold text-cvc-deep">FantasyPros players</p>
       <p className="mt-1 text-xs leading-5 text-slate-500">Syncs the FantasyPros player list (names, positions, NFL teams). This is FantasyPros' full player database, not scoped to currently-active players — it does not affect who shows up in Free Agents or the auction pool. Use "Confirm active players" below for that.</p>
+      <p className="mt-1 text-[11px] font-semibold uppercase tracking-[0.06em] text-amber-700">Uses the shared FantasyPros budget (500/day). Use sparingly.</p>
       <button type="button" className="cvc-button-compact mt-3" disabled={syncPlayers.isPending} onClick={() => syncPlayers.mutate()}><Save size={14} /> {syncPlayers.isPending ? "Syncing…" : "Sync FantasyPros players"}</button>
     </div>
     <div className="rounded-lg border border-dashed border-cvc-deep/20 bg-cvc-tint p-4">
@@ -413,6 +414,7 @@ function SeasonStatsSyncModule() {
     <div className="rounded-lg border border-dashed border-red-300 bg-red-50 p-4">
       <p className="text-sm font-semibold text-cvc-deep">Rookie flag sync <span className="font-normal text-red-700">— experimental, not recommended</span></p>
       <p className="mt-1 text-xs leading-5 text-slate-500">Attempts to flag rookies via FantasyPros' rookie-rankings endpoint using a guessed ranking-type parameter that's been confirmed to return incorrect results (it returned Josh Allen as a "rookie" QB in testing). The season's actual rookie flags were instead set correctly via a one-time manual match against FantasyPros' real rookie-rankings CSV export. Running this again would overwrite those correct flags with wrong data — only use it if you're deliberately re-attempting the API approach for a future season, not as routine maintenance.</p>
+      <p className="mt-1 text-[11px] font-semibold uppercase tracking-[0.06em] text-amber-700">Uses the shared FantasyPros budget (500/day). Use sparingly.</p>
       <button type="button" className="cvc-button-compact mt-3 bg-red-600 hover:bg-red-700" disabled={syncRookies.isPending} onClick={() => confirmDialog.confirm({ title: "Attempt rookie flag sync anyway?", description: "This will overwrite the currently-correct rookie flags with results from a guessed, previously-wrong API parameter. Are you sure?", confirmLabel: "Sync anyway", destructive: true, onConfirm: () => syncRookies.mutateAsync() })}><Save size={14} /> {syncRookies.isPending ? "Syncing…" : "Attempt rookie flag sync anyway"}</button>
       {rookieResult ? <div className="mt-3 rounded-md border border-slate-200 bg-white p-3 text-xs text-slate-600">
         <p><b className="text-cvc-deep">Rookies found on FantasyPros by position:</b> {Object.entries(rookieResult.countByPosition).map(([pos, count]) => `${pos}: ${count}`).join(", ") || "none"}</p>

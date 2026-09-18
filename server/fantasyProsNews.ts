@@ -1,15 +1,56 @@
-// Ported directly from WRC's server/fantasypros.ts getFantasyProsNews, which is
-// confirmed working in production there -- simple in-memory cache, no Supabase table
-// involved at all. Replaces an earlier provider_cache-table-based version here that hit
-// an unexplained bug: direct SQL repeatedly confirmed the cached row held real, valid,
-// non-expired data, yet the read path in this same code kept computing zero items from
-// it, across every fix attempted (payload shape tolerance, POST vs GET, method-override
-// server config). Rather than keep chasing that, use the exact mechanism already proven
-// to work for this exact problem in WRC.
-const API_BASE = "https://api.fantasypros.com/public/v2/json";
+// CVC and WRC used to share one FantasyPros API key with a 500 requests/day budget and
+// both were hitting 429s. WRC now runs its own scheduled fetcher that stores every
+// dataset in a table and exposes it at wrcfantasyfootball.com/api/fantasypros/feed.
+// From here on CVC makes zero calls to api.fantasypros.com for news/injuries/rankings/
+// projections -- it reads WRC's shared feed instead, keyed by the same cache-key
+// strings WRC uses internally. The feed's payload for a given key is the raw
+// FantasyPros JSON response body for that endpoint, unmodified, so every parsing
+// function below is untouched -- only how the raw payload is fetched changed.
+//
+// (The three FantasyPros calls in fantasyProsCache.ts -- full player sync, rookie
+// flags, active-player flags -- are commissioner-triggered, low-volume admin buttons,
+// not the traffic-driven calls that caused the 429s, and were deliberately left calling
+// api.fantasypros.com directly per commissioner decision.)
+const FEED_BASE = "https://wrcfantasyfootball.com/api/fantasypros/feed";
+
+// So one page load (which can trigger several of these calls, e.g. news + per-position
+// ranks for enrichment) doesn't hit WRC's feed repeatedly for the same key.
+const LOCAL_CACHE_TTL_MS = 5 * 60_000;
 
 type CacheEntry<T> = { expiresAt: number; value: T };
 const cache = new Map<string, CacheEntry<unknown>>();
+
+/** Fetches one WRC feed key, returning `null` (never throwing) on any failure --
+ * missing secret, 401, 404 (key not populated yet), 5xx, timeout, or network error --
+ * so a FantasyPros outage or a not-yet-warmed WRC key degrades to an empty dataset
+ * instead of breaking the page. Never falls back to calling FantasyPros directly. */
+async function requestFeed(key: string): Promise<unknown> {
+  const existing = cache.get(key);
+  if (existing && existing.expiresAt > Date.now()) return existing.value;
+
+  const secret = process.env.FANTASYPROS_FEED_SECRET;
+  if (!secret) {
+    console.warn(`[FantasyPros feed] FANTASYPROS_FEED_SECRET is not configured -- returning an empty result for key "${key}".`);
+    return null;
+  }
+
+  try {
+    const response = await fetch(`${FEED_BASE}?key=${encodeURIComponent(key)}`, {
+      headers: { "x-feed-secret": secret },
+      signal: AbortSignal.timeout(15_000),
+    });
+    if (!response.ok) {
+      console.warn(`[FantasyPros feed] Request for key "${key}" failed with status ${response.status} -- returning an empty result.`);
+      return null;
+    }
+    const value = await response.json();
+    cache.set(key, { value, expiresAt: Date.now() + LOCAL_CACHE_TTL_MS });
+    return value;
+  } catch (error) {
+    console.warn(`[FantasyPros feed] Request for key "${key}" threw -- returning an empty result.`, error instanceof Error ? error.message : error);
+    return null;
+  }
+}
 
 export type FantasyProsNewsItem = {
   id: number;
@@ -30,24 +71,6 @@ function asString(value: unknown): string { return typeof value === "string" ? v
 function asNumber(value: unknown): number | null { const number = Number(value); return Number.isFinite(number) ? number : null; }
 function asArray(value: unknown): unknown[] { return Array.isArray(value) ? value : []; }
 
-async function request<T>(path: string, cacheTtlMs: number): Promise<T> {
-  const existing = cache.get(path) as CacheEntry<T> | undefined;
-  if (existing && existing.expiresAt > Date.now()) return existing.value;
-
-  const apiKey = process.env.FANTASYPROS_API_KEY;
-  if (!apiKey) throw new Error("FantasyPros is not configured for CVC.");
-
-  const response = await fetch(`${API_BASE}${path}`, {
-    headers: { "x-api-key": apiKey },
-    signal: AbortSignal.timeout(15_000),
-  });
-  if (!response.ok) throw new Error(`FantasyPros request failed with status ${response.status}`);
-
-  const value = (await response.json()) as T;
-  cache.set(path, { value, expiresAt: Date.now() + cacheTtlMs });
-  return value;
-}
-
 export type FantasyProsInjury = {
   playerId: number;
   name: string;
@@ -64,10 +87,7 @@ export type FantasyProsInjury = {
 };
 
 export async function getFantasyProsInjuries(year: number, week: number): Promise<FantasyProsInjury[]> {
-  const data = asRecord(await request<unknown>(
-    `/nfl/injuries?year=${year}&week=${week}&include_probabilities=true`,
-    20 * 60_000,
-  ));
+  const data = asRecord(await requestFeed(`injuries:${year}:week:${week}`));
   return asArray(data.injuries).map(item => {
     const row = asRecord(item);
     return {
@@ -88,9 +108,11 @@ export async function getFantasyProsInjuries(year: number, week: number): Promis
 }
 
 export async function getFantasyProsNews(limit = 50): Promise<FantasyProsNewsItem[]> {
-  const query = new URLSearchParams({ limit: String(Math.min(Math.max(limit, 1), 100)), order_by: "updated" });
-  const data = asRecord(await request<unknown>(`/nfl/news?${query.toString()}`, 15 * 60_000));
-  return asArray(data.items).map(item => {
+  // WRC's feed stores the whole news payload under one key with no limit/order_by
+  // control -- apply the requested limit ourselves after fetching instead of as a
+  // request parameter.
+  const data = asRecord(await requestFeed("news"));
+  const items = asArray(data.items).map(item => {
     const row = asRecord(item);
     return {
       id: asNumber(row.id) ?? 0,
@@ -105,6 +127,7 @@ export async function getFantasyProsNews(limit = 50): Promise<FantasyProsNewsIte
       link: asString(row.link),
     };
   }).filter(item => item.title);
+  return items.slice(0, Math.min(Math.max(limit, 1), 100));
 }
 
 
@@ -119,11 +142,14 @@ export type FantasyProsRank = {
   byeWeek: number | null;
 };
 
-/** week=0 requests FantasyPros' preseason/draft-type rankings (ECR for the whole
- * season, not a specific week); week>0 requests that week's rankings. */
+/** WRC's feed keys ranks by position and week only (no year, no scoring/type
+ * dimension -- always PPR/weekly in WRC's own stored payload) and has no "OP"
+ * (cross-position overall) key at all, so that position always returns empty rather
+ * than requesting a key that doesn't exist. `year` is accepted for signature
+ * compatibility with existing callers but no longer used to build the request. */
 export async function getFantasyProsRanks(year: number, position: string, week: number): Promise<FantasyProsRank[]> {
-  const query = new URLSearchParams({ position, scoring: "PPR", type: week > 0 ? "WEEKLY" : "DRAFT", week: String(week) });
-  const data = asRecord(await request<unknown>(`/nfl/${year}/consensus-rankings?${query.toString()}`, 60 * 60_000));
+  if (position === "OP") return [];
+  const data = asRecord(await requestFeed(`ranks:${position}:week:${week}`));
   return asArray(data.players).map(item => {
     const row = asRecord(item);
     return {
@@ -153,9 +179,10 @@ export type FantasyProsProjection = {
   rushTouchdowns: number | null;
 };
 
+// `year` is accepted for signature compatibility with existing callers but no longer
+// used to build the request -- see getFantasyProsRanks above.
 export async function getFantasyProsProjections(year: number, position: string, week: number): Promise<FantasyProsProjection[]> {
-  const query = new URLSearchParams({ position, week: String(week) });
-  const data = asRecord(await request<unknown>(`/nfl/${year}/projections?${query.toString()}`, 60 * 60_000));
+  const data = asRecord(await requestFeed(`projections:${position}:week:${week}`));
   return asArray(data.players).map(item => {
     const row = asRecord(item);
     // Confirmed live: row.stats is a plain object (e.g. {points, points_ppr,

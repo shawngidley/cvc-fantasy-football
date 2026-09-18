@@ -70,4 +70,4 @@ Vite + React 19 + wouter (not react-router) for routing, TanStack Query + tRPC R
 
 ### Environment variables
 
-`SUPABASE_URL`, `SUPABASE_SECRET_KEY`, `TANK01_RAPIDAPI_KEY`, `FANTASYPROS_API_KEY`, `CRON_SECRET`. No `.env*` file is committed (gitignored) — set these in Vercel's project settings for deploys and in a local `.env` for `pnpm dev`.
+`SUPABASE_URL`, `SUPABASE_SECRET_KEY`, `TANK01_RAPIDAPI_KEY`, `FANTASYPROS_API_KEY`, `FANTASYPROS_FEED_SECRET`, `CRON_SECRET`. No `.env*` file is committed (gitignored) — set these in Vercel's project settings for deploys and in a local `.env` for `pnpm dev`. `FANTASYPROS_API_KEY` is only read by `server/fantasyProsCache.ts`'s three commissioner-triggered sync functions (full player list, rookie flags, active-player flags) now — news/injuries/rankings/projections (`server/fantasyProsNews.ts`) instead read WRC's shared feed at `wrcfantasyfootball.com/api/fantasypros/feed`, authenticated with `FANTASYPROS_FEED_SECRET`, to stay under FantasyPros' shared 500 requests/day budget.

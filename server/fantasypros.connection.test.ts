@@ -1,21 +1,53 @@
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { getFantasyProsInjuries, getFantasyProsRanks } from "./fantasyProsNews";
 
-describe("FantasyPros connection", () => {
-  it("authenticates with the configured server-only API key", async () => {
-    const apiKey = process.env.FANTASYPROS_API_KEY;
-    expect(apiKey).toBeTruthy();
+// CVC no longer calls api.fantasypros.com directly for news/injuries/rankings/
+// projections -- WRC now runs a scheduled fetcher that stores every dataset and
+// exposes it at wrcfantasyfootball.com/api/fantasypros/feed, shared to avoid both
+// sites hitting FantasyPros' 500 requests/day budget and 429ing each other. This file
+// used to be a live smoke test of the FantasyPros connection itself; that connection
+// no longer exists here, so it now verifies the feed adapter's fallback behavior
+// instead, with the network mocked.
+describe("FantasyPros feed adapter (server/fantasyProsNews.ts)", () => {
+  beforeEach(() => {
+    vi.restoreAllMocks();
+  });
 
-    const request = () => fetch("https://api.fantasypros.com/public/v2/json/nfl/players", {
-      headers: { "x-api-key": apiKey! }, signal: AbortSignal.timeout(12_000),
-    });
-    let response = await request().catch(() => null);
-    if (!response) {
-      await new Promise(resolve => setTimeout(resolve, 1_100));
-      response = await request();
-    }
+  it("returns an empty result instead of throwing when FANTASYPROS_FEED_SECRET is not configured, and never calls fetch", async () => {
+    delete process.env.FANTASYPROS_FEED_SECRET;
+    const fetchSpy = vi.spyOn(globalThis, "fetch");
+    const injuries = await getFantasyProsInjuries(2026, 101);
+    expect(injuries).toEqual([]);
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
 
-    expect(response.ok).toBe(true);
-    const data = await response.json();
-    expect(data).toBeTruthy();
-  }, 30_000);
+  it("returns an empty result instead of throwing on a non-2xx feed response (401, 404, or 5xx alike)", async () => {
+    process.env.FANTASYPROS_FEED_SECRET = "test-secret";
+    vi.spyOn(globalThis, "fetch").mockResolvedValue({ ok: false, status: 404 } as any);
+    const injuries = await getFantasyProsInjuries(2026, 102);
+    expect(injuries).toEqual([]);
+  });
+
+  it("never requests api.fantasypros.com -- only WRC's shared feed host, with the feed secret header", async () => {
+    process.env.FANTASYPROS_FEED_SECRET = "test-secret";
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue({
+      ok: true,
+      json: async () => ({ injuries: [] }),
+    } as any);
+    await getFantasyProsInjuries(2026, 103);
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+    const [url, init] = fetchSpy.mock.calls[0] as [string, RequestInit];
+    expect(url).toContain("wrcfantasyfootball.com/api/fantasypros/feed");
+    expect(url).not.toContain("api.fantasypros.com");
+    expect(url).toContain("key=injuries%3A2026%3Aweek%3A103");
+    expect((init.headers as Record<string, string>)["x-feed-secret"]).toBe("test-secret");
+  });
+
+  it("returns an empty result for the OP position without ever calling fetch -- WRC's feed has no OP key", async () => {
+    process.env.FANTASYPROS_FEED_SECRET = "test-secret";
+    const fetchSpy = vi.spyOn(globalThis, "fetch");
+    const ranks = await getFantasyProsRanks(2026, "OP", 104);
+    expect(ranks).toEqual([]);
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
 });
