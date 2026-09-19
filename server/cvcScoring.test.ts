@@ -50,12 +50,12 @@ describe("CVC scoring engine", () => {
     expect(calculateCvcFantasyPoints({ Receiving: { recYds: 99 } }, "WR", rules)).toBe(99 * 0.1);
   });
 
-  it("awards the +5 bonus for exactly 350 passing yards, but not for 349", () => {
-    expect(calculateCvcFantasyPoints({ Passing: { passYds: 350 } }, "QB", rules)).toBe(350 * 0.05 + 5);
-    expect(calculateCvcFantasyPoints({ Passing: { passYds: 349 } }, "QB", rules)).toBe(349 * 0.05);
+  it("awards the +5 bonus for exactly 300 passing yards, but not for 299", () => {
+    expect(calculateCvcFantasyPoints({ Passing: { passYds: 300 } }, "QB", rules)).toBe(300 * 0.05 + 5);
+    expect(calculateCvcFantasyPoints({ Passing: { passYds: 299 } }, "QB", rules)).toBe(14.95); // 299 * 0.05 rounded to 2 decimals, same as the function itself does -- raw 299 * 0.05 has a floating-point tail (14.950000000000001) that .toBe() won't match
   });
 
-  it("can award multiple bonuses at once for a dual-threat stat line (e.g. 350+ passing and 100+ rushing in the same game)", () => {
+  it("can award multiple bonuses at once for a dual-threat stat line (e.g. 300+ passing and 100+ rushing in the same game)", () => {
     const points = calculateCvcFantasyPoints({ Passing: { passYds: 380 }, Rushing: { rushYds: 110 } }, "QB", rules);
     expect(points).toBe(380 * 0.05 + 5 + 110 * 0.1 + 5);
   });
@@ -79,7 +79,7 @@ describe("calculateCvcFantasyPointsBreakdown (powers the points-breakdown popup)
   it("includes a labeled bonus line item separately from the base yardage line item", () => {
     const breakdown = calculateCvcFantasyPointsBreakdown({ Passing: { passYds: 380 } }, "QB", rules);
     expect(breakdown).toContainEqual({ label: "380 passing yds", points: 380 * 0.05 });
-    expect(breakdown).toContainEqual({ label: "350+ passing yd bonus", points: 5 });
+    expect(breakdown).toContainEqual({ label: "300+ passing yd bonus", points: 5 });
   });
 
   it("breaks down the real confirmed Jacksonville DST line from Week 1 CLE@JAX correctly", () => {

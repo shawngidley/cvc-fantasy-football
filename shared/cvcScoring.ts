@@ -49,7 +49,10 @@ export function calculateCvcFantasyPointsBreakdown(stats: Tank01LiveStats | null
   add(`${passTD} passing TD${passTD === 1 ? "" : "s"}`, passTD * ruleValue(rules, "passing_touchdown", position));
   const int = numeric(passing.int);
   add(`${int} INT thrown`, int * ruleValue(rules, "interception", position));
-  if (passYds >= 350) add("350+ passing yd bonus", ruleValue(rules, "passing_350_bonus", position));
+  // Threshold is 300+ (commissioner call, Sept 2026) -- the rule's stat_key stays
+  // "passing_350_bonus" for backward compatibility with the existing scoring_rule row
+  // (renaming it would silently zero out the bonus until someone also updated the DB).
+  if (passYds >= 300) add("300+ passing yd bonus", ruleValue(rules, "passing_350_bonus", position));
 
   const rushYds = numeric(rushing.rushYds);
   add(`${rushYds} rushing yds`, rushYds * ruleValue(rules, "rushing_yards", position));
