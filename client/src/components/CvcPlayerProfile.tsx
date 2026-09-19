@@ -5,7 +5,7 @@ import { trpc } from "@/lib/trpc";
 import { normalizePlayerName } from "@shared/playerNameMatch";
 import { useCvcOwnerAuth } from "@/hooks/useCvcOwnerAuth";
 import { CvcNewsRow, type CvcNewsItem } from "@/components/CvcNewsRow";
-import { buildScheduleWithBye, fmtDate, gameOpponent, normalizeTeam, shortenTeamName, teamLogoUrl, useTeamSchedule, type TankRecord } from "@/lib/nflSchedule";
+import { buildScheduleWithBye, fmtDate, normalizeTeam, shortenTeamName, teamLogoUrl, useTeamSchedule, type TankRecord } from "@/lib/nflSchedule";
 
 type TankPlayerInfo = { body?: TankRecord | TankRecord[] };
 type TankNewsItem = { title?: string; link?: string; image?: string; playerIDs?: string[] };
@@ -141,10 +141,14 @@ export function CvcPlayerProfile() {
   const injuryStatus = firstOf(tank ?? undefined, ["injury_designation", "injuryStatus", "gameStatus"]);
   const statusLabel = injuryStatus || player.status || "Active";
   const isInjuryStatus = looksLikeInjury(statusLabel);
-  const upcoming = schedule?.map(game => ({ game, opponent: gameOpponent(game, player.nfl_team ?? "") })).find(entry => entry.opponent);
   const scheduleRows = schedule ? buildScheduleWithBye(schedule, player.nfl_team ?? "") : [];
   const todayStr = new Date().toISOString().slice(0, 10).replace(/-/g, "");
   const currentWeekIndex = scheduleRows.findIndex(row => row.type === "game" && firstOf(row.game, ["gameDate", "date"]) && (firstOf(row.game, ["gameDate", "date"]) as string) >= todayStr);
+  // Reuses the Schedule tab's own date-filtered currentWeekIndex instead of re-deriving
+  // "upcoming" from the raw, Week-1-first schedule array -- the old version just grabbed
+  // the first game with a resolvable opponent, which was always Week 1.
+  const currentWeekRow = currentWeekIndex >= 0 ? scheduleRows[currentWeekIndex] : undefined;
+  const upcoming = currentWeekRow?.type === "game" ? currentWeekRow : undefined;
   const gameLogYearOptions = Array.from({ length: 5 }, (_, index) => currentSeasonYear - index);
   const gameLogColumns = GAME_LOG_COLUMNS[pos] ?? [];
   const espnPlayerUrl = espnId ? `https://www.espn.com/nfl/player/_/id/${espnId}` : null;
@@ -262,6 +266,6 @@ export function CvcPlayerProfile() {
       </div> : null}
     </section>
 
-    {upcoming ? <section className="cvc-card mt-5"><div className="cvc-card-title"><span>Week {firstOf(upcoming.game, ["gameWeek", "week"])?.replace(/\D/g, "") || "1"} Matchup</span><CalendarDays size={16} /></div><div className="cvc-card-body flex items-center justify-between"><span className="flex items-center gap-2"><img src={teamLogoUrl(upcoming.opponent!.opponent)} alt="" className="h-8 w-8 object-contain" /><span><p className="font-display text-xl text-cvc-deep">{upcoming.opponent!.atOrVs} {upcoming.opponent!.opponent}</p><p className="text-xs text-slate-500">{firstOf(upcoming.game, ["gameTime", "time"]) ?? ""}</p></span></span>{player.nfl_team ? <img src={teamLogoUrl(player.nfl_team)} alt="" className="h-8 w-8 object-contain" /> : null}</div></section> : null}
+    {upcoming ? <section className="cvc-card mt-5"><div className="cvc-card-title"><span>Week {upcoming.week} Matchup</span><CalendarDays size={16} /></div><div className="cvc-card-body flex items-center justify-between"><span className="flex items-center gap-2"><img src={teamLogoUrl(upcoming.opponent.opponent)} alt="" className="h-8 w-8 object-contain" /><span><p className="font-display text-xl text-cvc-deep">{upcoming.opponent.atOrVs} {upcoming.opponent.opponent}</p><p className="text-xs text-slate-500">{firstOf(upcoming.game, ["gameTime", "time"]) ?? ""}</p></span></span>{player.nfl_team ? <img src={teamLogoUrl(player.nfl_team)} alt="" className="h-8 w-8 object-contain" /> : null}</div></section> : null}
   </div>;
 }
