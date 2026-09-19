@@ -170,6 +170,9 @@ async function rebuildSeasonStatsCurrentForAllPlayers(seasonId) {
 // server/nflTeamAssignmentSync.ts
 import { parse } from "csv-parse/sync";
 
+// server/fantasyProsNews.ts
+var LOCAL_CACHE_TTL_MS = 5 * 6e4;
+
 // server/_core/scheduledHandlers.ts
 function checkCronAuth(req, res) {
   const expected = process.env.CRON_SECRET;

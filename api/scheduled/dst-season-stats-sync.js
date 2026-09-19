@@ -269,6 +269,9 @@ async function aggregateDstSeasonStats(seasonId, year, throughWeek) {
   return { status: "completed", weeksProcessed, teamsUpdated };
 }
 
+// server/fantasyProsNews.ts
+var LOCAL_CACHE_TTL_MS = 5 * 6e4;
+
 // server/_core/scheduledHandlers.ts
 function checkCronAuth(req, res) {
   const expected = process.env.CRON_SECRET;

@@ -43,7 +43,12 @@ async function requestFeed(key: string): Promise<unknown> {
       console.warn(`[FantasyPros feed] Request for key "${key}" failed with status ${response.status} -- returning an empty result.`);
       return null;
     }
-    const value = await response.json();
+    // The feed endpoint returns the whole cache row ({key, payload, fetched_at,
+    // expires_at}), not the raw FantasyPros payload itself -- the actual data every
+    // parser below expects (`.injuries`, `.items`, `.players`) lives one level down,
+    // under `.payload`.
+    const row = await response.json();
+    const value = asRecord(row).payload ?? null;
     cache.set(key, { value, expiresAt: Date.now() + LOCAL_CACHE_TTL_MS });
     return value;
   } catch (error) {

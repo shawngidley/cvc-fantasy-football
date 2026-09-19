@@ -8,18 +8,24 @@ describe("getFantasyProsProjections (using the real confirmed Matthew Stafford d
   });
 
   it("correctly parses points/pprPoints/passYards from row.stats -- the actual bug: row.stats is a plain object, not an array, so the previous asArray(row.stats)[0] silently produced an empty object for every player", async () => {
+    // The WRC feed wraps the raw FantasyPros payload in a cache-row envelope
+    // ({key, payload, fetched_at, expires_at}) -- the fields getFantasyProsProjections
+    // actually parses live under `.payload`, not at the top level.
     vi.spyOn(globalThis, "fetch").mockResolvedValue({
       ok: true,
       json: async () => ({
-        players: [{
-          fpid: 9451, mflid: 9431, name: "Matthew Stafford", position_id: "QB", team_id: "LAR", filename: "matthew-stafford.php",
-          stats: {
-            points: 17.63, points_ppr: 17.63, points_half: 17.63, pass_att: 33.51, pass_cmp: 21.97,
-            pass_yds: 251.57, pass_tds: 2, pass_ints: 0.53, pass_yds_300: 0, pass_yds_400: 0,
-            rush_att: 1.39, rush_yds: 2.55, rush_tds: 0.02, rush_yds_100: 0, rush_yds_200: 0,
-            scrimage_yards_100: 0, scrimage_yards_200: 0, fumbles: 0.15, ret_tds: 0, "2pt_tds": 0.1,
-          },
-        }],
+        key: "projections:QB:week:1",
+        payload: {
+          players: [{
+            fpid: 9451, mflid: 9431, name: "Matthew Stafford", position_id: "QB", team_id: "LAR", filename: "matthew-stafford.php",
+            stats: {
+              points: 17.63, points_ppr: 17.63, points_half: 17.63, pass_att: 33.51, pass_cmp: 21.97,
+              pass_yds: 251.57, pass_tds: 2, pass_ints: 0.53, pass_yds_300: 0, pass_yds_400: 0,
+              rush_att: 1.39, rush_yds: 2.55, rush_tds: 0.02, rush_yds_100: 0, rush_yds_200: 0,
+              scrimage_yards_100: 0, scrimage_yards_200: 0, fumbles: 0.15, ret_tds: 0, "2pt_tds": 0.1,
+            },
+          }],
+        },
       }),
     } as any);
 

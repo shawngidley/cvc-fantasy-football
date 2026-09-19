@@ -236,6 +236,9 @@ async function syncNflTeamSchedules(year) {
   return { status: "completed", teamsUpdated };
 }
 
+// server/fantasyProsNews.ts
+var LOCAL_CACHE_TTL_MS = 5 * 6e4;
+
 // server/planningWeek.ts
 function parseKickoffUtc(gameDate, gameTime) {
   if (!gameDate || !gameTime || gameDate.length < 8) return null;

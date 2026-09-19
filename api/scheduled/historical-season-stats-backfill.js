@@ -182,6 +182,9 @@ function getNFLDataAdapter() {
 // server/nflTeamAssignmentSync.ts
 import { parse } from "csv-parse/sync";
 
+// server/fantasyProsNews.ts
+var LOCAL_CACHE_TTL_MS = 5 * 6e4;
+
 // server/playerCareerStats.ts
 var ESPN_GAMELOG = "https://site.api.espn.com/apis/common/v3/sports/football/nfl/athletes";
 function buildLabelMap(labels) {

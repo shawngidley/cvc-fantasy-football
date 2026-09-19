@@ -199,7 +199,8 @@ async function requestFeed(key) {
       console.warn(`[FantasyPros feed] Request for key "${key}" failed with status ${response.status} -- returning an empty result.`);
       return null;
     }
-    const value = await response.json();
+    const row = await response.json();
+    const value = asRecord(row).payload ?? null;
     cache.set(key, { value, expiresAt: Date.now() + LOCAL_CACHE_TTL_MS });
     return value;
   } catch (error) {
