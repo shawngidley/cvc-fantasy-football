@@ -55,6 +55,22 @@ describe("CVC scoring engine", () => {
     expect(calculateCvcFantasyPoints({ Passing: { passYds: 299 } }, "QB", rules)).toBe(14.95); // 299 * 0.05 rounded to 2 decimals, same as the function itself does -- raw 299 * 0.05 has a floating-point tail (14.950000000000001) that .toBe() won't match
   });
 
+  // Regression guard: every other test here defines its own fixture, so renaming a
+  // stat_key in both the fixture and the engine keeps them green while production --
+  // whose scoring_rule rows this file never sees -- silently stops matching. That is
+  // the exact bug that twice looked like a threshold or deploy problem, so pin the
+  // behaviour rather than the name: either key must resolve the bonus.
+  it("resolves the passing bonus under either stat_key, so a DB/code key mismatch cannot silently zero it", () => {
+    const underOldKey = rules.map(rule => rule.stat_key === "passing_300_bonus" ? { ...rule, stat_key: "passing_350_bonus" } : rule);
+    expect(calculateCvcFantasyPoints({ Passing: { passYds: 324 } }, "QB", rules)).toBe(324 * 0.05 + 5);
+    expect(calculateCvcFantasyPoints({ Passing: { passYds: 324 } }, "QB", underOldKey)).toBe(324 * 0.05 + 5);
+  });
+
+  it("drops the bonus only when no bonus rule exists at all, never because of the key name", () => {
+    const withNoBonusRule = rules.filter(rule => rule.stat_key !== "passing_300_bonus");
+    expect(calculateCvcFantasyPoints({ Passing: { passYds: 324 } }, "QB", withNoBonusRule)).toBe(324 * 0.05);
+  });
+
   it("can award multiple bonuses at once for a dual-threat stat line (e.g. 300+ passing and 100+ rushing in the same game)", () => {
     const points = calculateCvcFantasyPoints({ Passing: { passYds: 380 }, Rushing: { rushYds: 110 } }, "QB", rules);
     expect(points).toBe(380 * 0.05 + 5 + 110 * 0.1 + 5);

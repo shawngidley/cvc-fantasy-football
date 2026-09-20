@@ -49,14 +49,15 @@ export function calculateCvcFantasyPointsBreakdown(stats: Tank01LiveStats | null
   add(`${passTD} passing TD${passTD === 1 ? "" : "s"}`, passTD * ruleValue(rules, "passing_touchdown", position));
   const int = numeric(passing.int);
   add(`${int} INT thrown`, int * ruleValue(rules, "interception", position));
-  // Threshold is 300+ (commissioner call, Sept 2026). Verified directly against the
-  // live scoring_rule data (via the public scoringRules endpoint) that the DB row's
-  // stat_key is actually "passing_300_bonus", not "passing_350_bonus" -- an earlier
-  // version of this fix assumed the old key name for backward compatibility without
-  // checking, which meant ruleValue() found no match, returned 0, and add() (which
-  // only pushes non-zero points) silently dropped the bonus line entirely. That's
-  // exactly the bug this stat_key value fixes.
-  if (passYds >= 300) add("300+ passing yd bonus", ruleValue(rules, "passing_300_bonus", position));
+  // Threshold is 300+ (commissioner call, Sept 2026). The scoring_rule row backing this
+  // bonus has been seen under two different stat_keys -- "passing_300_bonus" and the
+  // older "passing_350_bonus" -- so resolve either rather than betting on one name.
+  // Betting wrong fails silently and expensively: ruleValue() returns 0 for an unmatched
+  // key, and add() only pushes non-zero items, so the bonus line disappears completely
+  // rather than showing as 0. That read as "the threshold change never deployed" twice
+  // running. Whichever key the row actually uses, it is matched once and added once.
+  const passYdBonus = ruleValue(rules, "passing_300_bonus", position) || ruleValue(rules, "passing_350_bonus", position);
+  if (passYds >= 300) add("300+ passing yd bonus", passYdBonus);
 
   const rushYds = numeric(rushing.rushYds);
   add(`${rushYds} rushing yds`, rushYds * ruleValue(rules, "rushing_yards", position));
