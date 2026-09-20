@@ -29,6 +29,7 @@ function Router() {
       <Route path="/lineup"><ProtectedPage><LeaguePage kind="lineup" /></ProtectedPage></Route>
       <Route path="/lineup/:franchiseId"><ProtectedPage><LeaguePage kind="lineup" /></ProtectedPage></Route>
       <Route path="/protections"><ProtectedPage><Protections /></ProtectedPage></Route>
+      <Route path="/protections/:franchiseId"><ProtectedPage><Protections /></ProtectedPage></Route>
       <Route path="/owner-settings"><ProtectedPage><OwnerSettings /></ProtectedPage></Route>
       <Route path="/draft"><Redirect to="/auction" /></Route>
       <Route path="/auction" component={() => <Auction />} />
