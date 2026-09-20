@@ -343,14 +343,18 @@ export const leagueRouter = router({
     const draftsConcluded = drafts.length > 0 && drafts.every(draft => draft.status === "complete");
     const pickupOrDropTypes = ["add", "drop", "waiver"];
     const legacySummary = /atlas aces|harbor hounds|placeholder/i;
-    // The public log only goes back to "today" for pickups/drops/waivers -- everything
-    // from before that is pre-cleanup noise (backfilled data, testing activity, etc.)
-    // The one exception is trades, which stay visible regardless of date (the real trade
-    // completed earlier this season should keep showing). Compared as America/New_York
-    // calendar dates (not a raw UTC cutoff) so "today" lines up with the ET day the rest
-    // of the app already uses for deadlines.
+    // The public log only goes back to a fixed cutoff for pickups/drops/waivers --
+    // everything from before that is pre-cleanup noise (backfilled data, testing
+    // activity, etc.) The one exception is trades, which stay visible regardless of date
+    // (the real trade completed earlier this season should keep showing).
+    //
+    // This is a FIXED date, not "today" recomputed on every request -- an earlier
+    // version compared against new Date() at query time, which meant the cutoff quietly
+    // rolled forward every day and hid genuine activity from a day or two ago. Compared
+    // as America/New_York calendar dates (not a raw UTC cutoff) so the boundary lines up
+    // with the ET day the rest of the app already uses for deadlines.
+    const PICKUP_DROP_LOG_CUTOFF_NY = "2026-08-24";
     const nyDateFormatter = new Intl.DateTimeFormat("en-CA", { timeZone: "America/New_York", year: "numeric", month: "2-digit", day: "2-digit" });
-    const todayNy = nyDateFormatter.format(new Date());
     return (data ?? []).filter((item: any) => {
       const franchise = Array.isArray(item.franchise) ? item.franchise[0] : item.franchise;
       if (franchise?.is_active === false || legacySummary.test(item.summary ?? "")) return false;
@@ -360,7 +364,7 @@ export const leagueRouter = router({
       if (item.transaction_type === "trade") return true;
       if (!pickupOrDropTypes.includes(item.transaction_type)) return false;
       if (!draftsConcluded) return false;
-      return nyDateFormatter.format(new Date(item.occurred_at)) >= todayNy;
+      return nyDateFormatter.format(new Date(item.occurred_at)) >= PICKUP_DROP_LOG_CUTOFF_NY;
     }).slice(0, 50).map((item: any) => {
       const franchise = Array.isArray(item.franchise) ? item.franchise[0] : item.franchise;
       return { ...item, franchise_name: franchise?.name ?? null };
