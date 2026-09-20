@@ -10,7 +10,7 @@ const rules: CvcScoringRule[] = [
   { stat_key: "receiving_yards", value: 0.1, applies_to_positions: ["QB", "RB", "WR", "TE"] },
   { stat_key: "receiving_touchdown", value: 6, applies_to_positions: ["QB", "RB", "WR", "TE"] },
   { stat_key: "reception", value: 0.5, applies_to_positions: ["RB", "WR", "TE"] },
-  { stat_key: "passing_350_bonus", value: 5, applies_to_positions: ["QB", "RB", "WR", "TE"] },
+  { stat_key: "passing_300_bonus", value: 5, applies_to_positions: ["QB", "RB", "WR", "TE"] },
   { stat_key: "rushing_100_bonus", value: 5, applies_to_positions: ["QB", "RB", "WR", "TE"] },
   { stat_key: "receiving_100_bonus", value: 5, applies_to_positions: ["QB", "RB", "WR", "TE"] },
   { stat_key: "extra_point", value: 1, applies_to_positions: ["K"] },
