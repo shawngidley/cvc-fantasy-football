@@ -2045,7 +2045,23 @@ export const leagueRouter = router({
     if (!contract || ["released", "expired"].includes(contract.contract_status)) {
       throw new TRPCError({ code: "BAD_REQUEST", message: "Only an active CVC contract can be released from Protections." });
     }
-    const player = unwrap(await supabase.from("player").select("display_name").eq("id", input.playerId).maybeSingle());
+    const player = unwrap(await supabase.from("player").select("display_name, nfl_team").eq("id", input.playerId).maybeSingle());
+    // Once a rostered player's own game has started this week, they can't be cut until
+    // next week -- same rule, and the same shared check, already enforced against
+    // picking a player UP through waivers (submitFaabBid) and editing their lineup slot
+    // (the Lineup page's gameHasStarted lock). Before this, a cut mid-game let an owner
+    // drop a player after seeing how their game went, with no equivalent restriction on
+    // the other side of the roster move. Commissioner/administrator can still override,
+    // matching the same exemption already used for the lineup-slot lock, since a
+    // correction (like undoing someone else's mistaken cut) can legitimately need to
+    // touch an in-progress or already-played week.
+    if (!["commissioner", "administrator"].includes(actor.role)) {
+      const weeks = unwrap(await supabase.from("schedule_week").select("week_number, status").eq("season_id", season.id).order("week_number")) ?? [];
+      const currentWeek = await resolveEffectivePlanningWeek(weeks, season.id);
+      if (currentWeek && await isPlayerLockedForGameStart(player?.nfl_team, currentWeek.week_number, season.year)) {
+        throw new TRPCError({ code: "BAD_REQUEST", message: `${player?.display_name ?? "This player"}'s game has already started this week -- they can't be cut until next week.` });
+      }
+    }
     const activeRights = unwrap(await supabase.from("player_right").select("right_type").eq("season_id", season.id).eq("franchise_id", franchise.id).eq("player_id", input.playerId).eq("status", "active")) ?? [];
     const cutTagType = activeRights.find(right => right.right_type === "rookie_match" || right.right_type === "waiver_match")?.right_type as "rookie_match" | "waiver_match" | undefined;
 
