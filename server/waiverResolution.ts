@@ -82,17 +82,36 @@ export async function awardFreeAgentClaimNow(bidId: string): Promise<ImmediateFr
   }
 
   const now = new Date().toISOString();
+  const seasonYear = unwrap(await supabase.from("season").select("year").eq("id", period.season_id).single())?.year ?? new Date().getFullYear();
+
+  // The roster insert goes FIRST, before the drop is released. The alreadyRostered
+  // check above is a read, so it cannot by itself stop two owners who confirm within
+  // the same moment -- only the partial unique index added in migration
+  // 202609200001 (season_id, player_id) where released_at is null actually
+  // serialises that, and it does so by failing this insert. Releasing the dropped
+  // player first would mean a loser of that race gives up a player and gets nothing
+  // back, so nothing destructive happens until the contended insert has succeeded.
+  //
+  // Locked until this free period closes rather than until "the next resolution" --
+  // now that awards happen the moment they're confirmed instead of all at once at
+  // close, "the next resolution" would otherwise mean nothing changed and a player
+  // claimed at 9:05am could be cut and re-claimed by someone else at 9:06am.
+  const rosterInsert = await supabase.from("roster_assignment").insert({ season_id: period.season_id, franchise_id: bid.franchise_id, player_id: bid.player_id, roster_state: "bench", acquired_via: "waiver_free", locked_until: period.closes_at }).select("id").single();
+  if (rosterInsert.error) {
+    // 23505 = unique_violation: someone else's confirm landed in the moments since the
+    // read above. Same outcome as losing the pre-check, and no drop has happened yet.
+    if (rosterInsert.error.code === "23505") {
+      unwrap(await supabase.from("faab_bid").update({ status: "lost", resolved_at: now }).eq("id", bidId).select("id").single());
+      return { outcome: "already_claimed" };
+    }
+    throw new Error(rosterInsert.error.message);
+  }
+
   if (bid.drop_player_id) {
     unwrap(await supabase.from("roster_assignment").update({ roster_state: "released", released_at: now }).eq("season_id", period.season_id).eq("franchise_id", bid.franchise_id).eq("player_id", bid.drop_player_id).is("released_at", null).select("id"));
     unwrap(await supabase.from("player_contract").update({ contract_status: "released" }).eq("season_id", period.season_id).eq("franchise_id", bid.franchise_id).eq("player_id", bid.drop_player_id).select("id"));
   }
 
-  const seasonYear = unwrap(await supabase.from("season").select("year").eq("id", period.season_id).single())?.year ?? new Date().getFullYear();
-  // Locked until this free period closes rather than until "the next resolution" --
-  // now that awards happen the moment they're confirmed instead of all at once at
-  // close, "the next resolution" would otherwise mean nothing changed and a player
-  // claimed at 9:05am could be cut and re-claimed by someone else at 9:06am.
-  unwrap(await supabase.from("roster_assignment").insert({ season_id: period.season_id, franchise_id: bid.franchise_id, player_id: bid.player_id, roster_state: "bench", acquired_via: "waiver_free", locked_until: period.closes_at }).select("id").single());
   unwrap(await supabase.from("player_contract").upsert({ season_id: period.season_id, franchise_id: bid.franchise_id, player_id: bid.player_id, salary: 1, expires_year: seasonYear, source_marker: "W", contract_status: "active" }, { onConflict: "season_id,franchise_id,player_id" }).select("id").single());
   unwrap(await supabase.from("faab_bid").update({ status: "won", resolved_at: now, confirmed_at: now }).eq("id", bidId).select("id").single());
   unwrap(await supabase.from("transaction").insert({ season_id: period.season_id, franchise_id: bid.franchise_id, transaction_type: "waiver", status: "final", summary: `${franchise.name} claimed ${player.display_name} for $1 (free agent period).`, details: { faab_bid_id: bidId, player_id: bid.player_id, amount: 1 } }).select("id").single());
