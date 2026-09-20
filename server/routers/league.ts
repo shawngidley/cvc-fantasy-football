@@ -12,7 +12,7 @@ import { attachFantasyProsPlayerNames } from "../fantasyProsNewsNames";
 import { normalizePlayerName } from "@shared/playerNameMatch";
 import { syncNflTeamAssignments } from "../nflTeamAssignmentSync";
 import { getFaabBalance, MAX_ROSTER_SIZE, STARTING_FAAB } from "../waiverRules";
-import { resolveOpenWaiverPeriod } from "../waiverResolution";
+import { awardFreeAgentClaimNow, resolveOpenWaiverPeriod } from "../waiverResolution";
 import { computeNextResolutionTime, nextRosterCutDeadline } from "../waiverResolutionTiming";
 import { syncFantasyProsSnapshot, syncFantasyProsActiveFlags, syncFantasyProsRookieFlags } from "../fantasyProsSync";
 import { syncTank01SeasonStats } from "../tank01SeasonStatsSync";
@@ -1481,10 +1481,14 @@ export const leagueRouter = router({
     return bid;
   }),
 
-  // Free-period claims are NOT auto-awarded like bid-period FAAB claims are -- the
-  // claiming owner must explicitly confirm before it can be awarded. Anything left
-  // unconfirmed when the free period closes is dropped entirely, same as any other
-  // losing claim (see resolveOpenWaiverPeriod's confirmed_at filter).
+  // Free-period claims are NOT auto-awarded on submit like bid-period FAAB claims are
+  // -- the claiming owner must explicitly confirm first. But confirming now awards the
+  // claim immediately (commissioner call, Sept 2026: claims should process right away,
+  // any time during the 9am-1pm ET Sunday window, not all get batched up and resolved
+  // together when the window closes at 1pm) via awardFreeAgentClaimNow. Anything left
+  // unconfirmed when the free period closes is still dropped entirely, same as any
+  // other losing claim (see resolveOpenWaiverPeriod's confirmed_at filter) -- that part
+  // of the design is unchanged, only the timing of an actually-confirmed claim is.
   confirmFreeAgentClaim: protectedProcedure.input(z.object({ bidId: z.string().uuid() })).mutation(async ({ ctx, input }) => {
     const owner = await getOwnerAccess({ openId: ctx.user.openId });
     if (!owner) throw new TRPCError({ code: "FORBIDDEN", message: "A CVC owner session is required to confirm a claim." });
@@ -1498,8 +1502,12 @@ export const leagueRouter = router({
     if (period?.status !== "open") throw new TRPCError({ code: "BAD_REQUEST", message: "That free agent period is no longer open." });
     if (bid.status !== "pending") throw new TRPCError({ code: "BAD_REQUEST", message: "That claim has already been resolved and can no longer be confirmed." });
     if (bid.confirmed_at) return { alreadyConfirmed: true };
-    unwrap(await supabase.from("faab_bid").update({ confirmed_at: new Date().toISOString() }).eq("id", input.bidId).select("id").single());
-    return { alreadyConfirmed: false };
+    const result = await awardFreeAgentClaimNow(input.bidId);
+    if (result.outcome === "already_claimed") throw new TRPCError({ code: "BAD_REQUEST", message: "This player was just claimed by another CVC franchise." });
+    if (result.outcome === "rejected") throw new TRPCError({ code: "BAD_REQUEST", message: result.reason });
+    const { league, season } = await getCurrentLeagueAndSeason();
+    await createAuditEvent(league.id, season.id, owner.id, "faab_bid", bid.id, "awarded", `${result.franchiseName} claimed ${result.playerName} for $1 (free agent period).`);
+    return { alreadyConfirmed: false, awarded: true };
   }),
 
   // Lets an owner withdraw their own pending claim -- either type (bid-period FAAB or

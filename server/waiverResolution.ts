@@ -9,6 +9,104 @@ type PendingBid = { id: string; franchise_id: string; player_id: string; drop_pl
 // max_players_desired column.
 const DEFAULT_GROUP_KEY = "__default__";
 
+export type ImmediateFreeAgentAwardResult =
+  | { outcome: "awarded"; playerName: string; franchiseName: string }
+  | { outcome: "already_claimed" }
+  | { outcome: "rejected"; reason: string };
+
+/**
+ * Awards a single confirmed free-period claim the instant it's confirmed, instead of
+ * leaving it "pending" until the whole period closes and resolveOpenWaiverPeriod's
+ * batch cascade runs (commissioner call, Sept 2026: free-agent claims should process
+ * immediately, any time during the 9am-1pm ET Sunday window -- not all at once at
+ * 1pm). Mirrors the slice of resolveOpenWaiverPeriod's per-player award logic that
+ * matters for a single claim (roster/contract/transaction inserts, waiver-priority
+ * rotation), but there's no cascade to run: the first eligible confirm simply wins the
+ * player, and it's rostered immediately, so every later claim on the same player fails
+ * the ordinary "already rostered" check (in submitFaabBid, and again here as a
+ * belt-and-suspenders re-check right before award, to close the race where two owners
+ * confirm within moments of each other).
+ *
+ * resolveOpenWaiverPeriod still runs at period close as a cleanup pass -- it now
+ * typically finds nothing left to do for a free period (everything either got awarded
+ * here already or was never confirmed, and unconfirmed claims are excluded from
+ * selectFreeAgentCandidates), but it still marks the period "final" and opens the next
+ * one.
+ */
+export async function awardFreeAgentClaimNow(bidId: string): Promise<ImmediateFreeAgentAwardResult> {
+  const bid = unwrap(await supabase.from("faab_bid").select("id, franchise_id, player_id, drop_player_id, bid_group_id, waiver_period_id, status").eq("id", bidId).maybeSingle());
+  if (!bid || bid.status !== "pending") return { outcome: "rejected", reason: "That claim is no longer pending." };
+
+  const [periodResult, playerResult, franchiseResult, alreadyRosteredResult] = await Promise.all([
+    supabase.from("waiver_period").select("id, season_id, label, closes_at, period_type, status").eq("id", bid.waiver_period_id).single(),
+    supabase.from("player").select("id, display_name").eq("id", bid.player_id).single(),
+    supabase.from("franchise").select("id, name").eq("id", bid.franchise_id).single(),
+    supabase.from("roster_assignment").select("id").eq("player_id", bid.player_id).is("released_at", null).limit(1).maybeSingle(),
+  ]);
+  const period = unwrap(periodResult);
+  const player = unwrap(playerResult);
+  const franchise = unwrap(franchiseResult);
+  if (!period || !player || !franchise) return { outcome: "rejected", reason: "Claim details could not be loaded." };
+
+  if (unwrap(alreadyRosteredResult)) {
+    unwrap(await supabase.from("faab_bid").update({ status: "lost", resolved_at: new Date().toISOString() }).eq("id", bidId).select("id").single());
+    return { outcome: "already_claimed" };
+  }
+
+  await ensureWaiverPriorityBootstrapped(period.season_id);
+
+  // Same shared-pool cap the batch resolver enforces: an ungrouped claim's limit is
+  // the franchise's current default-pool max (the highest max_players_desired among
+  // its still-pending ungrouped claims this period, so a later-raised max always
+  // wins); a grouped claim shares its own group's stated max instead.
+  let capLimit = 1;
+  let groupLabel: string | null = null;
+  if (bid.bid_group_id) {
+    const group = unwrap(await supabase.from("faab_bid_group").select("id, label, max_players_desired").eq("id", bid.bid_group_id).maybeSingle());
+    capLimit = group?.max_players_desired ?? 1;
+    groupLabel = group?.label ?? null;
+  } else {
+    const poolBids = unwrap(await supabase.from("faab_bid").select("max_players_desired").eq("waiver_period_id", period.id).eq("franchise_id", bid.franchise_id).eq("status", "pending").is("bid_group_id", null)) ?? [];
+    capLimit = poolBids.length ? Math.max(...poolBids.map(row => row.max_players_desired)) : 1;
+  }
+  let wonQuery = supabase.from("faab_bid").select("id", { count: "exact", head: true }).eq("waiver_period_id", period.id).eq("franchise_id", bid.franchise_id).eq("status", "won");
+  wonQuery = bid.bid_group_id ? wonQuery.eq("bid_group_id", bid.bid_group_id) : wonQuery.is("bid_group_id", null);
+  const wonSoFar = (await wonQuery).count ?? 0;
+  if (wonSoFar >= capLimit) {
+    return { outcome: "rejected", reason: `Already claimed ${wonSoFar} player${wonSoFar === 1 ? "" : "s"}${groupLabel ? ` in the "${groupLabel}" group` : ""} this period, at your stated max of ${capLimit}.` };
+  }
+
+  const balance = await getFaabBalance(bid.franchise_id, period.season_id);
+  if (balance < 1) {
+    return { outcome: "rejected", reason: `This claim exceeds your remaining CVC FAAB budget. You have $${balance} left this season.` };
+  }
+
+  const now = new Date().toISOString();
+  if (bid.drop_player_id) {
+    unwrap(await supabase.from("roster_assignment").update({ roster_state: "released", released_at: now }).eq("season_id", period.season_id).eq("franchise_id", bid.franchise_id).eq("player_id", bid.drop_player_id).is("released_at", null).select("id"));
+    unwrap(await supabase.from("player_contract").update({ contract_status: "released" }).eq("season_id", period.season_id).eq("franchise_id", bid.franchise_id).eq("player_id", bid.drop_player_id).select("id"));
+  }
+
+  const seasonYear = unwrap(await supabase.from("season").select("year").eq("id", period.season_id).single())?.year ?? new Date().getFullYear();
+  // Locked until this free period closes rather than until "the next resolution" --
+  // now that awards happen the moment they're confirmed instead of all at once at
+  // close, "the next resolution" would otherwise mean nothing changed and a player
+  // claimed at 9:05am could be cut and re-claimed by someone else at 9:06am.
+  unwrap(await supabase.from("roster_assignment").insert({ season_id: period.season_id, franchise_id: bid.franchise_id, player_id: bid.player_id, roster_state: "bench", acquired_via: "waiver_free", locked_until: period.closes_at }).select("id").single());
+  unwrap(await supabase.from("player_contract").upsert({ season_id: period.season_id, franchise_id: bid.franchise_id, player_id: bid.player_id, salary: 1, expires_year: seasonYear, source_marker: "W", contract_status: "active" }, { onConflict: "season_id,franchise_id,player_id" }).select("id").single());
+  unwrap(await supabase.from("faab_bid").update({ status: "won", resolved_at: now, confirmed_at: now }).eq("id", bidId).select("id").single());
+  unwrap(await supabase.from("transaction").insert({ season_id: period.season_id, franchise_id: bid.franchise_id, transaction_type: "waiver", status: "final", summary: `${franchise.name} claimed ${player.display_name} for $1 (free agent period).`, details: { faab_bid_id: bidId, player_id: bid.player_id, amount: 1 } }).select("id").single());
+
+  // Move this franchise to the back of the waiver-priority line -- same rotation the
+  // batch resolver did for every winner at once, just applied the instant each claim
+  // wins instead.
+  const franchises = unwrap(await supabase.from("franchise").select("id, waiver_priority").eq("is_active", true)) ?? [];
+  const backOfLine = Math.max(0, ...franchises.map(row => row.waiver_priority ?? 0)) + 1;
+  unwrap(await supabase.from("franchise").update({ waiver_priority: backOfLine }).eq("id", bid.franchise_id).select("id").single());
+
+  return { outcome: "awarded", playerName: player.display_name, franchiseName: franchise.name };
+}
+
 export type WaiverAwardResult = { playerName: string; franchiseName: string; amount: number; droppedPlayerName: string | null };
 export type WaiverSkipResult = { playerName: string; franchiseName: string; reason: string };
 export type WaiverResolutionSummary = {
