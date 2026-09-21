@@ -1,4 +1,17 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+
+// Keep the shared L2 cache out of these tests -- it's best-effort and every read
+// here should miss so behavior matches the in-memory-only assertions below, without
+// actually touching Supabase.
+vi.mock("./supabase", () => ({
+  supabase: {
+    from: () => ({
+      select: () => ({ eq: () => ({ maybeSingle: () => Promise.resolve({ data: null, error: null }) }) }),
+      upsert: () => Promise.resolve({ data: null, error: null }),
+    }),
+  },
+}));
+
 import { __clearTank01ProxyCacheForTests, proxyTank01Request } from "./tank01Proxy";
 
 function mockReqRes(endpoint: string, query: Record<string, string>) {

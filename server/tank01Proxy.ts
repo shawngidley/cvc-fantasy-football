@@ -1,4 +1,5 @@
 import type { Request, Response } from "express";
+import { supabase } from "./supabase";
 
 const TANK01_HOST = "tank01-nfl-live-in-game-real-time-statistics-nfl.p.rapidapi.com";
 const TANK01_TIMEOUT_MS = 15_000;
@@ -26,6 +27,41 @@ const ALLOWED_ENDPOINTS = new Set([
 // an absolute guarantee, just a real, meaningful reduction in call volume.
 const CACHE_TTL_MS = 20_000;
 const responseCache = new Map<string, { status: number; contentType: string; body: string; expiresAt: number }>();
+
+// Shared L2 cache in Supabase, so the 20s dedup window actually holds across
+// serverless instances and viewers -- the in-memory Map above is per-instance, and
+// on Vercel each request can hit a different, short-lived instance, so it does NOT
+// collapse many owners' overlapping polls the way a single shared cache does. Every
+// read/write is best-effort: any error (including the table not existing yet) falls
+// through to a normal upstream fetch, so a cache problem can never break live
+// scoring. Run supabase/migrations/202609210001_cvc_tank01_response_cache.sql to
+// create the table.
+const SHARED_CACHE_TABLE = "tank01_response_cache";
+
+async function readSharedCache(cacheKey: string): Promise<{ status: number; contentType: string; body: string } | null> {
+  try {
+    const { data, error } = await supabase
+      .from(SHARED_CACHE_TABLE)
+      .select("status, content_type, body, updated_at")
+      .eq("cache_key", cacheKey)
+      .maybeSingle();
+    if (error || !data) return null;
+    if (Date.now() - new Date(data.updated_at as string).getTime() >= CACHE_TTL_MS) return null;
+    return { status: data.status as number, contentType: data.content_type as string, body: data.body as string };
+  } catch {
+    return null;
+  }
+}
+
+async function writeSharedCache(cacheKey: string, status: number, contentType: string, body: string): Promise<void> {
+  try {
+    await supabase
+      .from(SHARED_CACHE_TABLE)
+      .upsert({ cache_key: cacheKey, status, content_type: contentType, body, updated_at: new Date().toISOString() }, { onConflict: "cache_key" });
+  } catch {
+    // best-effort
+  }
+}
 
 export function __clearTank01ProxyCacheForTests() { responseCache.clear(); }
 
@@ -60,6 +96,15 @@ export async function proxyTank01Request(req: Request, res: Response): Promise<v
     return;
   }
 
+  // L2: shared across instances/viewers. Warm this instance's L1 from it so
+  // subsequent same-instance requests skip the Supabase round trip.
+  const shared = await readSharedCache(cacheKey);
+  if (shared) {
+    responseCache.set(cacheKey, { ...shared, expiresAt: Date.now() + CACHE_TTL_MS });
+    res.status(shared.status).type(shared.contentType).send(shared.body);
+    return;
+  }
+
   try {
     const upstream = await fetch(`https://${TANK01_HOST}/${endpoint}?${query.toString()}`, {
       headers: { "x-rapidapi-host": TANK01_HOST, "x-rapidapi-key": apiKey },
@@ -67,7 +112,10 @@ export async function proxyTank01Request(req: Request, res: Response): Promise<v
     });
     const contentType = upstream.headers.get("content-type") ?? "application/json";
     const body = await upstream.text();
-    if (upstream.ok) responseCache.set(cacheKey, { status: upstream.status, contentType, body, expiresAt: Date.now() + CACHE_TTL_MS });
+    if (upstream.ok) {
+      responseCache.set(cacheKey, { status: upstream.status, contentType, body, expiresAt: Date.now() + CACHE_TTL_MS });
+      await writeSharedCache(cacheKey, upstream.status, contentType, body);
+    }
     res.status(upstream.status).type(contentType).send(body);
   } catch (error) {
     const timedOut = error instanceof Error && (error.name === "TimeoutError" || error.name === "AbortError");

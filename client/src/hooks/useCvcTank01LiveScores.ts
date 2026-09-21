@@ -120,6 +120,13 @@ export function useCvcTank01LiveScores(week: number | undefined, season: number 
   // matches, making the stop guaranteed rather than dependent on the effect never
   // re-running.
   const stoppedForWeekRef = useRef<number | null>(null);
+  // The full fetch-eligible (wide) box-score fetch, which populates already-final
+  // games, runs only once per week; every recurring poll after that fetches box
+  // scores only for games isGameCurrentlyLive still considers in progress. Final
+  // games' stats don't change, so refetching all of them every 30s was the bulk of
+  // Tank01 call volume during a live week. Persists across effect re-runs like
+  // stoppedForWeekRef, for the same reason.
+  const initialFetchDoneForWeekRef = useRef<number | null>(null);
 
   const load = useCallback(async () => {
     if (!week || !season || !rules.length) return { fetchEligibleGames: [] as TankGame[], anyCurrentlyLive: false };
@@ -146,8 +153,14 @@ export function useCvcTank01LiveScores(week: number | undefined, season: number 
       if (!fetchEligibleGames.length) { setIsPolling(false); if (week != null) stoppedForWeekRef.current = week; return false; }
       setIsPolling(true);
       setError(null);
+      // Wide fetch only once per week (populates already-final games); every
+      // recurring poll after that only refetches games still likely in progress.
+      const needFullFetch = week == null || initialFetchDoneForWeekRef.current !== week;
+      const gamesToFetch = needFullFetch
+        ? fetchEligibleGames
+        : fetchEligibleGames.filter(game => isGameCurrentlyLive(game.gameDate, game.gameTime));
       const nextStatLines: LiveStatMap = {};
-      await Promise.all(fetchEligibleGames.map(async game => {
+      await Promise.all(gamesToFetch.map(async game => {
         const url = `${TANK01_BASE_URL}/getNFLBoxScore?gameID=${encodeURIComponent(game.gameID ?? "")}&fantasyPoints=true&twoPointConversions=2&passYards=.04&passTD=4&passInterceptions=-3&pointsPerReception=1&carries=0&rushYards=.1&rushTD=6&fumbles=-3&receivingYards=.1&receivingTD=6&targets=0&defTD=6&fgMade=0&fgYards=.1&xpMade=1`;
         const response = await fetch(url);
         if (!response.ok) throw new Error(`Tank01 box-score request failed (${response.status})`);
@@ -180,7 +193,10 @@ export function useCvcTank01LiveScores(week: number | undefined, season: number 
           if (teamAbv) nextStatLines[`dst:${normalizeTeam(teamAbv)}`] = { Defense: stat as unknown as Record<string, string | number> };
         }
       }));
-      setStatLines(nextStatLines);
+      // Merge rather than replace: a recurring poll only fetches games still in
+      // progress, so overwriting would wipe the stat lines already captured for
+      // games that have since gone final.
+      setStatLines(current => ({ ...current, ...nextStatLines }));
       setLastUpdated(new Date());
       // Override kicker stats with real per-kick ESPN data where available. Tank01's
       // live box score doesn't reliably include FG yardage at all (confirmed: none of
@@ -190,8 +206,21 @@ export function useCvcTank01LiveScores(week: number | undefined, season: number 
       // events for a kicker (e.g. the play text didn't match, or nothing's happened
       // yet), that kicker's stat line is left as Tank01 provided it, not blanked out.
       try {
-        const kickerEvents = await fetchEspnKickerEvents(fetchEligibleGames);
-        setKickerEvents(kickerEvents);
+        const kickerEvents = await fetchEspnKickerEvents(gamesToFetch);
+        // Merge rather than replace: a recurring poll only fetches games still in
+        // progress, so overwriting would wipe the kicker events already captured
+        // for games that have since gone final. Dedup by the same key the fetch
+        // loop uses.
+        setKickerEvents(prev => {
+          const key = (event: KickerPlayEvent) => `${event.playerName}|${event.type}|${event.outcome}|${event.yards}|${event.text}`;
+          const seen = new Set(prev.map(key));
+          const merged = prev.slice();
+          for (const event of kickerEvents) {
+            const eventKey = key(event);
+            if (!seen.has(eventKey)) { seen.add(eventKey); merged.push(event); }
+          }
+          return merged;
+        });
         if (kickerEvents.length) {
           setStatLines(current => {
             const next = { ...current };
@@ -223,6 +252,7 @@ export function useCvcTank01LiveScores(week: number | undefined, season: number 
       // the wide window is exactly what caused the runaway-polling incident: the poll
       // would never stop for up to 24 hours after any kickoff, regardless of whether the
       // game itself had already ended hours earlier.
+      if (week != null) initialFetchDoneForWeekRef.current = week;
       if (!anyCurrentlyLive && week != null) stoppedForWeekRef.current = week;
       return anyCurrentlyLive;
     } catch (cause) {
