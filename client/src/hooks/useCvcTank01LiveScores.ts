@@ -129,7 +129,7 @@ export function useCvcTank01LiveScores(week: number | undefined, season: number 
   const initialFetchDoneForWeekRef = useRef<number | null>(null);
 
   const load = useCallback(async () => {
-    if (!week || !season || !rules.length) return { fetchEligibleGames: [] as TankGame[], anyCurrentlyLive: false };
+    if (!week || !season || !rules.length) return { loaded: false, fetchEligibleGames: [] as TankGame[], anyCurrentlyLive: false };
     const response = await fetch(`${TANK01_BASE_URL}/getNFLGamesForWeek?week=${week}&seasonType=Regular%20Season&season=${season}`);
     if (!response.ok) throw new Error(`Tank01 schedule request failed (${response.status})`);
     const payload = await response.json() as { body?: TankGame[] };
@@ -143,14 +143,22 @@ export function useCvcTank01LiveScores(week: number | undefined, season: number 
     setNflMatchups(nextMatchups);
     const fetchEligibleGames = games.filter(game => game.gameID && isGameFetchEligible(game.gameDate, game.gameTime));
     const anyCurrentlyLive = games.some(game => game.gameID && isGameCurrentlyLive(game.gameDate, game.gameTime));
-    return { fetchEligibleGames, anyCurrentlyLive };
+    return { loaded: true, fetchEligibleGames, anyCurrentlyLive };
   }, [rules.length, season, week]);
 
   const refresh = useCallback(async () => {
     if (week != null && stoppedForWeekRef.current === week) { setIsPolling(false); return false; }
     try {
-      const { fetchEligibleGames, anyCurrentlyLive } = await load();
-      if (!fetchEligibleGames.length) { setIsPolling(false); if (week != null) stoppedForWeekRef.current = week; return false; }
+      const { loaded, fetchEligibleGames, anyCurrentlyLive } = await load();
+      // Back off for now, but NEVER latch the week off here. An empty list means either
+      // load() bailed before week/season/rules had arrived (loaded === false), or no game
+      // is fetch-eligible yet -- neither is evidence the week is over. Stopping on this
+      // path is what broke WRC: on mount, before those inputs resolved, the very first
+      // pass marked the week stopped, and the guard above then skipped every later fetch
+      // including the initial full one, so every score stayed 0.0 for the whole week.
+      // Returning false only pauses this timer chain; the effect re-runs and retries when
+      // load()'s inputs change.
+      if (!loaded || !fetchEligibleGames.length) { setIsPolling(false); return false; }
       setIsPolling(true);
       setError(null);
       // Wide fetch only once per week (populates already-final games); every
@@ -252,8 +260,12 @@ export function useCvcTank01LiveScores(week: number | undefined, season: number 
       // the wide window is exactly what caused the runaway-polling incident: the poll
       // would never stop for up to 24 hours after any kickoff, regardless of whether the
       // game itself had already ended hours earlier.
-      if (week != null) initialFetchDoneForWeekRef.current = week;
-      if (!anyCurrentlyLive && week != null) stoppedForWeekRef.current = week;
+      // Both latches require this pass to have actually fetched box scores. If
+      // gamesToFetch was empty there is nothing populated yet, so the next pass must
+      // still be allowed to run its full fetch rather than treating the week as done.
+      const populated = gamesToFetch.length > 0;
+      if (populated && week != null) initialFetchDoneForWeekRef.current = week;
+      if (!anyCurrentlyLive && populated && week != null && initialFetchDoneForWeekRef.current === week) stoppedForWeekRef.current = week;
       return anyCurrentlyLive;
     } catch (cause) {
       setIsPolling(false);
