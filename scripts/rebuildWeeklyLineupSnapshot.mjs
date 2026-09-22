@@ -150,6 +150,11 @@ const storedRows = unwrap(await db.from("weekly_lineup_snapshot")
 const storedSlot = new Map(storedRows.map((r) => [`${r.franchise_id}:${r.player_id}`, r.slot_code]));
 
 const rebuilt = [];
+// "No differences" is the default outcome when the replay contributes nothing, because
+// every slot falls back to the stored snapshot. Counting the two sources separately is
+// what distinguishes "the audit trail confirms the stored snapshot" from "no events
+// applied and the stored snapshot was echoed back unchanged".
+const sourceCounts = { event: 0, stored: 0 };
 const heldAtKickoff = new Set();
 for (const a of assignments) {
   const player = Array.isArray(a.player) ? a.player[0] : a.player;
@@ -167,8 +172,10 @@ for (const a of assignments) {
   // already baked into it and re-applying them is a no-op, so taking the last event
   // before kickoff when one exists, and the stored slot otherwise, is correct whenever
   // the snapshot was captured.
-  const code = slotFor.get(`${a.franchise_id}:${a.player_id}`) ?? storedSlot.get(`${a.franchise_id}:${a.player_id}`);
+  const fromEvent = slotFor.get(`${a.franchise_id}:${a.player_id}`);
+  const code = fromEvent ?? storedSlot.get(`${a.franchise_id}:${a.player_id}`);
   if (!code) continue; // no event and no stored row -> not part of the week's lineup
+  if (fromEvent !== undefined) sourceCounts.event += 1; else sourceCounts.stored += 1;
   const ov = overrides[franchiseName.get(a.franchise_id)]?.[player.display_name];
   if (ov === null) continue;
   rebuilt.push({ season_id: season.id, schedule_week_id: weekRow.id, franchise_id: a.franchise_id, player_id: a.player_id, roster_assignment_id: a.id, slot_code: ov ?? code, _name: player.display_name });
@@ -179,7 +186,10 @@ const existingByKey = new Map(existing.map((r) => [`${r.franchise_id}:${r.player
 const rebuiltByKey = new Map(rebuilt.map((r) => [`${r.franchise_id}:${r.player_id}`, r]));
 
 console.log(`\n=== ${weekRow.label ?? `Week ${WEEK}`} — reconstructed from ${events.length} lineup events ===`);
-console.log(`${APPLY ? "APPLY" : "DRY RUN"} — stored ${existing.length} rows, reconstructed ${rebuilt.length} rows\n`);
+console.log(`${APPLY ? "APPLY" : "DRY RUN"} — stored ${existing.length} rows, reconstructed ${rebuilt.length} rows`);
+console.log(`Slot source: ${sourceCounts.event} decided by a lineup event before kickoff, ${sourceCounts.stored} carried over from the stored snapshot (no event).`);
+if (sourceCounts.event === 0) console.log(`WARNING: no event decided any slot, so this run only echoed the stored snapshot back. Treat "no differences" as unproven.`);
+console.log("");
 let diffs = 0;
 for (const f of franchises) {
   const lines = [];
