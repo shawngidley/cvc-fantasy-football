@@ -52,15 +52,19 @@ export function shouldFinalizeWeek(totalScheduledGames: number, gameStatuses: bo
  * (this cron, running every 5 minutes for the entire CVC week regardless of actual game
  * timing) was fetching a box score for every game in the week on every single run --
  * including games days in the future that hadn't kicked off yet at all. */
-export function hasKickedOff(gameDate?: string, gameTime?: string): boolean {
-  if (!gameDate || !gameTime || gameDate.length < 8) return false;
+export function kickoffUtcMs(gameDate?: string, gameTime?: string): number | null {
+  if (!gameDate || !gameTime || gameDate.length < 8) return null;
   const time = gameTime.match(/(\d+):(\d+)([ap])/i);
-  if (!time) return false;
+  if (!time) return null;
   let hour = Number(time[1]);
   if (time[3].toLowerCase() === "p" && hour !== 12) hour += 12;
   if (time[3].toLowerCase() === "a" && hour === 12) hour = 0;
-  const kickoffUtc = Date.UTC(Number(gameDate.slice(0, 4)), Number(gameDate.slice(4, 6)) - 1, Number(gameDate.slice(6, 8)), hour + 4, Number(time[2]), 0);
-  return Date.now() >= kickoffUtc;
+  return Date.UTC(Number(gameDate.slice(0, 4)), Number(gameDate.slice(4, 6)) - 1, Number(gameDate.slice(6, 8)), hour + 4, Number(time[2]), 0);
+}
+
+export function hasKickedOff(gameDate?: string, gameTime?: string): boolean {
+  const kickoffUtc = kickoffUtcMs(gameDate, gameTime);
+  return kickoffUtc !== null && Date.now() >= kickoffUtc;
 }
 
 export type Tank01SyncSummary = {
@@ -139,20 +143,41 @@ async function currentContext(forceWeekNumber?: number) {
  */
 async function reconcileLineupSnapshot(seasonId: string, weekId: string, franchiseIds: string[], games: { away?: string; home?: string; gameDate?: string; gameTime?: string }[]) {
   if (!franchiseIds.length) return;
-  type AssignmentRow = { id: string; franchise_id: string; player_id: string; assigned_slot_code: string | null; player: { nfl_team: string | null } | { nfl_team: string | null }[] | null };
-  const assignments = (unwrap(await supabase.from("roster_assignment").select("id, franchise_id, player_id, assigned_slot_code, player:player_id(nfl_team)").eq("season_id", seasonId).in("franchise_id", franchiseIds).is("released_at", null).not("assigned_slot_code", "is", null)) ?? []) as AssignmentRow[];
+  type AssignmentRow = { id: string; franchise_id: string; player_id: string; assigned_slot_code: string | null; acquired_at: string | null; player: { nfl_team: string | null } | { nfl_team: string | null }[] | null };
+  const assignments = (unwrap(await supabase.from("roster_assignment").select("id, franchise_id, player_id, assigned_slot_code, acquired_at, player:player_id(nfl_team)").eq("season_id", seasonId).in("franchise_id", franchiseIds).is("released_at", null).not("assigned_slot_code", "is", null)) ?? []) as AssignmentRow[];
   type ExistingRow = { id: string; franchise_id: string; player_id: string; slot_code: string; roster_assignment_id: string | null; player: { nfl_team: string | null } | { nfl_team: string | null }[] | null };
   const existing = (unwrap(await supabase.from("weekly_lineup_snapshot").select("id, franchise_id, player_id, slot_code, roster_assignment_id, player:player_id(nfl_team)").eq("schedule_week_id", weekId)) ?? []) as ExistingRow[];
   const existingByKey = new Map(existing.map(row => [`${row.franchise_id}:${row.player_id}`, row]));
 
   const lockedTeams = new Set<string>();
+  const kickoffByTeam = new Map<string, number>();
   for (const game of games) {
-    if (!hasKickedOff(game.gameDate, game.gameTime)) continue;
-    if (game.away) lockedTeams.add(normalizeTeam(game.away));
-    if (game.home) lockedTeams.add(normalizeTeam(game.home));
+    const kickoff = kickoffUtcMs(game.gameDate, game.gameTime);
+    for (const side of [game.away, game.home]) {
+      if (!side) continue;
+      const team = normalizeTeam(side);
+      if (kickoff !== null) kickoffByTeam.set(team, kickoff);
+      if (hasKickedOff(game.gameDate, game.gameTime)) lockedTeams.add(team);
+    }
   }
   const nflTeamOf = (player: { nfl_team: string | null } | { nfl_team: string | null }[] | null) => (Array.isArray(player) ? player[0] : player)?.nfl_team ?? null;
   const isLocked = (nflTeam: string | null) => Boolean(nflTeam && lockedTeams.has(normalizeTeam(nflTeam)));
+  // For a locked player with no snapshot row yet, only write one if the roster
+  // assignment predates that player's own kickoff. Without this, re-running
+  // forceRecomputeWeek on an ALREADY-PLAYED week would mine the CURRENT roster and
+  // hand every since-acquired player a snapshot row for a game they were not rostered
+  // for -- crediting, say, a Week 3 pickup's points to Week 2. The legitimate cases
+  // this must not block both satisfy it: a free-agent claim cannot be awarded after
+  // its own kickoff (submitFaabBid / awardFreeAgentClaimNow enforce
+  // isPlayerLockedForGameStart), and restoreCutPlayer clears released_at on the
+  // EXISTING assignment rather than inserting a new one, so its acquired_at is still
+  // the original pre-kickoff acquisition.
+  const heldBeforeKickoff = (nflTeam: string | null, acquiredAt: string | null) => {
+    if (!acquiredAt) return true;
+    const kickoff = nflTeam ? kickoffByTeam.get(normalizeTeam(nflTeam)) : undefined;
+    if (kickoff === undefined) return true; // bye or unknown game -- nothing to compare against
+    return new Date(acquiredAt).getTime() < kickoff;
+  };
 
   const toUpsert: { season_id: string; schedule_week_id: string; franchise_id: string; player_id: string; roster_assignment_id: string; slot_code: string }[] = [];
   const currentKeys = new Set<string>();
@@ -161,7 +186,7 @@ async function reconcileLineupSnapshot(seasonId: string, weekId: string, franchi
     currentKeys.add(key);
     const prior = existingByKey.get(key);
     if (isLocked(nflTeamOf(row.player))) {
-      if (!prior) toUpsert.push({ season_id: seasonId, schedule_week_id: weekId, franchise_id: row.franchise_id, player_id: row.player_id, roster_assignment_id: row.id, slot_code: row.assigned_slot_code as string });
+      if (!prior && heldBeforeKickoff(nflTeamOf(row.player), row.acquired_at)) toUpsert.push({ season_id: seasonId, schedule_week_id: weekId, franchise_id: row.franchise_id, player_id: row.player_id, roster_assignment_id: row.id, slot_code: row.assigned_slot_code as string });
       continue; // frozen once a row exists -- never overwrite a locked player's entry
     }
     if (!prior || prior.slot_code !== row.assigned_slot_code || prior.roster_assignment_id !== row.id) {
