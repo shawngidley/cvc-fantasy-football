@@ -144,6 +144,11 @@ for (const ev of events) {
   slotFor.set(`${a.franchise_id}:${a.player_id}`, code);
 }
 
+const storedRows = unwrap(await db.from("weekly_lineup_snapshot")
+  .select("franchise_id, player_id, slot_code, player:player_id(display_name)")
+  .eq("schedule_week_id", weekRow.id));
+const storedSlot = new Map(storedRows.map((r) => [`${r.franchise_id}:${r.player_id}`, r.slot_code]));
+
 const rebuilt = [];
 const heldAtKickoff = new Set();
 for (const a of assignments) {
@@ -154,16 +159,22 @@ for (const a of assignments) {
   const released = a.released_at ? new Date(a.released_at).getTime() : Infinity;
   if (!(acquired <= lock && released > lock)) continue; // not held at their own kickoff
   heldAtKickoff.add(`${a.franchise_id}:${a.player_id}`);
-  const code = slotFor.get(`${a.franchise_id}:${a.player_id}`);
-  if (!code) continue; // never slotted -> not part of the week's lineup
+  // The audit log is a PATCH over the stored snapshot, not a replacement for it. The
+  // 2026 workbook import seeded rosters and their slots directly, with no audit event,
+  // so a player who never changed slot has no event at all -- rebuilding purely from
+  // events would drop every such starter (Kenneth Walker III, Houston DST, Drake Maye
+  // and 14 others on the first correct run). Events before the snapshot was taken are
+  // already baked into it and re-applying them is a no-op, so taking the last event
+  // before kickoff when one exists, and the stored slot otherwise, is correct whenever
+  // the snapshot was captured.
+  const code = slotFor.get(`${a.franchise_id}:${a.player_id}`) ?? storedSlot.get(`${a.franchise_id}:${a.player_id}`);
+  if (!code) continue; // no event and no stored row -> not part of the week's lineup
   const ov = overrides[franchiseName.get(a.franchise_id)]?.[player.display_name];
   if (ov === null) continue;
   rebuilt.push({ season_id: season.id, schedule_week_id: weekRow.id, franchise_id: a.franchise_id, player_id: a.player_id, roster_assignment_id: a.id, slot_code: ov ?? code, _name: player.display_name });
 }
 
-const existing = unwrap(await db.from("weekly_lineup_snapshot")
-  .select("franchise_id, player_id, slot_code, player:player_id(display_name)")
-  .eq("schedule_week_id", weekRow.id));
+const existing = storedRows;
 const existingByKey = new Map(existing.map((r) => [`${r.franchise_id}:${r.player_id}`, r]));
 const rebuiltByKey = new Map(rebuilt.map((r) => [`${r.franchise_id}:${r.player_id}`, r]));
 
@@ -182,7 +193,7 @@ for (const f of franchises) {
     if (!key.startsWith(`${f.id}:`) || rebuiltByKey.has(key)) continue;
     const p = Array.isArray(r.player) ? r.player[0] : r.player;
     const held = heldAtKickoff.has(key);
-    lines.push(`  - ${String(p?.display_name ?? r.player_id).padEnd(26)} ${r.slot_code}   (${held ? "held, but no slot event before their kickoff" : "not on this roster at their kickoff"})`);
+    lines.push(`  - ${String(p?.display_name ?? r.player_id).padEnd(26)} ${r.slot_code}   (${held ? "HELD AT KICKOFF -- investigate before applying" : "not on this roster at their kickoff"})`);
   }
   if (lines.length) { diffs += lines.length; console.log(`${f.name}`); console.log(lines.join("\n")); console.log(""); }
 }
