@@ -106,10 +106,14 @@ const weekEndMs = kickoffByTeam.size ? Math.max(...kickoffByTeam.values()) + 6 *
 // Slot labels drifted mid-season ("Running Back 1"/"Running Back 2" -> "Running Back"),
 // so map by label with the trailing index stripped, and keep the live codes as truth.
 const slots = unwrap(await db.from("roster_slot").select("code, label").eq("season_id", season.id));
+// Trailing punctuation comes off BEFORE the slot index, or "Running Back 1." never
+// matches the index pattern (the period sits between the digit and the end) and the
+// label silently fails to resolve -- which dropped 33 real events on the first run.
+const normalizeLabel = (label) => String(label).trim().toLowerCase().replace(/[.\s]+$/, "").replace(/\s+\d+$/, "");
 const slotByLabel = new Map();
-for (const s of slots) slotByLabel.set(s.label.trim().toLowerCase().replace(/\s+\d+$/, ""), s.code);
+for (const s of slots) slotByLabel.set(normalizeLabel(s.label), s.code);
 slotByLabel.set("bench", "BENCH");
-const codeForLabel = (label) => slotByLabel.get(String(label).trim().toLowerCase().replace(/\s+\d+$/, "").replace(/\.$/, "")) ?? null;
+const codeForLabel = (label) => slotByLabel.get(normalizeLabel(label)) ?? null;
 
 const franchises = unwrap(await db.from("franchise").select("id, name").eq("league_id", league.id).eq("is_active", true));
 const franchiseName = new Map(franchises.map((f) => [f.id, f.name]));
@@ -126,6 +130,7 @@ const events = unwrap(await db.from("audit_event")
 const overrides = OVERRIDES_PATH ? JSON.parse(await readFile(OVERRIDES_PATH, "utf8")) : {};
 
 // Replay: last slot event strictly before each player's own kickoff wins.
+const unmapped = [];
 const slotFor = new Map(); // `${franchise_id}:${player_id}` -> code
 for (const ev of events) {
   const a = assignmentById.get(ev.entity_id);
@@ -135,11 +140,12 @@ for (const ev of events) {
   if (new Date(ev.created_at).getTime() >= lock) continue; // locked: change came too late
   const label = String(ev.summary).replace(/^.*\bto\s+/i, "");
   const code = codeForLabel(label);
-  if (!code) { console.warn(`  ! unmapped slot label ${JSON.stringify(label)} (${ev.created_at})`); continue; }
+  if (!code) { unmapped.push(`${label} @ ${ev.created_at}`); continue; }
   slotFor.set(`${a.franchise_id}:${a.player_id}`, code);
 }
 
 const rebuilt = [];
+const heldAtKickoff = new Set();
 for (const a of assignments) {
   const player = Array.isArray(a.player) ? a.player[0] : a.player;
   if (!player) continue;
@@ -147,6 +153,7 @@ for (const a of assignments) {
   const acquired = a.acquired_at ? new Date(a.acquired_at).getTime() : 0;
   const released = a.released_at ? new Date(a.released_at).getTime() : Infinity;
   if (!(acquired <= lock && released > lock)) continue; // not held at their own kickoff
+  heldAtKickoff.add(`${a.franchise_id}:${a.player_id}`);
   const code = slotFor.get(`${a.franchise_id}:${a.player_id}`);
   if (!code) continue; // never slotted -> not part of the week's lineup
   const ov = overrides[franchiseName.get(a.franchise_id)]?.[player.display_name];
@@ -174,11 +181,20 @@ for (const f of franchises) {
   for (const [key, r] of existingByKey) {
     if (!key.startsWith(`${f.id}:`) || rebuiltByKey.has(key)) continue;
     const p = Array.isArray(r.player) ? r.player[0] : r.player;
-    lines.push(`  - ${String(p?.display_name ?? r.player_id).padEnd(26)} ${r.slot_code}   (not held at kickoff / never slotted)`);
+    const held = heldAtKickoff.has(key);
+    lines.push(`  - ${String(p?.display_name ?? r.player_id).padEnd(26)} ${r.slot_code}   (${held ? "held, but no slot event before their kickoff" : "not on this roster at their kickoff"})`);
   }
   if (lines.length) { diffs += lines.length; console.log(`${f.name}`); console.log(lines.join("\n")); console.log(""); }
 }
 if (!diffs) console.log("No differences — the stored snapshot already matches the audit trail.\n");
+
+if (unmapped.length) {
+  console.error(`REFUSING TO APPLY: ${unmapped.length} lineup events had a slot label that did not resolve to a roster_slot code.`);
+  console.error(`Every dropped event is a lineup change that would be silently missing from the rebuild:`);
+  for (const u of unmapped.slice(0, 20)) console.error(`  ${u}`);
+  if (unmapped.length > 20) console.error(`  ... and ${unmapped.length - 20} more`);
+  process.exit(1);
+}
 
 if (APPLY) {
   unwrap(await db.from("weekly_lineup_snapshot").delete().eq("schedule_week_id", weekRow.id).select("id"));
