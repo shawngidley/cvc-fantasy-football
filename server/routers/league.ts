@@ -1922,13 +1922,25 @@ export const leagueRouter = router({
   liveScoringBoard: publicProcedure.input(z.object({ weekNumber: z.number().int().optional() }).optional()).query(async ({ input }) => {
     const { season } = await getCurrentLeagueAndSeason();
     const weeks = unwrap(await supabase.from("schedule_week").select("id, week_number, label, status").eq("season_id", season.id).order("week_number")) ?? [];
+    const currentWeek = await resolveEffectivePlanningWeek(weeks, season.id);
     const week = input?.weekNumber != null
       ? weeks.find(item => item.week_number === input.weekNumber) ?? null
-      : await resolveEffectivePlanningWeek(weeks, season.id);
+      : currentWeek;
     if (!week) return { week: null, matchups: [] };
+    // A past week is scored off the frozen weekly_lineup_snapshot, so read the lineup
+    // from there too. Reading roster_assignment (the CURRENT roster) for a completed
+    // week applied that week's stats to today's teams, so this page and the Schedule
+    // page disagreed for any franchise that had made a roster move since -- differing
+    // in whichever direction the churn went, and agreeing only for franchises that had
+    // not touched their roster at all. lineupForWeek already resolves past weeks this
+    // way; this is the same rule, so the two pages now agree by construction.
+    const isPastWeek = currentWeek != null && week.week_number < currentWeek.week_number;
     const matchups = unwrap(await supabase.from("matchup").select("id, home_franchise_id, away_franchise_id, home_score, away_score, result_state, home:home_franchise_id(id, name, logo_url), away:away_franchise_id(id, name, logo_url)").eq("schedule_week_id", week.id).order("created_at")) ?? [];
     const franchiseIds = Array.from(new Set(matchups.flatMap(item => [item.home_franchise_id, item.away_franchise_id])));
-    const assignments = franchiseIds.length ? unwrap(await supabase.from("roster_assignment").select("id, franchise_id, assigned_slot_code, player:player_id(id, display_name, position, nfl_team, metadata)").eq("season_id", season.id).in("franchise_id", franchiseIds).is("released_at", null)) ?? [] : [];
+    const snapshotLineup = isPastWeek && franchiseIds.length
+      ? (unwrap(await supabase.from("weekly_lineup_snapshot").select("id, franchise_id, slot_code, player:player_id(id, display_name, position, nfl_team, metadata)").eq("schedule_week_id", week.id).in("franchise_id", franchiseIds)) ?? []).map((row: any) => ({ id: row.id, franchise_id: row.franchise_id, assigned_slot_code: row.slot_code, player: row.player }))
+      : null;
+    const assignments = snapshotLineup ?? (franchiseIds.length ? unwrap(await supabase.from("roster_assignment").select("id, franchise_id, assigned_slot_code, player:player_id(id, display_name, position, nfl_team, metadata)").eq("season_id", season.id).in("franchise_id", franchiseIds).is("released_at", null)) ?? [] : []);
     const lineupFor = (franchiseId: string) => franchiseLiveLineup(assignments, franchiseId);
     const franchise = (value: unknown) => Array.isArray(value) ? value[0] as { name?: string; logo_url?: string | null } | undefined : value as { name?: string; logo_url?: string | null } | null;
     return {
