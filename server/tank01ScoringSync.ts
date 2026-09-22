@@ -100,12 +100,78 @@ async function currentContext(forceWeekNumber?: number) {
   return { season, week, weeks };
 }
 
-async function snapshotLineups(seasonId: string, weekId: string, franchiseIds: string[]) {
-  const existing = unwrap(await supabase.from("weekly_lineup_snapshot").select("franchise_id, player_id").eq("schedule_week_id", weekId)) ?? [];
-  if (existing.length) return;
-  const assignments = unwrap(await supabase.from("roster_assignment").select("id, franchise_id, player_id, assigned_slot_code").eq("season_id", seasonId).in("franchise_id", franchiseIds).is("released_at", null).not("assigned_slot_code", "is", null)) ?? [];
-  if (!assignments.length) return;
-  unwrap(await supabase.from("weekly_lineup_snapshot").insert(assignments.map(item => ({ season_id: seasonId, schedule_week_id: weekId, franchise_id: item.franchise_id, player_id: item.player_id, roster_assignment_id: item.id, slot_code: item.assigned_slot_code }))));
+/** Keeps a week's locked-lineup snapshot in sync with roster/lineup moves made before
+ * a player's game kicks off, and freezes each player's entry the instant their game
+ * starts -- replacing the previous all-or-nothing behavior (snapshot once, on
+ * whichever sync call happened to run first for the week, then never touched again
+ * for the rest of the week no matter what changed).
+ *
+ * Confirmed real production bug this fixes: CVC's free-agent claims resolve
+ * continuously through the 9am-1pm ET Sunday window (confirmFreeAgentClaim /
+ * awardFreeAgentClaimNow), and the very first sync call for a week can land before
+ * that window closes -- e.g. triggered by an earlier Sunday slate, or a Thursday-
+ * night game the week before. A claim awarded at 1:00pm ET, minutes before that
+ * franchise's own game kicked off, was previously locked out of the week's official
+ * score entirely: the one-time snapshot had already captured the old lineup and
+ * nothing ever revisited it. Confirmed live in Week 2: Xavier Musketeers claimed
+ * Konata Mumpfield and started him at WR at 1:00:14pm ET; the old snapshot logic
+ * never picked him up, so the persisted matchup score undercounted by his full point
+ * total while the Live Scoring page (which always reads the CURRENT roster, not the
+ * snapshot) showed the real number.
+ *
+ * Per player, per this week:
+ *   - Game not yet kicked off (or no game found this week -- a bye stays open the
+ *     whole week): the snapshot row is kept in sync with the CURRENT roster
+ *     assignment (which franchise, which slot, whether it should exist at all) on
+ *     every sync call.
+ *   - Game already kicked off: frozen. An existing row is left exactly as it was at
+ *     the moment of freeze, even if the roster changes afterward -- this is what
+ *     "locked in" is supposed to mean, and matches the game-started lock already
+ *     enforced on lineup edits, cuts and free-agent acquisitions elsewhere. A row
+ *     that's missing entirely for an already-started player is still written once
+ *     (never updated again after) -- this is the only way a legitimate post-kickoff
+ *     commissioner override (e.g. restoreCutPlayer reinstating a wrongly-cut player)
+ *     can actually end up counting.
+ *   - A not-yet-locked player who left this franchise's roster entirely before their
+ *     game started (traded, cut, moved) has their now-stale row removed, so they
+ *     stop scoring for a team they're no longer on. A locked player's row is never
+ *     removed, for the same freeze reason as above.
+ */
+async function reconcileLineupSnapshot(seasonId: string, weekId: string, franchiseIds: string[], games: { away?: string; home?: string; gameDate?: string; gameTime?: string }[]) {
+  if (!franchiseIds.length) return;
+  type AssignmentRow = { id: string; franchise_id: string; player_id: string; assigned_slot_code: string | null; player: { nfl_team: string | null } | { nfl_team: string | null }[] | null };
+  const assignments = (unwrap(await supabase.from("roster_assignment").select("id, franchise_id, player_id, assigned_slot_code, player:player_id(nfl_team)").eq("season_id", seasonId).in("franchise_id", franchiseIds).is("released_at", null).not("assigned_slot_code", "is", null)) ?? []) as AssignmentRow[];
+  type ExistingRow = { id: string; franchise_id: string; player_id: string; slot_code: string; roster_assignment_id: string | null; player: { nfl_team: string | null } | { nfl_team: string | null }[] | null };
+  const existing = (unwrap(await supabase.from("weekly_lineup_snapshot").select("id, franchise_id, player_id, slot_code, roster_assignment_id, player:player_id(nfl_team)").eq("schedule_week_id", weekId)) ?? []) as ExistingRow[];
+  const existingByKey = new Map(existing.map(row => [`${row.franchise_id}:${row.player_id}`, row]));
+
+  const lockedTeams = new Set<string>();
+  for (const game of games) {
+    if (!hasKickedOff(game.gameDate, game.gameTime)) continue;
+    if (game.away) lockedTeams.add(normalizeTeam(game.away));
+    if (game.home) lockedTeams.add(normalizeTeam(game.home));
+  }
+  const nflTeamOf = (player: { nfl_team: string | null } | { nfl_team: string | null }[] | null) => (Array.isArray(player) ? player[0] : player)?.nfl_team ?? null;
+  const isLocked = (nflTeam: string | null) => Boolean(nflTeam && lockedTeams.has(normalizeTeam(nflTeam)));
+
+  const toUpsert: { season_id: string; schedule_week_id: string; franchise_id: string; player_id: string; roster_assignment_id: string; slot_code: string }[] = [];
+  const currentKeys = new Set<string>();
+  for (const row of assignments) {
+    const key = `${row.franchise_id}:${row.player_id}`;
+    currentKeys.add(key);
+    const prior = existingByKey.get(key);
+    if (isLocked(nflTeamOf(row.player))) {
+      if (!prior) toUpsert.push({ season_id: seasonId, schedule_week_id: weekId, franchise_id: row.franchise_id, player_id: row.player_id, roster_assignment_id: row.id, slot_code: row.assigned_slot_code as string });
+      continue; // frozen once a row exists -- never overwrite a locked player's entry
+    }
+    if (!prior || prior.slot_code !== row.assigned_slot_code || prior.roster_assignment_id !== row.id) {
+      toUpsert.push({ season_id: seasonId, schedule_week_id: weekId, franchise_id: row.franchise_id, player_id: row.player_id, roster_assignment_id: row.id, slot_code: row.assigned_slot_code as string });
+    }
+  }
+  if (toUpsert.length) unwrap(await supabase.from("weekly_lineup_snapshot").upsert(toUpsert, { onConflict: "schedule_week_id,franchise_id,player_id" }));
+
+  const staleIds = existing.filter(row => !currentKeys.has(`${row.franchise_id}:${row.player_id}`) && !isLocked(nflTeamOf(row.player))).map(row => row.id);
+  if (staleIds.length) unwrap(await supabase.from("weekly_lineup_snapshot").delete().in("id", staleIds));
 }
 
 /** Fetches every kicked-off game's box score for the week and returns raw stat lines
@@ -189,8 +255,7 @@ export function applyEspnKickerOverrides(statLines: Map<string, Tank01LiveStats>
   }
 }
 
-async function tankStatLinesForWeek(adapter: Tank01NFLDataAdapter, nflWeek: number, seasonYear: number) {
-  const games = await adapter.listGamesForWeek(nflWeek, seasonYear);
+async function tankStatLinesForWeek(adapter: Tank01NFLDataAdapter, games: Awaited<ReturnType<Tank01NFLDataAdapter["listGamesForWeek"]>>) {
   const kickedOffGames = games.filter(game => game.gameID && hasKickedOff(game.gameDate, game.gameTime));
   const statLines = new Map<string, Tank01LiveStats>();
   const gameStatuses = await mapWithConcurrencyLimit(kickedOffGames, 5, async game => {
@@ -214,7 +279,7 @@ async function tankStatLinesForWeek(adapter: Tank01NFLDataAdapter, nflWeek: numb
   });
   const kickerEvents = await fetchEspnKickerEventsForWeek(kickedOffGames);
   applyEspnKickerOverrides(statLines, kickerEvents);
-  return { statLines, games, gameStatuses };
+  return { statLines, gameStatuses };
 }
 
 /** Idempotent provider-only score reconciliation. Called by the authenticated Heartbeat
@@ -233,9 +298,13 @@ export async function syncTank01Scores(now = new Date(), forceWeekNumber?: numbe
   const franchiseIds = Array.from(new Set(matchups.flatMap(item => [item.home_franchise_id, item.away_franchise_id])));
   const alreadySnapshotted = unwrap(await supabase.from("weekly_lineup_snapshot").select("id").eq("schedule_week_id", week.id).limit(1)) ?? [];
   if (!alreadySnapshotted.length) await promotePlannedLineupForWeek(season.id, week.id, week.week_number, franchiseIds);
-  await snapshotLineups(season.id, week.id, franchiseIds);
+  const games = await adapter.listGamesForWeek(week.week_number, season.year);
+  // Reconciles every sync call, not just the first one for the week -- see
+  // reconcileLineupSnapshot's own comment for why a one-time snapshot silently
+  // undercounted legitimate pre-kickoff roster moves.
+  await reconcileLineupSnapshot(season.id, week.id, franchiseIds, games);
   const snapshots = unwrap(await supabase.from("weekly_lineup_snapshot").select("franchise_id, slot_code, player:player_id(id, display_name, position, nfl_team)").eq("schedule_week_id", week.id)) as SnapshotRow[] ?? [];
-  const { statLines, games, gameStatuses } = await tankStatLinesForWeek(adapter, week.week_number, season.year);
+  const { statLines, gameStatuses } = await tankStatLinesForWeek(adapter, games);
   if (!statLines.size) {
     unwrap(await supabase.from("tank01_scoring_sync_state").upsert({ season_id: season.id, last_attempt_at: now.toISOString(), last_error: null, updated_at: now.toISOString() }, { onConflict: "season_id" }).select("id").single());
     return { status: "skipped", weekLabel: week.label, matchupsUpdated: 0, reason: `Tank01 has not published box-score data for this CVC week. [debug: season.year=${season.year}, week.week_number=${week.week_number}, Tank01 games found=${games.length}, kicked-off games=${gameStatuses.length}]` };

@@ -1332,16 +1332,22 @@ export const leagueRouter = router({
   // it only ever looks for a "live" or "upcoming" week. Without this, fixing a scoring
   // bug after a week has already finalized would appear to do nothing when re-run,
   // since the sync silently skips straight past that week to whatever's next.
-  // Confirmed real data problem: Week 1's weekly_lineup_snapshot was captured once,
-  // very early (this table is only ever written once per week, then locked forever --
-  // it explicitly skips re-writing itself if any row already exists for that week),
-  // and it doesn't match the real Week 1 rosters (confirmed directly: a player who was
-  // never actually on a franchise's roster ended up snapshotted onto it). Since
-  // snapshotLineups only skips re-taking a week's snapshot when rows already exist,
-  // deleting the bad rows here lets the very next forceRecomputeWeek call re-take the
-  // snapshot fresh from the current roster_assignment (confirmed as the accurate
-  // source -- it's what the Rosters page itself reads) and correctly re-score
-  // everything, including re-resolving the skin.
+  // Historically this was also needed for a second, now-fixed reason: the snapshot
+  // used to be captured once, very early, then locked forever for the rest of the
+  // week no matter what changed -- so a legitimate roster move made before a
+  // player's own game kicked off (confirmed real case: a free-agent claim awarded at
+  // 1:00pm ET, minutes before that franchise's game started) never made it into the
+  // snapshot and silently undercounted the official score. tank01ScoringSync's
+  // reconcileLineupSnapshot now keeps every not-yet-locked player's snapshot row in
+  // sync with the current roster on every sync call, freezing each player only once
+  // their own game has actually started -- so that specific failure mode should
+  // self-heal on the next normal sync without needing this button at all. This full
+  // reset remains useful as a blunt last resort (e.g. a genuinely corrupted snapshot
+  // row that reconciliation, which only ever adds/updates/removes per-player, can't
+  // clean up some other way): deleting everything here lets the very next
+  // forceRecomputeWeek call rebuild the week's snapshot from scratch off the current
+  // roster_assignment (confirmed as the accurate source -- it's what the Rosters page
+  // itself reads) and correctly re-score everything, including re-resolving the skin.
   resetWeekSnapshot: protectedProcedure.input(z.object({ weekNumber: z.number().int().positive() })).mutation(async ({ ctx, input }) => {
     await requireCommissioner({ openId: ctx.user.openId });
     const { season } = await getCurrentLeagueAndSeason();
