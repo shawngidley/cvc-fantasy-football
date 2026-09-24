@@ -1,6 +1,7 @@
 import { supabase, unwrap } from "./supabase";
 import { computeFranchiseStandings, getFaabBalance, MAX_ROSTER_SIZE, rankBidPeriodCandidates, resolveWaiverAssignments, selectFreeAgentCandidates, sortByWorstRecordFirst, type WaiverCandidateBid } from "./waiverRules";
 import { computeNextResolutionTime, nextEasternWeekdayAt, sameEasternDayAt } from "./waiverResolutionTiming";
+import { hasClearedWaiverHold } from "./waiverHold";
 
 type PendingBid = { id: string; franchise_id: string; player_id: string; drop_player_id: string | null; amount: number; max_players_desired: number; priority: number; bid_group_id: string | null; confirmed_at: string | null };
 
@@ -136,6 +137,9 @@ export type WaiverResolutionSummary = {
   awarded: WaiverAwardResult[];
   skipped: WaiverSkipResult[];
   nextPeriodLabel: string | null;
+  /** Bids left pending because their player was cut less than 48 hours before this
+   * resolution -- carried into the next bid period rather than awarded or lost. */
+  carriedOver: number;
 };
 
 /** The type of the period that opens right after a period closing on `closesAt`.
@@ -172,6 +176,17 @@ async function createNextWaiverPeriod(seasonId: string, previousClosesAt: Date, 
   }
   const label = type === "free" ? "Free agent period (waiver priority, $1)" : (nextCloses.getUTCDay() === 4 ? "Thursday waiver period" : "Sunday waiver period");
   const created = unwrap(await supabase.from("waiver_period").insert({ season_id: seasonId, label, opens_at: opensAt.toISOString(), closes_at: nextCloses.toISOString(), status: "open", period_type: type }).select("id, label").single());
+  // Carry any still-pending (held) bids forward into a newly opened BID period. After
+  // a resolution the only pending faab_bids left in the season are ones held by the
+  // 48-hour rule, so re-pointing every pending bid at the new period picks exactly
+  // those up. Skipped for a free period -- FAAB bids never resolve in the free window,
+  // so held bids wait on their old (finalized) period until the next bid period opens.
+  if (created && type !== "free") {
+    const seasonPeriodIds = (unwrap(await supabase.from("waiver_period").select("id").eq("season_id", seasonId)) ?? []).map(row => row.id).filter(id => id !== created.id);
+    if (seasonPeriodIds.length) {
+      unwrap(await supabase.from("faab_bid").update({ waiver_period_id: created.id }).eq("status", "pending").in("waiver_period_id", seasonPeriodIds).select("id"));
+    }
+  }
   return created?.label ?? null;
 }
 
@@ -202,7 +217,44 @@ export async function resolveOpenWaiverPeriod(): Promise<WaiverResolutionSummary
 
   const seasonId = period.season_id;
   const periodType = (period.period_type ?? "bid") as "bid" | "free";
-  const pendingBids = (unwrap(await supabase.from("faab_bid").select("id, franchise_id, player_id, drop_player_id, amount, max_players_desired, priority, bid_group_id, confirmed_at").eq("waiver_period_id", period.id).eq("status", "pending")) ?? []) as PendingBid[];
+  const allPendingBids = (unwrap(await supabase.from("faab_bid").select("id, franchise_id, player_id, drop_player_id, amount, max_players_desired, priority, bid_group_id, confirmed_at").eq("waiver_period_id", period.id).eq("status", "pending")) ?? []) as PendingBid[];
+
+  // 48-hour waiver hold + already-rostered guard, applied before anything is
+  // awarded. A player cut less than 48 hours before this resolution is HELD: on a
+  // bid period their claim stays pending and is carried into the next bid period
+  // (see createNextWaiverPeriod's sweep); on the Sunday free period it can't be
+  // picked up at all, so it's retired (in practice a free-period claim only ever
+  // reaches here unconfirmed -- a confirmed one is already awarded immediately by
+  // awardFreeAgentClaimNow, which enforces this same hold at submit time instead).
+  // A player already back on a roster (won elsewhere in the interim) can never be
+  // won again, so those claims are retired too. Everything that survives is
+  // genuinely eligible for this resolution.
+  const involvedPlayerIdsForHold = Array.from(new Set(allPendingBids.map(bid => bid.player_id)));
+  const droppedAtByPlayer = new Map<string, string>();
+  const rosteredPlayerIds = new Set<string>();
+  if (involvedPlayerIdsForHold.length) {
+    const releasedRows = unwrap(await supabase.from("roster_assignment").select("player_id, released_at").eq("season_id", seasonId).in("player_id", involvedPlayerIdsForHold).not("released_at", "is", null)) ?? [];
+    for (const row of releasedRows) {
+      const current = droppedAtByPlayer.get(row.player_id);
+      if (!current || new Date(row.released_at).getTime() > new Date(current).getTime()) droppedAtByPlayer.set(row.player_id, row.released_at);
+    }
+    const activeRows = unwrap(await supabase.from("roster_assignment").select("player_id").eq("season_id", seasonId).in("player_id", involvedPlayerIdsForHold).is("released_at", null)) ?? [];
+    for (const row of activeRows) rosteredPlayerIds.add(row.player_id);
+  }
+  let carriedOverCount = 0;
+  const pendingBids: PendingBid[] = [];
+  for (const bid of allPendingBids) {
+    if (rosteredPlayerIds.has(bid.player_id)) {
+      unwrap(await supabase.from("faab_bid").update({ status: "lost", resolved_at: now.toISOString() }).eq("id", bid.id).select("id").single());
+      continue;
+    }
+    if (!hasClearedWaiverHold(droppedAtByPlayer.get(bid.player_id) ?? null, now)) {
+      if (periodType === "bid") { carriedOverCount += 1; continue; } // held: stays pending, carried forward
+      unwrap(await supabase.from("faab_bid").update({ status: "lost", resolved_at: now.toISOString() }).eq("id", bid.id).select("id").single());
+      continue;
+    }
+    pendingBids.push(bid);
+  }
 
   if (periodType === "free" && pendingBids.length) await ensureWaiverPriorityBootstrapped(seasonId);
 
@@ -362,5 +414,5 @@ export async function resolveOpenWaiverPeriod(): Promise<WaiverResolutionSummary
   unwrap(await supabase.from("waiver_period").update({ status: "final" }).eq("id", period.id).select("id").single());
   const nextPeriodLabel = await createNextWaiverPeriod(seasonId, period.closes_at ? new Date(period.closes_at) : now, periodType);
 
-  return { periodId: period.id, periodLabel: period.label, periodType, playersContested: byPlayer.size, awarded, skipped, nextPeriodLabel };
+  return { periodId: period.id, periodLabel: period.label, periodType, playersContested: byPlayer.size, awarded, skipped, nextPeriodLabel, carriedOver: carriedOverCount };
 }

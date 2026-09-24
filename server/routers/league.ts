@@ -14,6 +14,7 @@ import { syncNflTeamAssignments } from "../nflTeamAssignmentSync";
 import { getFaabBalance, MAX_ROSTER_SIZE, STARTING_FAAB } from "../waiverRules";
 import { awardFreeAgentClaimNow, resolveOpenWaiverPeriod } from "../waiverResolution";
 import { computeNextResolutionTime, nextRosterCutDeadline } from "../waiverResolutionTiming";
+import { getWaiverAwardDate, hasClearedWaiverHold } from "../waiverHold";
 import { syncFantasyProsSnapshot, syncFantasyProsActiveFlags, syncFantasyProsRookieFlags } from "../fantasyProsSync";
 import { syncTank01SeasonStats } from "../tank01SeasonStatsSync";
 import { syncTank01Scores } from "../tank01ScoringSync";
@@ -155,6 +156,33 @@ async function applyRookieLotteryResults(lotteryId: string, draftId: string, rou
  * the steady-state path. A past year (2023 and later, excluding the current season)
  * reads cvc_season_stats_historical instead, which has no such fallback since it's the
  * only source for those years at all. Players with no row anywhere are left as-is. */
+/** Adds the 48-hour waiver-hold timing to a list of free agents: droppedAt (their
+ * most recent cut this season, or null), heldForWaiver (still inside the 48h hold,
+ * so no free pickup yet), and awardDate (when a winning BID-PERIOD bid would be
+ * awarded -- the first Thu/Sun resolution at least 48h after the cut; not
+ * meaningful once a free-period claim clears the hold, since that's awarded
+ * immediately on confirm rather than at a scheduled resolution -- see
+ * awardFreeAgentClaimNow). Batched to keep the .in() URL within limits, same as
+ * attachSeasonStats. */
+async function attachWaiverTiming<T extends { id: string }>(players: T[], seasonId: string): Promise<(T & { droppedAt: string | null; heldForWaiver: boolean; awardDate: string })[]> {
+  if (!players.length) return players as (T & { droppedAt: string | null; heldForWaiver: boolean; awardDate: string })[];
+  const ids = players.map(player => player.id);
+  const releasedByPlayer = new Map<string, string>();
+  for (let index = 0; index < ids.length; index += 150) {
+    const batch = ids.slice(index, index + 150);
+    const rows = unwrap(await supabase.from("roster_assignment").select("player_id, released_at").eq("season_id", seasonId).in("player_id", batch).not("released_at", "is", null)) ?? [];
+    for (const row of rows) {
+      const current = releasedByPlayer.get(row.player_id);
+      if (!current || new Date(row.released_at).getTime() > new Date(current).getTime()) releasedByPlayer.set(row.player_id, row.released_at);
+    }
+  }
+  const nowDate = new Date();
+  return players.map(player => {
+    const droppedAt = releasedByPlayer.get(player.id) ?? null;
+    return { ...player, droppedAt, heldForWaiver: !hasClearedWaiverHold(droppedAt, nowDate), awardDate: getWaiverAwardDate(droppedAt, nowDate).toISOString() };
+  });
+}
+
 async function attachSeasonStats<T extends { id: string }>(players: T[], seasonId: string, year?: number, currentSeasonYear?: number): Promise<(T & { seasonStats?: Record<string, number | null> })[]> {
   if (!players.length) return players;
   // A single .in() clause with up to 1000 player UUIDs (36+ chars each, plus URL
@@ -785,7 +813,7 @@ export const leagueRouter = router({
       }
       tagged.sort((a, b) => a.display_name.localeCompare(b.display_name));
       const page = tagged.slice(0, limit);
-      return attachSeasonStats(page, season.id, input?.year, season.year);
+      return attachWaiverTiming(await attachSeasonStats(page, season.id, input?.year, season.year), season.id);
     }
 
     let playerQuery = supabase.from("player").select("id, provider, display_name, position, nfl_team, status, metadata").neq("provider", "placeholder").in("position", eligiblePositions).order("display_name").limit(limit + 220);
@@ -825,7 +853,7 @@ export const leagueRouter = router({
       const tag = latestCutTagByPlayerId.get(player.id);
       return tag ? { ...player, cutByFranchiseName: tag.franchiseName, cutTagType: tag.tagType } : player;
     });
-    return attachSeasonStats(tagged, season.id, input?.year, season.year);
+    return attachWaiverTiming(await attachSeasonStats(tagged, season.id, input?.year, season.year), season.id);
   }),
 
   // "All Players" tab equivalent -- same eligible-position pool as freeAgents, but
@@ -1456,6 +1484,16 @@ export const leagueRouter = router({
     const playerRow = unwrap(player);
     if (!playerRow) throw new TRPCError({ code: "NOT_FOUND", message: "CVC player was not found." });
     if (unwrap(activeAssignment)) throw new TRPCError({ code: "BAD_REQUEST", message: "Rostered players cannot be claimed through waivers." });
+    // 48-hour waiver hold: a player cut less than 48 hours ago can't be taken in the
+    // bid-exempt Sunday free pickup at all -- blocked here at submit time, since a
+    // free-period claim is awarded immediately once confirmed (awardFreeAgentClaimNow)
+    // rather than at a later resolution where a hold could otherwise be enforced.
+    if (isFreePeriod) {
+      const lastReleased = unwrap(await supabase.from("roster_assignment").select("released_at").eq("season_id", season.id).eq("player_id", input.playerId).not("released_at", "is", null).order("released_at", { ascending: false }).limit(1).maybeSingle());
+      if (!hasClearedWaiverHold(lastReleased?.released_at ?? null)) {
+        throw new TRPCError({ code: "BAD_REQUEST", message: `${playerRow.display_name} was cut less than 48 hours ago and isn't eligible for the free pickup yet.` });
+      }
+    }
     // Once a free agent's own game has started this week, they can't be picked up until
     // next week -- same shared check as the lineup-slot lock (see playerGameLock.ts).
     // Fails safe: if the check itself can't be completed, isPlayerLockedForGameStart

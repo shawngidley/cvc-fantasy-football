@@ -360,6 +360,14 @@ export function CvcFreeAgents() {
           {isFreePeriod ? <div className="flex flex-col gap-1"><span className="text-[10px] font-black uppercase tracking-[.08em] text-cvc-muted">Claim price</span><span className="rounded-md border border-white/20 bg-black/20 px-3 py-2 text-sm text-white">$1 flat</span></div> : <label className="flex flex-col gap-1"><span className="text-[10px] font-black uppercase tracking-[.08em] text-cvc-muted">Bid ($1–$30)</span><input value={amount} onChange={event => setAmount(event.target.value.replace(/\D/g, ""))} className="w-28 rounded-md border border-white/20 bg-black/20 px-3 py-2 text-sm text-white" inputMode="numeric" placeholder="$0" /></label>}
         </div>
 
+        {selectedPlayer?.awardDate ? (
+          isFreePeriod
+            ? (selectedPlayer?.heldForWaiver
+                ? <p className="mt-3 rounded-md border border-red-400/40 bg-red-500/10 px-3 py-2 text-center text-xs font-semibold text-red-200">Cut less than 48 hours ago, not eligible for the free pickup yet. Once the 48-hour hold clears, at the earliest {new Date(selectedPlayer.awardDate).toLocaleString("en-US", { weekday: "long", month: "short", day: "numeric", hour: "numeric", minute: "2-digit", timeZone: "America/New_York" })} ET, they'll be claimable again.</p>
+                : <p className="mt-3 rounded-md border border-amber-400/40 bg-amber-500/10 px-3 py-2 text-center text-xs font-semibold text-amber-200">If you win, you're awarded immediately once you confirm the claim</p>)
+            : <p className="mt-3 rounded-md border border-amber-400/40 bg-amber-500/10 px-3 py-2 text-center text-xs font-semibold text-amber-200">If you win, awarded {new Date(selectedPlayer.awardDate).toLocaleString("en-US", { weekday: "long", month: "short", day: "numeric", hour: "numeric", minute: "2-digit", timeZone: "America/New_York" })} ET</p>
+        ) : null}
+
         <p className="mt-4 text-center text-xs text-cvc-muted">{waiver.data?.period?.label ?? "Waiver"} · Bids are blind until the commissioner's resolution runs</p>
         {submit.error ? <p className="mt-2 text-center text-sm text-red-300">{submit.error.message}</p> : null}
 
