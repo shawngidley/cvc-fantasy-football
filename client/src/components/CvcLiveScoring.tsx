@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { Link } from "wouter";
-import { getKickerEventsForPlayer, groupKickerEventsForDisplay } from "@shared/espnKickerEvents";
+import { getKickerEventsForPlayer } from "@shared/espnKickerEvents";
 import { getCvcLivePoints, getCvcLiveStatLine, useCvcTank01LiveScores } from "@/hooks/useCvcTank01LiveScores";
 import { getCvcProjectedPoints, useCvcNFLProjections } from "@/hooks/useCvcNFLProjections";
 import { useCvcTank01PlayerProfiles, profileKey } from "@/hooks/useCvcTank01PlayerProfiles";
@@ -8,7 +8,7 @@ import { useCvcInjuryStatuses } from "@/hooks/useCvcInjuryStatuses";
 import { CvcInjuryBadge } from "@/components/CvcInjuryBadge";
 import { CvcPointsBreakdown } from "@/components/CvcPointsBreakdown";
 import { normalizePlayerName } from "@shared/playerNameMatch";
-import type { CvcScoringRule } from "@shared/cvcScoring";
+import { ruleValue, type CvcScoringRule } from "@shared/cvcScoring";
 import { minutesRemainingInGame, useCvcNFLGameStatus, type NflGameStatusMap } from "@/hooks/useCvcNFLGameStatus";
 import { shortenTeamName } from "@/lib/nflSchedule";
 import { trpc } from "@/lib/trpc";
@@ -41,13 +41,34 @@ function displayNameFor(player: any): string {
  * live under the same key as a real kicker's FG/XP stats -- so this checks for the
  * actual field-goal-specific fields rather than assuming Kicking always means
  * place-kicking. */
-export function statChips(stat: any): { label: string; value: string }[] {
-  const chips: { label: string; value: string }[] = [];
+export function statChips(stat: any): { label: string; value: string; negative?: boolean }[] {
+  const chips: { label: string; value: string; negative?: boolean }[] = [];
   const passing = stat?.Passing; const rushing = stat?.Rushing; const receiving = stat?.Receiving; const defense = stat?.Defense; const kicking = stat?.Kicking;
-  if (passing && Number(passing.passAttempts) > 0) chips.push({ label: "C/ATT", value: `${passing.passCompletions ?? 0}/${passing.passAttempts ?? 0}` }, { label: "YDS", value: String(passing.passYds ?? 0) }, { label: "TD", value: String(passing.passTD ?? 0) }, { label: "INT", value: String(passing.int ?? 0) });
-  if (rushing && Number(rushing.carries) > 0) chips.push({ label: "CAR", value: String(rushing.carries ?? 0) }, { label: "YDS", value: String(rushing.rushYds ?? 0) }, { label: "TD", value: String(rushing.rushTD ?? 0) });
-  if (receiving && (Number(receiving.targets) > 0 || Number(receiving.receptions) > 0)) chips.push({ label: "REC", value: `${receiving.receptions ?? 0}/${receiving.targets ?? 0}` }, { label: "YDS", value: String(receiving.recYds ?? 0) }, { label: "TD", value: String(receiving.recTD ?? 0) });
-  if (kicking && (kicking.fgMade !== undefined || kicking.xpMade !== undefined)) chips.push({ label: "FG", value: String(kicking.fgMade ?? 0) }, { label: "XP", value: String(kicking.xpMade ?? 0) });
+  const num = (value: unknown) => Number(value ?? 0);
+  // Each chip is only shown when its category actually has a stat -- a 0 TD / 0 INT
+  // (etc.) is dropped rather than shown as an empty "0" chip. Yardage uses !== 0 so a
+  // negative (e.g. a QB kneel or sack) still shows. Interceptions thrown are a penalty,
+  // so the QB INT chip is marked negative and rendered red, matching WRC.
+  if (passing && num(passing.passAttempts) > 0) {
+    chips.push({ label: "C/ATT", value: `${num(passing.passCompletions)}/${num(passing.passAttempts)}` });
+    if (num(passing.passYds) !== 0) chips.push({ label: "YDS", value: String(num(passing.passYds)) });
+    if (num(passing.passTD) > 0) chips.push({ label: "TD", value: String(num(passing.passTD)) });
+    if (num(passing.int) > 0) chips.push({ label: "INT", value: String(num(passing.int)), negative: true });
+  }
+  if (rushing && num(rushing.carries) > 0) {
+    chips.push({ label: "CAR", value: String(num(rushing.carries)) });
+    if (num(rushing.rushYds) !== 0) chips.push({ label: "YDS", value: String(num(rushing.rushYds)) });
+    if (num(rushing.rushTD) > 0) chips.push({ label: "TD", value: String(num(rushing.rushTD)) });
+  }
+  if (receiving && (num(receiving.targets) > 0 || num(receiving.receptions) > 0)) {
+    chips.push({ label: "REC", value: `${num(receiving.receptions)}/${num(receiving.targets)}` });
+    if (num(receiving.recYds) !== 0) chips.push({ label: "YDS", value: String(num(receiving.recYds)) });
+    if (num(receiving.recTD) > 0) chips.push({ label: "TD", value: String(num(receiving.recTD)) });
+  }
+  if (kicking) {
+    if (num(kicking.fgMade) > 0) chips.push({ label: "FG", value: String(num(kicking.fgMade)) });
+    if (num(kicking.xpMade) > 0) chips.push({ label: "XP", value: String(num(kicking.xpMade)) });
+  }
   if (defense && Number(defense.totalTackles) > 0) chips.push({ label: "TKL", value: String(defense.totalTackles ?? 0) });
   if (defense && Number(defense.sacks) > 0) chips.push({ label: "SACK", value: String(defense.sacks) });
   if (defense && Number(defense.defensiveInterceptions) > 0) chips.push({ label: "INT", value: String(defense.defensiveInterceptions) });
@@ -191,12 +212,16 @@ function LineupRow({ away, home, slot, points, live, profiles, injuryStatuses, p
   const awayChips = chipsFor(away); const homeChips = chipsFor(home);
   const kickerEventsFor = (entry: any) => entry?.player?.position === "K" ? getKickerEventsForPlayer(live.kickerEvents, entry.player.display_name) : [];
   const awayKickerEvents = kickerEventsFor(away); const homeKickerEvents = kickerEventsFor(home);
-  const ChipRow = ({ chips, align }: { chips: { label: string; value: string }[]; align: "left" | "right" }) => chips.length ? <div className={`mt-1 flex flex-wrap gap-1 ${align === "right" ? "justify-end" : ""}`}>{chips.map((chip, index) => <span key={index} className="inline-flex items-center gap-0.5 rounded border border-slate-200 bg-slate-50 px-1 py-0.5 text-[8px] font-semibold text-slate-600 sm:text-[9px]"><span className="text-slate-400">{chip.label}</span>{chip.value}</span>)}</div> : null;
-  // Individual kick-by-kick chips (e.g. "54 yd FG made") -- separate from the regular
-  // made-count stat chips, matching WRC's own "event chips" for kickers.
+  const ChipRow = ({ chips, align }: { chips: { label: string; value: string; negative?: boolean }[]; align: "left" | "right" }) => chips.length ? <div className={`mt-1 flex flex-wrap gap-1 ${align === "right" ? "justify-end" : ""}`}>{chips.map((chip, index) => <span key={index} className={`inline-flex items-center gap-0.5 rounded border px-1 py-0.5 text-[8px] font-semibold sm:text-[9px] ${chip.negative ? "border-rose-200 bg-rose-50 text-rose-600" : "border-slate-200 bg-slate-50 text-slate-600"}`}><span className={chip.negative ? "text-rose-400" : "text-slate-400"}>{chip.label}</span>{chip.value}</span>)}</div> : null;
+  // Made field goals only, as a single chip listing each distance and the points CVC
+  // awards for them (kicker scoring is per FG yard, field_goal_yard rule). Matches
+  // WRC's kicker display, minus the missed-FG and XP chips, and uses the same neutral
+  // styling as every other stat chip rather than a special color.
   const KickerEventRow = ({ events, align }: { events: ReturnType<typeof getKickerEventsForPlayer>; align: "left" | "right" }) => {
-    const chips = groupKickerEventsForDisplay(events);
-    return chips.length ? <div className={`mt-1 flex flex-wrap gap-1 ${align === "right" ? "justify-end" : ""}`}>{chips.map(chip => <span key={chip.key} className={`rounded border px-1 py-0.5 text-[8px] font-bold sm:text-[9px] ${chip.outcome === "made" ? "border-emerald-200 bg-emerald-50 text-emerald-700" : "border-rose-200 bg-rose-50 text-rose-600"}`}>{chip.text}</span>)}</div> : null;
+    const yardages = events.filter(event => event.type === "fg" && event.outcome === "made").map(event => event.yards ?? 0);
+    if (!yardages.length) return null;
+    const points = yardages.reduce((total, yards) => total + yards, 0) * ruleValue(rules, "field_goal_yard", "K");
+    return <div className={`mt-1 flex flex-wrap gap-1 ${align === "right" ? "justify-end" : ""}`}><span className="inline-flex items-center gap-0.5 rounded border border-slate-200 bg-slate-50 px-1 py-0.5 text-[8px] font-semibold text-slate-600 sm:text-[9px]">{yardages.join(", ")} yd FG made (+{points.toFixed(1)})</span></div>;
   };
   const injuryFor = (entry: any) => entry?.player && !isDst(entry.player.position) ? injuryStatuses.statuses.get(normalizePlayerName(entry.player.display_name)) : undefined;
   const awayInjury = injuryFor(away); const homeInjury = injuryFor(home);

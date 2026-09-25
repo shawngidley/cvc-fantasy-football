@@ -19,7 +19,7 @@ const numeric = (value: unknown): number => {
   return Number.isFinite(parsed) ? parsed : 0;
 };
 
-const ruleValue = (rules: CvcScoringRule[], statKey: string, position: string): number => {
+export const ruleValue = (rules: CvcScoringRule[], statKey: string, position: string): number => {
   const rule = rules.find(candidate => candidate.stat_key === statKey && (!candidate.applies_to_positions?.length || candidate.applies_to_positions.includes(position)));
   return rule ? numeric(rule.value) : 0;
 };
