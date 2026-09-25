@@ -1,11 +1,41 @@
 import { Archive, CalendarClock, DatabaseZap, Flag, Trophy } from "lucide-react";
 
-const tableHeaders = ["Year", "Champion", "Owner", "Championship result"];
+const tableHeaders = ["Year", "Owner", "Champion"];
+
+// Commissioner-provided CVC championship history (2000-2025), newest first.
+const champions = [
+  { year: 2025, owner: "Scott Mackar", team: "Xavier Musketeers" },
+  { year: 2024, owner: "Scott Mackar", team: "Xavier Musketeers" },
+  { year: 2023, owner: "David Sutton", team: "Shepard's Pie" },
+  { year: 2022, owner: "Justin Brock", team: "DS Warteaters" },
+  { year: 2021, owner: "Jonas Pattie", team: "The Super Snuffleupagus" },
+  { year: 2020, owner: "Jamie Yane", team: "The Four Horsemen" },
+  { year: 2019, owner: "Justin Brock", team: "DS Warteaters" },
+  { year: 2018, owner: "Shawn Gidley", team: "Vipers" },
+  { year: 2017, owner: "Shawn Gidley", team: "Vipers" },
+  { year: 2016, owner: "Shawn Gidley", team: "Vipers" },
+  { year: 2015, owner: "David Sotka", team: "Legends" },
+  { year: 2014, owner: "Brian Brickman", team: "Dresser Drawer Devices" },
+  { year: 2013, owner: "David Sutton", team: "Shepard's Pie" },
+  { year: 2012, owner: "Jonas Pattie", team: "The Super Snuffleupagus" },
+  { year: 2011, owner: "Justin Brock", team: "DS Warteaters" },
+  { year: 2010, owner: "David Sotka", team: "Legends" },
+  { year: 2009, owner: "Bill Krause", team: "Pimp Mack Daddies" },
+  { year: 2008, owner: "Justin Brock", team: "DS Warteaters" },
+  { year: 2007, owner: "Scott Nelson", team: "Miller Time" },
+  { year: 2006, owner: "Brian Brickman", team: "Dresser Drawer Devices" },
+  { year: 2005, owner: "Scott Nelson", team: "Miller Time" },
+  { year: 2004, owner: "Dan Osicki", team: "Pulsating Polish Peckers" },
+  { year: 2003, owner: "Jonas Pattie", team: "The Super Snuffleupagus" },
+  { year: 2002, owner: "Scott Nelson", team: "Miller Time" },
+  { year: 2001, owner: "Shawn Gidley", team: "Vipers" },
+  { year: 2000, owner: "Dan Osicki", team: "Pulsating Polish Peckers" },
+] as const;
 
 export function CvcHistory() {
   return <section className="min-h-screen bg-[#06121b] px-3 pb-14 pt-6 text-white sm:px-6"><div className="mx-auto max-w-5xl"><div className="mb-7"><p className="text-xs font-black uppercase tracking-[0.16em] text-cvc-accent">League archive</p><h1 className="mt-2 font-display text-5xl uppercase">Franchise History</h1><p className="mt-2 max-w-2xl text-sm text-slate-300">CVC champions, season standings, playoff results, and all-time franchise records.</p></div><ChampionsCard/><section className="mb-5 flex flex-wrap gap-2" aria-label="Historical season selector"><button disabled className="rounded-lg border border-white/15 bg-white/10 px-4 py-2 font-display text-sm uppercase tracking-[0.08em] text-white/60">No historical seasons imported</button></section><div className="grid gap-5 lg:grid-cols-[1.35fr_0.65fr]"><section className="overflow-hidden rounded-2xl border border-white/10 bg-white text-cvc-deep"><div className="h-1.5 bg-cvc-accent"/><header className="border-b border-slate-200 px-5 py-4"><h2 className="font-display text-2xl uppercase">Season Standings</h2><p className="mt-1 text-xs text-slate-500">Division records, head-to-head context, median results, and points will appear after a CVC season archive is imported.</p></header><EmptyArchive icon={Archive} title="CVC standings archive not imported" detail="Commissioner-approved historical division results are required before this table can show records or playoff berths."/></section><section className="overflow-hidden rounded-2xl border border-white/10 bg-white text-cvc-deep"><div className="h-1.5 bg-cvc-accent"/><header className="flex items-center gap-2 border-b border-slate-200 px-5 py-4"><Flag size={18} className="text-cvc-accent"/><h2 className="font-display text-2xl uppercase">Playoff Results</h2></header><EmptyArchive icon={CalendarClock} title="No CVC playoff archive yet" detail="Wild card, divisional, and championship results will be listed by season after approved historical playoffs are recorded."/></section></div><section className="mt-5 overflow-hidden rounded-2xl border border-white/10 bg-white text-cvc-deep"><div className="h-1.5 bg-cvc-accent"/><header className="border-b border-slate-200 px-5 py-4"><h2 className="font-display text-2xl uppercase">All-Time Franchise Records</h2><p className="mt-1 text-xs text-slate-500">Win-loss totals, winning percentage, and titles are calculated only from imported CVC seasons.</p></header><EmptyArchive icon={DatabaseZap} title="No CVC all-time totals to calculate" detail="Import at least one verified historical season to establish CVC all-time records. No WRC historical data is shown or assumed here."/></section><p className="mt-5 text-center text-xs text-slate-400">Historical archive is intentionally empty until CVC records are approved and imported.</p></div></section>;
 }
 
-function ChampionsCard() { return <section className="mb-5 overflow-hidden rounded-2xl border border-white/10 bg-white text-cvc-deep"><div className="flex items-center gap-2 bg-gradient-to-r from-amber-300 to-yellow-500 px-5 py-3"><Trophy size={17}/><h2 className="font-display text-xl uppercase tracking-[0.08em]">CVC Champions</h2></div><div className="overflow-x-auto"><table className="min-w-[620px] w-full text-left text-sm"><thead className="bg-[#123040] text-xs font-black uppercase tracking-[0.08em] text-white"><tr>{tableHeaders.map(header => <th className="px-5 py-3" key={header}>{header}</th>)}</tr></thead><tbody><tr><td colSpan={tableHeaders.length} className="px-5 py-8 text-center text-sm text-slate-500">No approved CVC championship history has been imported.</td></tr></tbody></table></div></section>; }
+function ChampionsCard() { return <section className="mb-5 overflow-hidden rounded-2xl border border-white/10 bg-white text-cvc-deep"><div className="flex items-center gap-2 bg-gradient-to-r from-amber-300 to-yellow-500 px-5 py-3"><Trophy size={17}/><h2 className="font-display text-xl uppercase tracking-[0.08em]">CVC Champions</h2></div><div className="overflow-x-auto"><table className="min-w-[480px] w-full text-left text-sm"><thead className="bg-[#123040] text-xs font-black uppercase tracking-[0.08em] text-white"><tr>{tableHeaders.map(header => <th className="px-5 py-3" key={header}>{header}</th>)}</tr></thead><tbody>{champions.map(row => <tr className="border-b border-slate-100 last:border-0 even:bg-slate-50" key={row.year}><td className="px-5 py-2.5 font-display text-base text-cvc-deep">{row.year}</td><td className="px-5 py-2.5">{row.owner}</td><td className="px-5 py-2.5 font-semibold">{row.team}</td></tr>)}</tbody></table></div></section>; }
 
 function EmptyArchive({ icon: Icon, title, detail }: { icon: typeof Archive; title: string; detail: string }) { return <div className="flex min-h-52 flex-col items-center justify-center px-7 py-8 text-center"><span className="mb-3 flex h-11 w-11 items-center justify-center rounded-full bg-[#e9f5ee] text-cvc-accent"><Icon size={21}/></span><h3 className="font-display text-xl uppercase">{title}</h3><p className="mt-2 max-w-md text-sm leading-6 text-slate-500">{detail}</p></div>; }
