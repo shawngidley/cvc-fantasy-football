@@ -69,7 +69,6 @@ export function statChips(stat: any): { label: string; value: string; negative?:
     if (num(kicking.fgMade) > 0) chips.push({ label: "FG", value: String(num(kicking.fgMade)) });
     if (num(kicking.xpMade) > 0) chips.push({ label: "XP", value: String(num(kicking.xpMade)) });
   }
-  if (defense && Number(defense.totalTackles) > 0) chips.push({ label: "TKL", value: String(defense.totalTackles ?? 0) });
   if (defense && Number(defense.sacks) > 0) chips.push({ label: "SACK", value: String(defense.sacks) });
   if (defense && Number(defense.defensiveInterceptions) > 0) chips.push({ label: "INT", value: String(defense.defensiveInterceptions) });
   if (defense && Number(defense.fumblesRecovered) > 0) chips.push({ label: "FR", value: String(defense.fumblesRecovered) });
