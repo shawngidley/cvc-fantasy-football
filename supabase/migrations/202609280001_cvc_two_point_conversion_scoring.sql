@@ -16,7 +16,10 @@
 -- Safe to re-run: the table's own (season_id, stat_key, label) uniqueness makes the
 -- insert a no-op the second time.
 insert into public.scoring_rule (season_id, category, stat_key, label, value, applies_to_positions, display_order)
-select s.id, category, stat_key, label, 2, array['QB', 'RB', 'WR', 'TE'], display_order
+-- Columns are qualified as new_rules.* because public.season has its own `label`
+-- column (the season's display name), which makes a bare `label` ambiguous here and
+-- fails with 42702 rather than picking one.
+select s.id, new_rules.category, new_rules.stat_key, new_rules.label, 2, array['QB', 'RB', 'WR', 'TE'], new_rules.display_order
 from public.season as s
 cross join (values
   ('Passing', 'passing_two_point_conversion', 'Passing 2pt conversion', 15),
