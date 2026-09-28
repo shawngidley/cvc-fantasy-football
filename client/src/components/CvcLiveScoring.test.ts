@@ -31,11 +31,20 @@ describe("statChips (using the real confirmed live Drake Maye stat line)", () =>
     expect(statChips(undefined)).toEqual([]);
   });
 
-  it("shows defensive chips only for nonzero categories, for an individual defender", () => {
+  // fa2e6ce deliberately dropped the TKL chip: tackles have no CVC scoring rule, so
+  // it was informational only, and it also showed up on offensive players who happen
+  // to record a tackle (Tank01 attaches a Defense block to them). A defender with
+  // tackles but no scoring stat should now show no chips at all.
+  it("omits the TKL chip (tackles aren't a CVC scoring category), even for a defender who racked up several", () => {
     const defenderStat = { Defense: { totalTackles: "5", defTD: "0", forcedFumbles: "0", soloTackles: "4", tfl: "0", qbHits: "0", defensiveInterceptions: "0", sacks: "0", passDeflections: "0" } };
+    expect(statChips(defenderStat)).toEqual([]);
+  });
+
+  it("shows defensive chips only for nonzero scoring categories, for an individual defender", () => {
+    const defenderStat = { Defense: { totalTackles: "5", defTD: "0", forcedFumbles: "0", soloTackles: "4", tfl: "0", qbHits: "0", defensiveInterceptions: "0", sacks: "1", passDeflections: "0" } };
     const chips = statChips(defenderStat);
-    expect(chips).toContainEqual({ label: "TKL", value: "5" });
-    expect(chips.some(chip => chip.label === "SACK")).toBe(false);
+    expect(chips).toContainEqual({ label: "SACK", value: "1" });
+    expect(chips.some(chip => chip.label === "TKL")).toBe(false);
     expect(chips.some(chip => chip.label === "INT")).toBe(false);
   });
 
