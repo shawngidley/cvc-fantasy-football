@@ -112,6 +112,9 @@ var adapter = process.env.TANK01_RAPIDAPI_KEY ? new Tank01NFLDataAdapter(process
 // server/nflTeamAssignmentSync.ts
 import { parse } from "csv-parse/sync";
 
+// server/waiverHold.ts
+var WAIVER_HOLD_MS = 48 * 60 * 60 * 1e3;
+
 // server/fantasyProsArchive.ts
 import { createHash } from "node:crypto";
 var ARCHIVE_RETENTION_DAYS = 30;

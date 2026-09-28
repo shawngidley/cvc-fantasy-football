@@ -3,6 +3,9 @@ var numeric = (value) => {
   const parsed = typeof value === "number" ? value : Number.parseFloat(String(value ?? "0"));
   return Number.isFinite(parsed) ? parsed : 0;
 };
+var twoPointConversionCount = (category) => {
+  return numeric(category.twoPtMade ?? category.twoPointConversion ?? category.twoPointConversions ?? category.twoPtConversion ?? category.twoPtConversions ?? category.twoPointMade);
+};
 var ruleValue = (rules, statKey, position) => {
   const rule = rules.find((candidate) => candidate.stat_key === statKey && (!candidate.applies_to_positions?.length || candidate.applies_to_positions.includes(position)));
   return rule ? numeric(rule.value) : 0;
@@ -26,11 +29,15 @@ function calculateCvcFantasyPointsBreakdown(stats, position, rules) {
   add(`${int} INT thrown`, int * ruleValue(rules, "interception", position));
   const passYdBonus = ruleValue(rules, "passing_300_bonus", position) || ruleValue(rules, "passing_350_bonus", position);
   if (passYds >= 300) add("300+ passing yd bonus", passYdBonus);
+  const passTwoPt = twoPointConversionCount(passing);
+  add(`${passTwoPt} passing 2pt conversion${passTwoPt === 1 ? "" : "s"}`, passTwoPt * ruleValue(rules, "passing_two_point_conversion", position));
   const rushYds = numeric(rushing.rushYds);
   add(`${rushYds} rushing yds`, rushYds * ruleValue(rules, "rushing_yards", position));
   const rushTD = numeric(rushing.rushTD);
   add(`${rushTD} rushing TD${rushTD === 1 ? "" : "s"}`, rushTD * ruleValue(rules, "rushing_touchdown", position));
   if (rushYds >= 100) add("100+ rushing yd bonus", ruleValue(rules, "rushing_100_bonus", position));
+  const rushTwoPt = twoPointConversionCount(rushing);
+  add(`${rushTwoPt} rushing 2pt conversion${rushTwoPt === 1 ? "" : "s"}`, rushTwoPt * ruleValue(rules, "rushing_two_point_conversion", position));
   const recYds = numeric(receiving.recYds);
   add(`${recYds} receiving yds`, recYds * ruleValue(rules, "receiving_yards", position));
   const recTD = numeric(receiving.recTD);
@@ -38,6 +45,8 @@ function calculateCvcFantasyPointsBreakdown(stats, position, rules) {
   const receptions = numeric(receiving.receptions);
   add(`${receptions} reception${receptions === 1 ? "" : "s"}`, receptions * ruleValue(rules, "reception", position));
   if (recYds >= 100) add("100+ receiving yd bonus", ruleValue(rules, "receiving_100_bonus", position));
+  const recTwoPt = twoPointConversionCount(receiving);
+  add(`${recTwoPt} receiving 2pt conversion${recTwoPt === 1 ? "" : "s"}`, recTwoPt * ruleValue(rules, "receiving_two_point_conversion", position));
   const xpMade = numeric(kicking.xpMade);
   add(`${xpMade} extra point${xpMade === 1 ? "" : "s"} made`, xpMade * ruleValue(rules, "extra_point", position));
   const fgYds = numeric(kicking.fgYds ?? kicking.kickYards);
@@ -200,6 +209,9 @@ function normalizeNFLTeamCode(team) {
   const code = (team ?? "").trim().toUpperCase();
   return TEAM_CODE_ALIASES[code] ?? code;
 }
+
+// server/waiverHold.ts
+var WAIVER_HOLD_MS = 48 * 60 * 60 * 1e3;
 
 // server/dstSeasonAggregation.ts
 var numeric2 = (value) => {

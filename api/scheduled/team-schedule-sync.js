@@ -134,6 +134,9 @@ function easternWallClockToUtc(year, month, day, hour) {
   return new Date(asIfUtc - offsetMs);
 }
 
+// server/waiverHold.ts
+var WAIVER_HOLD_MS = 48 * 60 * 60 * 1e3;
+
 // server/nflTeamScheduleSync.ts
 var TEAM_CODE_ALIASES = { kan: "kc", tam: "tb", arz: "ari", jax: "jac", was: "wsh" };
 var NFL_TEAMS = [

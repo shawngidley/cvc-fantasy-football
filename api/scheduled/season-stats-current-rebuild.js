@@ -170,6 +170,9 @@ async function rebuildSeasonStatsCurrentForAllPlayers(seasonId) {
 // server/nflTeamAssignmentSync.ts
 import { parse } from "csv-parse/sync";
 
+// server/waiverHold.ts
+var WAIVER_HOLD_MS = 48 * 60 * 60 * 1e3;
+
 // server/fantasyProsNews.ts
 var LOCAL_CACHE_TTL_MS = 5 * 6e4;
 
