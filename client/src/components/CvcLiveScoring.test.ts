@@ -50,12 +50,31 @@ describe("statChips (using the real confirmed live Drake Maye stat line)", () =>
 
   it("shows a fumble-recovery chip for DST -- the actual confirmed bug: the real Week 1 CLE@JAX box score had Jacksonville's DST at fumblesRecovered: 1, sacks: 5, defensiveInterceptions: 1, but the live UI only ever showed SACK and INT, with no FR chip at all, even though the raw data (and the points total) had it", () => {
     const jaxDst = { Defense: { teamAbv: "JAX", defTD: "0", defensiveInterceptions: "1", sacks: "5", ydsAllowed: "272", fumblesRecovered: "1", ptsAllowed: "10", safeties: "0" } };
-    const chips = statChips(jaxDst);
+    const chips = statChips(jaxDst, "DST");
     expect(chips).toContainEqual({ label: "SACK", value: "5" });
     expect(chips).toContainEqual({ label: "INT", value: "1" });
     expect(chips).toContainEqual({ label: "FR", value: "1" });
     // Also confirms the new points-allowed chip, using this same real confirmed value.
     expect(chips).toContainEqual({ label: "PTS AGST", value: "10" });
+  });
+
+  // Fumble recovery has no CVC scoring rule outside DST (cvcScoring.ts only awards
+  // fumble_recovery when position === "DST"), but Tank01 attaches a Defense block to
+  // an offensive player too if they happen to recover one -- the actual confirmed
+  // bug: a live screenshot showed a TE (T. Kraft, GB) with an "FR 1" chip alongside
+  // his real receiving line, even though a TE's fumble recovery scores nothing in
+  // CVC. Same latent-chip-for-a-non-scoring-stat pattern as the TKL chip (fa2e6ce).
+  it("omits the FR chip for a non-DST player who recovered a fumble, since it doesn't score for them", () => {
+    const teWithFumbleRecovery = { Receiving: { receptions: "4", targets: "8", recYds: "26", recTD: "0" }, Defense: { fumblesRecovered: "1" } };
+    const chips = statChips(teWithFumbleRecovery, "TE");
+    expect(chips).toContainEqual({ label: "REC", value: "4/8" });
+    expect(chips.some(chip => chip.label === "FR")).toBe(false);
+  });
+
+  it("still shows the FR chip for a DST that recovered a fumble, even alongside a receiving-position case with no position passed at all (undefined defaults to non-DST, matching the safer omit-by-default behavior)", () => {
+    const unknownPositionFumble = { Defense: { fumblesRecovered: "1" } };
+    expect(statChips(unknownPositionFumble).some(chip => chip.label === "FR")).toBe(false);
+    expect(statChips(unknownPositionFumble, "DST")).toContainEqual({ label: "FR", value: "1" });
   });
 
   it("shows a defensive-TD chip and a safety chip for DST when nonzero, also previously missing entirely", () => {

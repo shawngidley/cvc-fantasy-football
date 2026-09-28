@@ -41,7 +41,7 @@ function displayNameFor(player: any): string {
  * live under the same key as a real kicker's FG/XP stats -- so this checks for the
  * actual field-goal-specific fields rather than assuming Kicking always means
  * place-kicking. */
-export function statChips(stat: any): { label: string; value: string; negative?: boolean }[] {
+export function statChips(stat: any, position?: string | null): { label: string; value: string; negative?: boolean }[] {
   const chips: { label: string; value: string; negative?: boolean }[] = [];
   const passing = stat?.Passing; const rushing = stat?.Rushing; const receiving = stat?.Receiving; const defense = stat?.Defense; const kicking = stat?.Kicking;
   const num = (value: unknown) => Number(value ?? 0);
@@ -71,7 +71,13 @@ export function statChips(stat: any): { label: string; value: string; negative?:
   }
   if (defense && Number(defense.sacks) > 0) chips.push({ label: "SACK", value: String(defense.sacks) });
   if (defense && Number(defense.defensiveInterceptions) > 0) chips.push({ label: "INT", value: String(defense.defensiveInterceptions) });
-  if (defense && Number(defense.fumblesRecovered) > 0) chips.push({ label: "FR", value: String(defense.fumblesRecovered) });
+  // Fumble recovery has no CVC scoring rule outside DST (shared/cvcScoring.ts only
+  // awards fumble_recovery when position === "DST"), but Tank01 attaches a Defense
+  // block to an offensive player too if they happen to recover one (e.g. a receiver
+  // on a muffed-punt recovery) -- same latent bug as the TKL chip fixed in fa2e6ce,
+  // where a chip was shown for a stat that scores nothing for that player. Gated to
+  // DST, same as the rule itself.
+  if (defense && isDst(position) && Number(defense.fumblesRecovered) > 0) chips.push({ label: "FR", value: String(defense.fumblesRecovered) });
   if (defense && Number(defense.defensiveOrSpecialTeamsTds ?? defense.defTD) > 0) chips.push({ label: "DEF TD", value: String(defense.defensiveOrSpecialTeamsTds ?? defense.defTD) });
   if (defense && Number(defense.safeties) > 0) chips.push({ label: "SFTY", value: String(defense.safeties) });
   if (defense) {
@@ -220,7 +226,7 @@ function LineupRow({ away, home, slot, points, live, profiles, injuryStatuses, p
   const emptyDetail = isBench ? "" : "Owner must set this slot";
   const projFor = (entry: any) => entry?.player ? getCvcProjectedPoints(projections, entry.player.display_name, isDst(entry.player.position) ? "DST" : entry.player.position, entry.player.nfl_team, rules) : null;
   const awayProj = projFor(away); const homeProj = projFor(home);
-  const chipsFor = (entry: any) => entry?.player ? statChips(getCvcLiveStatLine(live.statLines, entry.player.display_name, isDst(entry.player.position) ? "DST" : entry.player.position, entry.player.nfl_team)) : [];
+  const chipsFor = (entry: any) => entry?.player ? statChips(getCvcLiveStatLine(live.statLines, entry.player.display_name, isDst(entry.player.position) ? "DST" : entry.player.position, entry.player.nfl_team), entry.player.position) : [];
   const awayChips = chipsFor(away); const homeChips = chipsFor(home);
   const kickerEventsFor = (entry: any) => entry?.player?.position === "K" ? getKickerEventsForPlayer(live.kickerEvents, entry.player.display_name) : [];
   const awayKickerEvents = kickerEventsFor(away); const homeKickerEvents = kickerEventsFor(home);
