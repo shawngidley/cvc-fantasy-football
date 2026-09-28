@@ -79,23 +79,37 @@ describe("CVC scoring engine", () => {
     expect(points).toBe(380 * 0.05 + 5 + 110 * 0.1 + 5);
   });
 
-  // NOT YET CONFIRMED against a real Tank01 box score with a real 2-point conversion
-  // in it -- "twoPtMade" is this engine's best guess at Tank01's field name (matching
-  // its own xpMade/fgMade "Made" convention), tried alongside several other plausible
-  // spellings (see twoPointConversionCount's comment in cvcScoring.ts). These tests
-  // pin the chosen primary spelling and the scoring math around it; they cannot by
-  // themselves confirm Tank01 actually calls it that live.
+  // Confirmed live against the real Week 3 2026 BAL@DAL box score: CeeDee Lamb's
+  // real receiving 2-point conversion came back from Tank01 as
+  // Receiving.receivingTwoPointConversion, not any of this engine's original six
+  // guesses (twoPtMade and friends -- see twoPointConversionCount's comment in
+  // cvcScoring.ts) -- it was scoring 0 in production until this was found and fixed.
+  // Passing/rushing use the same category-prefixed pattern by inference from the
+  // confirmed receiving key, not yet individually confirmed against a real passing or
+  // rushing conversion.
   it("scores a 2-point conversion at 2 points each, for passing, rushing, and receiving", () => {
-    expect(calculateCvcFantasyPoints({ Passing: { twoPtMade: 1 } }, "QB", rules)).toBe(2);
-    expect(calculateCvcFantasyPoints({ Rushing: { twoPtMade: 1 } }, "RB", rules)).toBe(2);
-    expect(calculateCvcFantasyPoints({ Receiving: { twoPtMade: 1 } }, "WR", rules)).toBe(2);
+    expect(calculateCvcFantasyPoints({ Passing: { passingTwoPointConversion: 1 } }, "QB", rules)).toBe(2);
+    expect(calculateCvcFantasyPoints({ Rushing: { rushingTwoPointConversion: 1 } }, "RB", rules)).toBe(2);
+    expect(calculateCvcFantasyPoints({ Receiving: { receivingTwoPointConversion: 1 } }, "WR", rules)).toBe(2);
+  });
+
+  // The actual confirmed bug: CeeDee Lamb's real Week 3 2026 BAL@DAL stat line (7
+  // receptions, 112 yards, plus the 100+ receiving yd bonus) -- before this fix, his
+  // live points total was 19.7 with no 2pt conversion line in the breakdown at all,
+  // silently 2 points short of the real 21.7.
+  it("scores the real confirmed CeeDee Lamb Week 3 2026 stat line, including the 2pt conversion", () => {
+    const lambStats = { Receiving: { receptions: "7", recTD: "0", recAvg: "16.0", receivingTwoPointConversion: "1", longRec: "49", targets: "8", recYds: "112" } };
+    // 112 * 0.1 + 5 + 7 * 0.5 + 2 has a floating-point tail (21.700000000000003) that
+    // .toBe() won't match, same as the 299-passing-yards case above -- asserted as the
+    // plain literal instead, matching the function's own round-to-2-decimals output.
+    expect(calculateCvcFantasyPoints(lambStats, "WR", rules)).toBe(21.7);
   });
 
   it("stacks multiple 2-point conversions in the same game", () => {
-    expect(calculateCvcFantasyPoints({ Rushing: { twoPtMade: 2 } }, "RB", rules)).toBe(4);
+    expect(calculateCvcFantasyPoints({ Rushing: { rushingTwoPointConversion: 2 } }, "RB", rules)).toBe(4);
   });
 
-  it("also resolves the 2-point conversion count under alternate plausible Tank01 field spellings", () => {
+  it("also resolves the 2-point conversion count under the original fallback field spellings, in case passing or rushing ever turns out to use a different key than the confirmed receiving one", () => {
     expect(calculateCvcFantasyPoints({ Passing: { twoPointConversion: 1 } }, "QB", rules)).toBe(2);
     expect(calculateCvcFantasyPoints({ Rushing: { twoPointConversions: 1 } }, "RB", rules)).toBe(2);
     expect(calculateCvcFantasyPoints({ Receiving: { twoPtConversion: 1 } }, "WR", rules)).toBe(2);

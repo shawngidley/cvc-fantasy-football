@@ -20,19 +20,22 @@ const numeric = (value: unknown): number => {
 };
 
 /** Reads a 2-point-conversion count off a Passing/Rushing/Receiving stat object.
- * NOT CONFIRMED against a real Tank01 box score yet -- unlike every other field this
- * file reads (passYds, rushTD, recYds, ...), which were each individually verified
- * live before being wired in (see the comments throughout this file and
- * tank01ScoringSync.ts for that pattern), nobody has yet checked what Tank01 actually
- * calls this field, because doing so requires a live box score from a game with a
- * real 2-point conversion in it. Tries every plausible spelling rather than betting
- * on one, for the same reason the passing-yardage bonus resolves either
- * "passing_300_bonus" or "passing_350_bonus": guessing wrong here fails silently (a
- * missing field just reads as 0, not an error) and would look like "the 2pt change
- * never deployed" rather than a naming miss. Whoever verifies this against a live
- * conversion should collapse it to the one real key and delete the others. */
-const twoPointConversionCount = (category: Record<string, string | number | undefined>): number => {
-  return numeric(category.twoPtMade ?? category.twoPointConversion ?? category.twoPointConversions ?? category.twoPtConversion ?? category.twoPtConversions ?? category.twoPointMade);
+ * Confirmed live against the real Week 3 2026 BAL@DAL box score (CeeDee Lamb's
+ * receiving conversion, reported by the commissioner and checked against the raw
+ * Tank01 payload via the public /api/tank01 proxy): the receiving key is
+ * "receivingTwoPointConversion" -- none of this function's original six guesses
+ * (twoPtMade, twoPointConversion, twoPointConversions, twoPtConversion,
+ * twoPtConversions, twoPointMade) were right, which is exactly why that first
+ * version deliberately tried several rather than betting on one; it silently scored
+ * Lamb's conversion as 0 until this fix. Tank01 prefixes the category onto the stat
+ * name (receivingTwoPointConversion), so passingTwoPointConversion and
+ * rushingTwoPointConversion are used here as the same pattern applied to the other
+ * two categories -- reasonable given the confirmed receiving key, but NOT yet each
+ * individually confirmed against a real passing or rushing 2-point conversion. The
+ * original guesses are kept as a fallback for exactly that reason: if either of
+ * those two turns out to use a different key, this still won't silently score 0. */
+const twoPointConversionCount = (category: Record<string, string | number | undefined>, confirmedKey: string): number => {
+  return numeric(category[confirmedKey] ?? category.twoPtMade ?? category.twoPointConversion ?? category.twoPointConversions ?? category.twoPtConversion ?? category.twoPtConversions ?? category.twoPointMade);
 };
 
 export const ruleValue = (rules: CvcScoringRule[], statKey: string, position: string): number => {
@@ -74,7 +77,7 @@ export function calculateCvcFantasyPointsBreakdown(stats: Tank01LiveStats | null
   // running. Whichever key the row actually uses, it is matched once and added once.
   const passYdBonus = ruleValue(rules, "passing_300_bonus", position) || ruleValue(rules, "passing_350_bonus", position);
   if (passYds >= 300) add("300+ passing yd bonus", passYdBonus);
-  const passTwoPt = twoPointConversionCount(passing);
+  const passTwoPt = twoPointConversionCount(passing, "passingTwoPointConversion");
   add(`${passTwoPt} passing 2pt conversion${passTwoPt === 1 ? "" : "s"}`, passTwoPt * ruleValue(rules, "passing_two_point_conversion", position));
 
   const rushYds = numeric(rushing.rushYds);
@@ -82,7 +85,7 @@ export function calculateCvcFantasyPointsBreakdown(stats: Tank01LiveStats | null
   const rushTD = numeric(rushing.rushTD);
   add(`${rushTD} rushing TD${rushTD === 1 ? "" : "s"}`, rushTD * ruleValue(rules, "rushing_touchdown", position));
   if (rushYds >= 100) add("100+ rushing yd bonus", ruleValue(rules, "rushing_100_bonus", position));
-  const rushTwoPt = twoPointConversionCount(rushing);
+  const rushTwoPt = twoPointConversionCount(rushing, "rushingTwoPointConversion");
   add(`${rushTwoPt} rushing 2pt conversion${rushTwoPt === 1 ? "" : "s"}`, rushTwoPt * ruleValue(rules, "rushing_two_point_conversion", position));
 
   const recYds = numeric(receiving.recYds);
@@ -92,7 +95,7 @@ export function calculateCvcFantasyPointsBreakdown(stats: Tank01LiveStats | null
   const receptions = numeric(receiving.receptions);
   add(`${receptions} reception${receptions === 1 ? "" : "s"}`, receptions * ruleValue(rules, "reception", position));
   if (recYds >= 100) add("100+ receiving yd bonus", ruleValue(rules, "receiving_100_bonus", position));
-  const recTwoPt = twoPointConversionCount(receiving);
+  const recTwoPt = twoPointConversionCount(receiving, "receivingTwoPointConversion");
   add(`${recTwoPt} receiving 2pt conversion${recTwoPt === 1 ? "" : "s"}`, recTwoPt * ruleValue(rules, "receiving_two_point_conversion", position));
 
   const xpMade = numeric(kicking.xpMade);
