@@ -13,6 +13,9 @@ const rules: CvcScoringRule[] = [
   { stat_key: "passing_300_bonus", value: 5, applies_to_positions: ["QB", "RB", "WR", "TE"] },
   { stat_key: "rushing_100_bonus", value: 5, applies_to_positions: ["QB", "RB", "WR", "TE"] },
   { stat_key: "receiving_100_bonus", value: 5, applies_to_positions: ["QB", "RB", "WR", "TE"] },
+  { stat_key: "passing_two_point_conversion", value: 2, applies_to_positions: ["QB", "RB", "WR", "TE"] },
+  { stat_key: "rushing_two_point_conversion", value: 2, applies_to_positions: ["QB", "RB", "WR", "TE"] },
+  { stat_key: "receiving_two_point_conversion", value: 2, applies_to_positions: ["QB", "RB", "WR", "TE"] },
   { stat_key: "extra_point", value: 1, applies_to_positions: ["K"] },
   { stat_key: "field_goal_yard", value: 0.1, applies_to_positions: ["K"] },
   { stat_key: "fumble_recovery", value: 2, applies_to_positions: ["DST"] },
@@ -74,6 +77,28 @@ describe("CVC scoring engine", () => {
   it("can award multiple bonuses at once for a dual-threat stat line (e.g. 300+ passing and 100+ rushing in the same game)", () => {
     const points = calculateCvcFantasyPoints({ Passing: { passYds: 380 }, Rushing: { rushYds: 110 } }, "QB", rules);
     expect(points).toBe(380 * 0.05 + 5 + 110 * 0.1 + 5);
+  });
+
+  // NOT YET CONFIRMED against a real Tank01 box score with a real 2-point conversion
+  // in it -- "twoPtMade" is this engine's best guess at Tank01's field name (matching
+  // its own xpMade/fgMade "Made" convention), tried alongside several other plausible
+  // spellings (see twoPointConversionCount's comment in cvcScoring.ts). These tests
+  // pin the chosen primary spelling and the scoring math around it; they cannot by
+  // themselves confirm Tank01 actually calls it that live.
+  it("scores a 2-point conversion at 2 points each, for passing, rushing, and receiving", () => {
+    expect(calculateCvcFantasyPoints({ Passing: { twoPtMade: 1 } }, "QB", rules)).toBe(2);
+    expect(calculateCvcFantasyPoints({ Rushing: { twoPtMade: 1 } }, "RB", rules)).toBe(2);
+    expect(calculateCvcFantasyPoints({ Receiving: { twoPtMade: 1 } }, "WR", rules)).toBe(2);
+  });
+
+  it("stacks multiple 2-point conversions in the same game", () => {
+    expect(calculateCvcFantasyPoints({ Rushing: { twoPtMade: 2 } }, "RB", rules)).toBe(4);
+  });
+
+  it("also resolves the 2-point conversion count under alternate plausible Tank01 field spellings", () => {
+    expect(calculateCvcFantasyPoints({ Passing: { twoPointConversion: 1 } }, "QB", rules)).toBe(2);
+    expect(calculateCvcFantasyPoints({ Rushing: { twoPointConversions: 1 } }, "RB", rules)).toBe(2);
+    expect(calculateCvcFantasyPoints({ Receiving: { twoPtConversion: 1 } }, "WR", rules)).toBe(2);
   });
 });
 

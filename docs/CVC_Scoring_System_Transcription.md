@@ -8,8 +8,8 @@ This transcription was verified from the supplied CVC scoring-system image in or
 
 | Unit | Scoring rule |
 | --- | --- |
-| QB | 1 point per 20 passing yards; 1 point per 10 rushing or receiving yards; 4 points per passing touchdown; 6 points per rushing or receiving touchdown; minus 1 point per interception. |
-| RB / WR / TE | 1 point per 20 passing yards; 1 point per 10 rushing or receiving yards; 4 points per passing touchdown; 6 points per rushing or receiving touchdown; 0.5 points per reception. |
+| QB | 1 point per 20 passing yards; 1 point per 10 rushing or receiving yards; 4 points per passing touchdown; 6 points per rushing or receiving touchdown; minus 1 point per interception; 2 points per passing, rushing, or receiving 2-point conversion. |
+| RB / WR / TE | 1 point per 20 passing yards; 1 point per 10 rushing or receiving yards; 4 points per passing touchdown; 6 points per rushing or receiving touchdown; 0.5 points per reception; 2 points per passing, rushing, or receiving 2-point conversion. |
 | PK | 1 point per extra point; 0.1 point per yard for field goals. |
 | D/ST | 2 points per fumble recovery; 2 points per interception; 2 points per sack; 6 points per touchdown; 5 points per safety. |
 | D/ST points allowed | 15 points for 0 points allowed; 10 for 1–6; 5 for 7–13; 3 for 14–20. |
