@@ -4,7 +4,7 @@ import { protectedProcedure, publicProcedure, router } from "../_core/trpc";
 import { getFantasyProsDataAdapter, getNFLDataAdapter, Tank01NFLDataAdapter } from "../nflDataAdapter";
 import { getCvcPlayerCareerStats, parseCvcGameLog, toCvcSeasonStatsShape } from "../playerCareerStats";
 import { readSeasonStatsFromWeekly, readSeasonStatsCurrent } from "../cvcPlayerWeeklyStats";
-import { headToHeadDelta } from "../cvcStandings";
+import { headToHeadDelta, calculateStreak } from "../cvcStandings";
 import { fantasyProsCacheStatus, getFantasyProsActivePlayerIds, getFantasyProsRookiePlayerIds } from "../fantasyProsCache";
 import { getFantasyProsInjuries, getFantasyProsNews, getFantasyProsProjections, getFantasyProsRanks, matchPlayerNameFromTitle } from "../fantasyProsNews";
 import { archiveFantasyProsNews, getArchivedFantasyProsNews, mergeFantasyProsNews } from "../fantasyProsArchive";
@@ -257,6 +257,11 @@ export const leagueRouter = router({
 
     const franchiseStats = new Map(franchiseRows.map(franchise => [franchise.id, { wins: 0, losses: 0, pointsFor: 0, pointsAgainst: 0, divisionWins: 0, divisionLosses: 0 }]));
     const finalMatchups = matchupRows.filter(matchup => matchup.result_state === "final");
+    // calculateStreak needs each game's week number to order them chronologically; the
+    // matchup rows only carry schedule_week_id, so resolve it once here through weekById
+    // rather than per franchise. A matchup whose week is somehow missing falls back to
+    // -1, sorting it oldest instead of producing NaN and destabilising the sort.
+    const finalMatchupsWithWeek = finalMatchups.map(matchup => ({ ...matchup, week_number: weekById.get(matchup.schedule_week_id)?.week_number ?? -1 }));
     finalMatchups.forEach(matchup => {
       const home = franchiseStats.get(matchup.home_franchise_id); const away = franchiseStats.get(matchup.away_franchise_id);
       if (!home || !away) return;
@@ -284,6 +289,7 @@ export const leagueRouter = router({
         divisionRecord: `${stats.divisionWins}–${stats.divisionLosses}`,
         moneyOwed,
         completedGames: completed.length,
+        streak: calculateStreak(franchise.id, finalMatchupsWithWeek),
       };
     }).sort((left, right) => {
       if (left.division_name !== right.division_name) return left.division_name.localeCompare(right.division_name);
