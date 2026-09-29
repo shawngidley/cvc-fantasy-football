@@ -77,10 +77,16 @@ export async function awardFreeAgentClaimNow(bidId: string): Promise<ImmediateFr
     return { outcome: "rejected", reason: `Already claimed ${wonSoFar} player${wonSoFar === 1 ? "" : "s"}${groupLabel ? ` in the "${groupLabel}" group` : ""} this period, at your stated max of ${capLimit}.` };
   }
 
-  const balance = await getFaabBalance(bid.franchise_id, period.season_id);
-  if (balance < 1) {
-    return { outcome: "rejected", reason: `This claim exceeds your remaining CVC FAAB budget. You have $${balance} left this season.` };
-  }
+  // No FAAB-budget check here, deliberately. This function is only ever reached for a
+  // free period (confirmFaabBid, its sole caller, hard-rejects any other period_type),
+  // and a free-period claim costs $0 FAAB -- see getFaabBalance's comment in
+  // waiverRules.ts. The `balance < 1` guard that used to sit here was the same mistake
+  // the batch resolver's `cost: periodType === "free" ? 1 : ...` was: it locked any
+  // franchise that had spent its $30 down to $0 in real bid-cycle periods out of every
+  // free-agent pickup for the rest of the season, rejecting each one with a budget
+  // error for a budget the claim never draws from. Since this immediate-confirm path is
+  // how free-period claims are actually awarded now, that guard was the one that would
+  // really have bitten.
 
   const now = new Date().toISOString();
   const seasonYear = unwrap(await supabase.from("season").select("year").eq("id", period.season_id).single())?.year ?? new Date().getFullYear();
@@ -115,7 +121,11 @@ export async function awardFreeAgentClaimNow(bidId: string): Promise<ImmediateFr
 
   unwrap(await supabase.from("player_contract").upsert({ season_id: period.season_id, franchise_id: bid.franchise_id, player_id: bid.player_id, salary: 1, expires_year: seasonYear, source_marker: "W", contract_status: "active" }, { onConflict: "season_id,franchise_id,player_id" }).select("id").single());
   unwrap(await supabase.from("faab_bid").update({ status: "won", resolved_at: now, confirmed_at: now }).eq("id", bidId).select("id").single());
-  unwrap(await supabase.from("transaction").insert({ season_id: period.season_id, franchise_id: bid.franchise_id, transaction_type: "waiver", status: "final", summary: `${franchise.name} claimed ${player.display_name} for $1 (free agent period).`, details: { faab_bid_id: bidId, player_id: bid.player_id, amount: 1 } }).select("id").single());
+  // "$0 FAAB" here is deliberate, not a typo: a free-period claim is a $1 salary (see
+  // the player_contract upsert above) but costs the owner nothing against their season
+  // FAAB budget (see getFaabBalance's comment in waiverRules.ts) -- the old "for $1"
+  // wording read as a FAAB charge, which it never actually was.
+  unwrap(await supabase.from("transaction").insert({ season_id: period.season_id, franchise_id: bid.franchise_id, transaction_type: "waiver", status: "final", summary: `${franchise.name} claimed ${player.display_name} for $0 FAAB ($1 salary, free agent period).`, details: { faab_bid_id: bidId, player_id: bid.player_id, amount: 0, salary: 1 } }).select("id").single());
 
   // Move this franchise to the back of the waiver-priority line -- same rotation the
   // batch resolver did for every winner at once, just applied the instant each claim
@@ -127,7 +137,13 @@ export async function awardFreeAgentClaimNow(bidId: string): Promise<ImmediateFr
   return { outcome: "awarded", playerName: player.display_name, franchiseName: franchise.name };
 }
 
-export type WaiverAwardResult = { playerName: string; franchiseName: string; amount: number; droppedPlayerName: string | null };
+// "amount" is what the win actually cost against the franchise's season FAAB budget
+// (0 for a free-period claim -- see getFaabBalance's comment in waiverRules.ts);
+// "salary" is what the player's contract carries (always $1 for a free-period claim,
+// matching a real bid-period win's own amount otherwise). The two only diverge for
+// free-period claims, which is exactly the distinction this type used to collapse
+// into a single field.
+export type WaiverAwardResult = { playerName: string; franchiseName: string; amount: number; salary: number; droppedPlayerName: string | null };
 export type WaiverSkipResult = { playerName: string; franchiseName: string; reason: string };
 export type WaiverResolutionSummary = {
   periodId: string;
@@ -341,7 +357,15 @@ export async function resolveOpenWaiverPeriod(): Promise<WaiverResolutionSummary
       return {
         id: bid.id,
         franchiseId: bid.franchise_id,
-        cost: periodType === "free" ? 1 : bid.amount,
+        // Free-period claims never cost FAAB (commissioner call, Sept 2026 -- see
+        // getFaabBalance's comment in waiverRules.ts), so this MUST be 0, not 1: this
+        // "cost" is what resolveWaiverAssignments below checks against and deducts from
+        // each franchise's remaining budget, and a $1 figure here would incorrectly
+        // reject (or budget-block) a free-period claim for any franchise that had
+        // already spent down to $0 in real bid-cycle periods, even though a free-period
+        // pickup should never be budget-constrained at all. The $1 the player actually
+        // signs for is a roster/contract salary fact, applied separately below.
+        cost: periodType === "free" ? 0 : bid.amount,
         priority: bid.priority,
         maxPlayersDesired,
         dropPlayerId: bid.drop_player_id,
@@ -380,7 +404,11 @@ export async function resolveOpenWaiverPeriod(): Promise<WaiverResolutionSummary
     if (!winner) continue;
 
     const franchise = franchiseById.get(winner.franchise_id);
-    const awardAmount = periodType === "free" ? 1 : winner.amount;
+    // Commissioner call, Sept 2026: a free-period claim is a $1 salary but a $0 FAAB
+    // add -- the $1 must not reduce the owner's season FAAB budget. These diverge only
+    // for the free period; a real bid-cycle win costs its bid amount both ways.
+    const salary = periodType === "free" ? 1 : winner.amount;
+    const faabCost = periodType === "free" ? 0 : winner.amount;
 
     if (winner.drop_player_id) {
       unwrap(await supabase.from("roster_assignment").update({ roster_state: "released", released_at: now.toISOString() }).eq("season_id", seasonId).eq("franchise_id", winner.franchise_id).eq("player_id", winner.drop_player_id).is("released_at", null).select("id"));
@@ -388,12 +416,12 @@ export async function resolveOpenWaiverPeriod(): Promise<WaiverResolutionSummary
     }
 
     unwrap(await supabase.from("roster_assignment").insert({ season_id: seasonId, franchise_id: winner.franchise_id, player_id: playerId, roster_state: "bench", acquired_via: periodType === "free" ? "waiver_free" : "waiver_bid", locked_until: nextResolutionAt.toISOString() }).select("id").single());
-    unwrap(await supabase.from("player_contract").upsert({ season_id: seasonId, franchise_id: winner.franchise_id, player_id: playerId, salary: awardAmount, expires_year: seasonYear, source_marker: "W", contract_status: "active" }, { onConflict: "season_id,franchise_id,player_id" }).select("id").single());
+    unwrap(await supabase.from("player_contract").upsert({ season_id: seasonId, franchise_id: winner.franchise_id, player_id: playerId, salary, expires_year: seasonYear, source_marker: "W", contract_status: "active" }, { onConflict: "season_id,franchise_id,player_id" }).select("id").single());
     unwrap(await supabase.from("faab_bid").update({ status: "won", resolved_at: now.toISOString() }).eq("id", winner.id).select("id").single());
-    unwrap(await supabase.from("transaction").insert({ season_id: seasonId, franchise_id: winner.franchise_id, transaction_type: "waiver", status: "final", summary: `${franchise?.name ?? "A CVC franchise"} ${periodType === "free" ? "claimed" : "won"} ${playerName} for $${awardAmount}${periodType === "free" ? " (free agent period)" : " FAAB"} (${period.label}).`, details: { faab_bid_id: winner.id, player_id: playerId, amount: awardAmount } }).select("id").single());
+    unwrap(await supabase.from("transaction").insert({ season_id: seasonId, franchise_id: winner.franchise_id, transaction_type: "waiver", status: "final", summary: `${franchise?.name ?? "A CVC franchise"} ${periodType === "free" ? "claimed" : "won"} ${playerName} for ${periodType === "free" ? `$0 FAAB ($1 salary)` : `$${faabCost} FAAB`} (${period.label}).`, details: { faab_bid_id: winner.id, player_id: playerId, amount: faabCost, salary } }).select("id").single());
 
     if (periodType === "free") priorityRotationOrder.push(winner.franchise_id);
-    awarded.push({ playerName, franchiseName: franchise?.name ?? "Unknown franchise", amount: awardAmount, droppedPlayerName: winner.drop_player_id ? (playerById.get(winner.drop_player_id)?.display_name ?? null) : null });
+    awarded.push({ playerName, franchiseName: franchise?.name ?? "Unknown franchise", amount: faabCost, salary, droppedPlayerName: winner.drop_player_id ? (playerById.get(winner.drop_player_id)?.display_name ?? null) : null });
   }
 
   // Free period only: move each winning franchise to the back of the waiver priority

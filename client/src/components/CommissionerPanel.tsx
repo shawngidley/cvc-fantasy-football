@@ -168,7 +168,7 @@ function SeasonStatsSyncModule() {
     },
     onError: error => toast.error(error.message),
   });
-  const [waiverResult, setWaiverResult] = useState<null | { resolved: boolean; message?: string; periodLabel?: string; playersContested?: number; awarded?: { playerName: string; franchiseName: string; amount: number; droppedPlayerName: string | null }[]; skipped?: { playerName: string; franchiseName: string; reason: string }[]; nextPeriodLabel?: string | null }>(null);
+  const [waiverResult, setWaiverResult] = useState<null | { resolved: boolean; message?: string; periodLabel?: string; playersContested?: number; awarded?: { playerName: string; franchiseName: string; amount: number; salary: number; droppedPlayerName: string | null }[]; skipped?: { playerName: string; franchiseName: string; reason: string }[]; nextPeriodLabel?: string | null }>(null);
   const runWaiverResolution = trpc.league.runWaiverResolution.useMutation({
     onSuccess: async data => {
       setWaiverResult(data);
@@ -397,7 +397,12 @@ function SeasonStatsSyncModule() {
       {waiverResult ? <div className="mt-3 rounded-md border border-slate-200 bg-white p-3 text-xs text-slate-600">
         {waiverResult.resolved ? <>
           <p><b className="text-cvc-deep">Resolved:</b> {waiverResult.periodLabel} · <b className="text-cvc-deep">Players contested:</b> {waiverResult.playersContested} · <b className="text-cvc-deep">Next period:</b> {waiverResult.nextPeriodLabel ?? "—"}</p>
-          {waiverResult.awarded?.length ? <div className="mt-2"><p className="font-semibold text-cvc-deep">Awarded</p><ul className="mt-1 space-y-0.5">{waiverResult.awarded.map((item, index) => <li key={index}>{item.franchiseName} won {item.playerName} for ${item.amount}{item.droppedPlayerName ? ` (dropped ${item.droppedPlayerName})` : ""}</li>)}</ul></div> : null}
+          {/* $0 FAAB / $1 salary only ever diverge for a free-period claim (commissioner
+              call, Sept 2026: a free-period pickup costs nothing against the season FAAB
+              budget even though the player signs for $1) -- shown separately here rather
+              than one "$X" figure so that distinction is visible in this commissioner-only
+              audit view, not just in the public transaction summary. */}
+          {waiverResult.awarded?.length ? <div className="mt-2"><p className="font-semibold text-cvc-deep">Awarded</p><ul className="mt-1 space-y-0.5">{waiverResult.awarded.map((item, index) => <li key={index}>{item.franchiseName} won {item.playerName} for {item.amount === item.salary ? `$${item.amount}` : `$${item.amount} FAAB ($${item.salary} salary)`}{item.droppedPlayerName ? ` (dropped ${item.droppedPlayerName})` : ""}</li>)}</ul></div> : null}
           {waiverResult.skipped?.length ? <div className="mt-2"><p className="font-semibold text-amber-700">Skipped</p><ul className="mt-1 space-y-0.5">{waiverResult.skipped.map((item, index) => <li key={index}>{item.franchiseName} on {item.playerName}: {item.reason}</li>)}</ul></div> : null}
         </> : <p>{waiverResult.message}</p>}
       </div> : null}

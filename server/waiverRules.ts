@@ -6,10 +6,15 @@ export const MIN_ROSTER_SIZE = 15;
 export const MAX_ROSTER_SIZE = 22;
 
 /** Remaining season FAAB budget for a franchise: STARTING_FAAB minus every 'won' bid
- * amount this season, across every waiver period (bid-cycle or free-period alike --
- * free-period wins are always $1, which still counts against the season cap). */
+ * amount this season, across every real bid-cycle waiver period. Free-period claims
+ * are excluded entirely -- commissioner call, Sept 2026: a free agent period pickup is
+ * a $0 FAAB add. The player still signs for a $1 salary (that's a roster/contract
+ * fact, tracked separately via player_contract.salary), but that $1 must not reduce
+ * the owner's FAAB balance. Before this fix, every free-period win's flat $1 was
+ * summed in here right alongside real bid-cycle wins, silently taxing owners' season
+ * FAAB budgets $1 per free-period pickup. */
 export async function getFaabBalance(franchiseId: string, seasonId: string): Promise<number> {
-  const periodIds = (unwrap(await supabase.from("waiver_period").select("id").eq("season_id", seasonId)) ?? []).map(period => period.id);
+  const periodIds = (unwrap(await supabase.from("waiver_period").select("id").eq("season_id", seasonId).neq("period_type", "free")) ?? []).map(period => period.id);
   if (!periodIds.length) return STARTING_FAAB;
   const spent = (unwrap(await supabase.from("faab_bid").select("amount").eq("franchise_id", franchiseId).eq("status", "won").in("waiver_period_id", periodIds)) ?? []).reduce((total, bid) => total + bid.amount, 0);
   return STARTING_FAAB - spent;

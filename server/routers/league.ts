@@ -1471,17 +1471,24 @@ export const leagueRouter = router({
     // The free agent period (post-Sunday, bid-exempt) is always a flat $1 claim awarded
     // by waiver priority, regardless of whatever amount was submitted -- ignore the
     // client's amount entirely rather than trusting it, matching how a real waiver claim
-    // (not a bid) works.
+    // (not a bid) works. That $1 is a player-contract salary only, never a FAAB cost
+    // (commissioner call, Sept 2026 -- see getFaabBalance's comment in waiverRules.ts),
+    // so the season-FAAB-budget guard below is skipped entirely for a free-period claim:
+    // it can never actually exceed a budget it doesn't draw from, and checking it against
+    // other pending $1 free claims would wrongly block claims a low-FAAB owner is still
+    // fully entitled to make.
     const isFreePeriod = period.period_type === "free";
     const amount = isFreePeriod ? 1 : input.amount;
     // $30 season cap: a bid can't itself exceed what's left, accounting for every other
     // *pending* bid this franchise already has open this period too (not just already-won
     // bids) -- otherwise an owner could submit several $30 bids simultaneously and only
     // get caught at resolution time, when it's too late to bid smarter.
-    const balance = await getFaabBalance(franchise.id, season.id);
-    const otherPendingThisPeriod = (unwrap(await supabase.from("faab_bid").select("amount").eq("waiver_period_id", period.id).eq("franchise_id", franchise.id).eq("status", "pending").neq("player_id", input.playerId)) ?? []).reduce((total, bid) => total + bid.amount, 0);
-    if (amount > balance - otherPendingThisPeriod) {
-      throw new TRPCError({ code: "BAD_REQUEST", message: `This ${isFreePeriod ? "claim" : "bid"} exceeds your remaining CVC FAAB budget. You have $${balance} left this season${otherPendingThisPeriod ? ` ($${otherPendingThisPeriod} already committed to other pending claims this period)` : ""}.` });
+    if (!isFreePeriod) {
+      const balance = await getFaabBalance(franchise.id, season.id);
+      const otherPendingThisPeriod = (unwrap(await supabase.from("faab_bid").select("amount").eq("waiver_period_id", period.id).eq("franchise_id", franchise.id).eq("status", "pending").neq("player_id", input.playerId)) ?? []).reduce((total, bid) => total + bid.amount, 0);
+      if (amount > balance - otherPendingThisPeriod) {
+        throw new TRPCError({ code: "BAD_REQUEST", message: `This bid exceeds your remaining CVC FAAB budget. You have $${balance} left this season${otherPendingThisPeriod ? ` ($${otherPendingThisPeriod} already committed to other pending claims this period)` : ""}.` });
+      }
     }
     const [player, activeAssignment] = await Promise.all([
       supabase.from("player").select("id, display_name, nfl_team").eq("id", input.playerId).maybeSingle(),
@@ -1556,7 +1563,7 @@ export const leagueRouter = router({
     if (result.outcome === "already_claimed") throw new TRPCError({ code: "BAD_REQUEST", message: "This player was just claimed by another CVC franchise." });
     if (result.outcome === "rejected") throw new TRPCError({ code: "BAD_REQUEST", message: result.reason });
     const { league, season } = await getCurrentLeagueAndSeason();
-    await createAuditEvent(league.id, season.id, owner.id, "faab_bid", bid.id, "awarded", `${result.franchiseName} claimed ${result.playerName} for $1 (free agent period).`);
+    await createAuditEvent(league.id, season.id, owner.id, "faab_bid", bid.id, "awarded", `${result.franchiseName} claimed ${result.playerName} for $0 FAAB ($1 salary, free agent period).`);
     return { alreadyConfirmed: false, awarded: true };
   }),
 
