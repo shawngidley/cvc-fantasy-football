@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { Link } from "wouter";
+import { pickBestTank01Match } from "@/hooks/useCvcTank01PlayerProfiles";
 
 export type CvcNewsItem = {
   playerName: string;
@@ -17,19 +18,26 @@ export type CvcNewsItem = {
 // Same per-row lazy headshot fetch + module-level cache pattern already used in
 // CvcPlayerProfile.tsx, CvcOwnerLineup.tsx, and Protections.tsx -- kept
 // consistent with those rather than introducing a shared hook none of them use.
+//
+// Cache key includes nflTeam (not just playerName): Tank01's name search can return
+// multiple real NFL players sharing one name (confirmed live -- "DeVonta Smith"
+// matches both the Philadelphia Eagles WR and an unrelated Carolina Panthers CB), and
+// pickBestTank01Match (useCvcTank01PlayerProfiles.ts) disambiguates by team, so two
+// different same-named players must not collide on one cache entry here either.
 const headshotCache = new Map<string, string | null>();
-function useHeadshot(playerName: string, pos: string) {
-  const [url, setUrl] = useState<string | null>(headshotCache.get(playerName) ?? null);
+function useHeadshot(playerName: string, pos: string, nflTeam: string) {
+  const cacheKey = `${playerName}|${nflTeam}`;
+  const [url, setUrl] = useState<string | null>(headshotCache.get(cacheKey) ?? null);
   useEffect(() => {
     if (pos === "DST") return;
-    if (headshotCache.has(playerName)) { setUrl(headshotCache.get(playerName) ?? null); return; }
+    if (headshotCache.has(cacheKey)) { setUrl(headshotCache.get(cacheKey) ?? null); return; }
     let cancelled = false;
     fetch(`/api/tank01/getNFLPlayerInfo?playerName=${encodeURIComponent(playerName)}&getStats=false`)
-      .then(response => (response.ok ? response.json() : null) as Promise<{ body?: { espnHeadshot?: string }[] } | null>)
-      .then(payload => { const headshot = payload?.body?.[0]?.espnHeadshot ?? null; headshotCache.set(playerName, headshot); if (!cancelled) setUrl(headshot); })
-      .catch(() => { headshotCache.set(playerName, null); if (!cancelled) setUrl(null); });
+      .then(response => (response.ok ? response.json() : null) as Promise<{ body?: { espnHeadshot?: string; team?: string }[] } | null>)
+      .then(payload => { const headshot = pickBestTank01Match(payload?.body ?? [], { nfl_team: nflTeam })?.espnHeadshot ?? null; headshotCache.set(cacheKey, headshot); if (!cancelled) setUrl(headshot); })
+      .catch(() => { headshotCache.set(cacheKey, null); if (!cancelled) setUrl(null); });
     return () => { cancelled = true; };
-  }, [playerName, pos]);
+  }, [playerName, pos, nflTeam]);
   return url;
 }
 
@@ -43,7 +51,7 @@ function formatDate(iso: string) {
 
 export function CvcNewsRow({ item, isFirst = false }: { item: CvcNewsItem; isFirst?: boolean }) {
   const [headshotFailed, setHeadshotFailed] = useState(false);
-  const headshotUrl = useHeadshot(item.playerName, item.pos);
+  const headshotUrl = useHeadshot(item.playerName, item.pos, item.nflTeam);
   const initials = item.playerName.split(/\s+/).filter(Boolean).map(part => part[0]).slice(0, 2).join("").toUpperCase();
 
   return (

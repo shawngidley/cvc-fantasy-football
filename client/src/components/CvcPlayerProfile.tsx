@@ -244,12 +244,12 @@ export function CvcPlayerProfile() {
               <tbody>{seasonStats.data.seasons.map((row, index) => <tr key={row.season} className="border-b border-slate-100 last:border-b-0 hover:bg-slate-50">
                 <td className="px-5 py-2.5 font-bold text-cvc-deep">{row.season}{index === 0 ? <span className="ml-1.5 rounded bg-emerald-100 px-1.5 py-0.5 text-[9px] font-black uppercase text-emerald-700">Latest</span> : null}</td>
                 <td className="px-3 py-2.5">{row.team ? <img src={teamLogoUrl(row.team)} alt={row.team} className="h-5 w-5 object-contain" /> : "—"}</td>
-                <td className="px-3 py-2.5 text-right">{row.gp}</td>
+                <td className="px-3 py-2.5 text-right text-cvc-deep">{row.gp}</td>
                 <td className="px-3 py-2.5 text-right font-bold text-amber-600">{row.cvcPtsPerGame.toFixed(1)}</td>
                 <td className="px-3 py-2.5 text-right font-bold text-emerald-700">{row.cvcPts.toFixed(1)}</td>
-                {pos === "QB" ? <><td className="px-3 py-2.5 text-right">{row.passCmp ?? "—"}</td><td className="px-3 py-2.5 text-right">{row.passAtt ?? "—"}</td><td className="px-3 py-2.5 text-right">{row.passCmpPct != null ? `${row.passCmpPct}%` : "—"}</td><td className="px-3 py-2.5 text-right font-semibold">{row.passYds ?? "—"}</td><td className="px-3 py-2.5 text-right">{row.passTD ?? "—"}</td><td className="px-3 py-2.5 text-right">{row.passInt ?? "—"}</td><td className="px-3 py-2.5 text-right">{row.rushYds ?? "—"}</td><td className="px-3 py-2.5 text-right">{row.rushTD ?? "—"}</td></> : null}
-                {(pos === "RB" || pos === "WR" || pos === "TE") ? <><td className="px-3 py-2.5 text-right">{row.rec ?? "—"}</td><td className="px-3 py-2.5 text-right">{row.recYds ?? "—"}</td><td className="px-3 py-2.5 text-right">{row.recTD ?? "—"}</td><td className="px-3 py-2.5 text-right">{row.rushYds ?? "—"}</td><td className="px-3 py-2.5 text-right">{row.rushTD ?? "—"}</td></> : null}
-                {pos === "K" ? <><td className="px-3 py-2.5 text-right">{row.fgMade ?? "—"}</td><td className="px-3 py-2.5 text-right">{row.fgAtt ?? "—"}</td><td className="px-3 py-2.5 text-right">{row.xpMade ?? "—"}</td></> : null}
+                {pos === "QB" ? <><td className="px-3 py-2.5 text-right text-cvc-deep">{row.passCmp ?? "—"}</td><td className="px-3 py-2.5 text-right text-cvc-deep">{row.passAtt ?? "—"}</td><td className="px-3 py-2.5 text-right text-cvc-deep">{row.passCmpPct != null ? `${row.passCmpPct}%` : "—"}</td><td className="px-3 py-2.5 text-right font-semibold text-cvc-deep">{row.passYds ?? "—"}</td><td className="px-3 py-2.5 text-right text-cvc-deep">{row.passTD ?? "—"}</td><td className="px-3 py-2.5 text-right text-cvc-deep">{row.passInt ?? "—"}</td><td className="px-3 py-2.5 text-right text-cvc-deep">{row.rushYds ?? "—"}</td><td className="px-3 py-2.5 text-right text-cvc-deep">{row.rushTD ?? "—"}</td></> : null}
+                {(pos === "RB" || pos === "WR" || pos === "TE") ? <><td className="px-3 py-2.5 text-right text-cvc-deep">{row.rec ?? "—"}</td><td className="px-3 py-2.5 text-right text-cvc-deep">{row.recYds ?? "—"}</td><td className="px-3 py-2.5 text-right text-cvc-deep">{row.recTD ?? "—"}</td><td className="px-3 py-2.5 text-right text-cvc-deep">{row.rushYds ?? "—"}</td><td className="px-3 py-2.5 text-right text-cvc-deep">{row.rushTD ?? "—"}</td></> : null}
+                {pos === "K" ? <><td className="px-3 py-2.5 text-right text-cvc-deep">{row.fgMade ?? "—"}</td><td className="px-3 py-2.5 text-right text-cvc-deep">{row.fgAtt ?? "—"}</td><td className="px-3 py-2.5 text-right text-cvc-deep">{row.xpMade ?? "—"}</td></> : null}
               </tr>)}</tbody>
             </table> : <p className="px-5 pb-5 text-sm text-slate-500">{espnId ? "No historical season stats found for this player." : "Season stats need an ESPN player ID, which Tank01 hasn't returned for this player."}</p>}
         </div>
@@ -279,7 +279,7 @@ export function CvcPlayerProfile() {
                 <td className="px-3 py-2.5"><span className="inline-flex items-center gap-1.5"><img src={teamLogoUrl(game.opponent)} alt="" className="h-4 w-4 object-contain" />{game.isHome ? "vs" : "@"} {game.opponent}</span></td>
                 <td className="px-3 py-2.5 text-slate-500">{game.result ?? "—"}</td>
                 <td className="px-3 py-2.5 text-right font-bold text-emerald-700">{game.cvcPts.toFixed(1)}</td>
-                {gameLogColumns.map(column => <td key={column.key} className="px-3 py-2.5 text-right">{(game as unknown as Record<string, number | undefined>)[column.key] ?? "—"}</td>)}
+                {gameLogColumns.map(column => <td key={column.key} className="px-3 py-2.5 text-right text-cvc-deep">{(game as unknown as Record<string, number | undefined>)[column.key] ?? "—"}</td>)}
               </tr>)}</tbody>
             </table> : <p className="px-5 py-5 text-sm text-slate-500">No {gameLogYear} game log yet{gameLogYear === currentSeasonYear ? " — check back once games are underway." : "."}</p>}
         </div>
