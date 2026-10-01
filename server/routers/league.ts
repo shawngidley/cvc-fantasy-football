@@ -756,6 +756,16 @@ export const leagueRouter = router({
     };
   }),
 
+  // Public (unlike myFaabBalance, which is the logged-in owner's own team only) --
+  // league FAAB spend is already visible to everyone via the transaction feed's own
+  // waiver-win summaries, so a team's remaining balance isn't private, and the
+  // Rosters page needs every franchise's, not just the viewer's. Same getFaabBalance
+  // every other FAAB check in this file uses -- live-computed, nothing cached.
+  franchiseFaabBalance: publicProcedure.input(z.object({ franchiseId: z.string().uuid() })).query(async ({ input }) => {
+    const { season } = await getCurrentLeagueAndSeason();
+    return { balance: await getFaabBalance(input.franchiseId, season.id) };
+  }),
+
   // Scoped to exactly what's actually tradeable: this year's picks (only while that
   // draft hasn't completed) and next year's -- matches the same rule proposeTrade
   // enforces, so the trade builder UI never even offers an invalid pick as an option.
