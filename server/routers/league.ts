@@ -358,13 +358,15 @@ export const leagueRouter = router({
 
   activity: publicProcedure.query(async () => {
     const { season } = await getCurrentLeagueAndSeason();
-    // Only trade/add/drop/waiver rows are ever eligible for the public board (see filter
-    // below), so restrict the raw fetch to those types before limiting — otherwise a
-    // burst of same-day admin activity (protection notes, commissioner adjustments,
-    // draft picks, etc.) can fill the row-limit window and push a genuinely recent
-    // trade or pickup/drop out of view even though it still qualifies for display.
+    // No row cap here (commissioner call, Sept 2026 -- the feed used to fetch 200 raw
+    // rows and then show only the newest 50 of those that passed the filter below,
+    // which silently hid older activity once a season passed that count). Only
+    // trade/add/drop/waiver rows are eligible for the public board in the first place
+    // (see filter below), so restricting the raw fetch to those types still keeps this
+    // from ever scanning unrelated transaction types (protection notes, commissioner
+    // adjustments, draft picks, etc.).
     const [txResult, draftsResult] = await Promise.all([
-      supabase.from("transaction").select("id, transaction_type, status, summary, occurred_at, details, franchise_id, franchise:franchise_id(name, is_active)").eq("season_id", season.id).in("transaction_type", ["trade", "add", "drop", "waiver"]).order("occurred_at", { ascending: false }).limit(200),
+      supabase.from("transaction").select("id, transaction_type, status, summary, occurred_at, details, franchise_id, franchise:franchise_id(name, is_active)").eq("season_id", season.id).in("transaction_type", ["trade", "add", "drop", "waiver"]).order("occurred_at", { ascending: false }),
       supabase.from("draft").select("status").eq("season_id", season.id),
     ]);
     const { data, error } = txResult;
@@ -405,7 +407,7 @@ export const leagueRouter = router({
       if (!pickupOrDropTypes.includes(item.transaction_type)) return false;
       if (!draftsConcluded) return false;
       return occurredNy > LOG_START_NY;
-    }).slice(0, 50).map((item: any) => {
+    }).map((item: any) => {
       const franchise = Array.isArray(item.franchise) ? item.franchise[0] : item.franchise;
       return { ...item, franchise_name: franchise?.name ?? null };
     });
