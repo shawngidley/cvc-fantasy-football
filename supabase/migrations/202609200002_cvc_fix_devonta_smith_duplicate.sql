@@ -5,9 +5,11 @@
 -- existing FantasyPros-sourced row for him (WR, PHI). Heiden's Hardtimes has been
 -- rostering, paying, and scoring the real Philadelphia Eagles WR under that wrong row
 -- ever since (confirmed live: it already carries a real weekly stat line and a current
--- season-stats row, so this isn't just a roster/contract fix -- his stats need to move
--- too, or they'd silently stop counting for Heiden's Hardtimes the moment the roster
--- row is corrected).
+-- season-stats row, so this isn't just a roster/contract fix). Update 2026-09-30, after
+-- running the preflight below against live data: his stats don't need to MOVE after
+-- all -- the correct row already independently carries the complete, more accurate
+-- version of the same data (see the two DELETEs' own comment further down for why),
+-- so nothing stops counting for Heiden's Hardtimes at any point in this migration.
 --
 -- Wrong duplicate: 25e20772-f149-43e4-bf10-13353abcf9dc (WR, CAR, cvc_workbook_2026)
 -- Correct player:  8a60ba10-5815-4710-bee4-edfc5f753df1 (WR, PHI, fantasypros)
