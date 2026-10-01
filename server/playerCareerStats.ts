@@ -109,7 +109,7 @@ function toCvcStatsShape(row: Partial<CvcSeasonStatRow>): Tank01LiveStats {
   };
 }
 
-async function fetchOneSeason(espnId: string, year: number, position: string, rules: CvcScoringRule[]): Promise<CvcSeasonStatRow | null> {
+async function fetchOneSeason(espnId: string, year: number, position: string, rules: CvcScoringRule[], nflTeam?: string): Promise<CvcSeasonStatRow | null> {
   const response = await fetch(`${ESPN_GAMELOG}/${espnId}/gamelog?season=${year}`, { signal: AbortSignal.timeout(15_000) });
   if (!response.ok) return null;
   const data = await response.json() as { seasonTypes?: { categories?: { events?: { stats?: string[] }[] }[] }[]; labels?: string[] };
@@ -131,16 +131,23 @@ async function fetchOneSeason(espnId: string, year: number, position: string, ru
   const extracted = extractFromGamelog(totals, events.length, labels);
   const cvcPts = calculateCvcFantasyPoints(toCvcStatsShape(extracted), position, rules);
   const gp = extracted.gp ?? 0;
-  return { season: year, gp, ...extracted, cvcPts: Math.round(cvcPts * 100) / 100, cvcPtsPerGame: gp > 0 ? Math.round((cvcPts / gp) * 100) / 100 : 0 };
+  // "team" isn't in ESPN's per-game gamelog stat rows at all (confirmed live -- only
+  // the separate top-level `events` map, keyed by ESPN game ID, carries any team-related
+  // data, and even that only has the *opponent's* abbreviation, not the player's own).
+  // Rather than resolve an ESPN team ID back to an abbreviation with no mapping table
+  // for it, this uses the player's current nfl_team for every season row -- the same
+  // simplification the Game Log and Schedule tabs already make (both pass a single
+  // "current team" through rather than tracking in-season/year-over-year trades).
+  return { season: year, team: nflTeam, gp, ...extracted, cvcPts: Math.round(cvcPts * 100) / 100, cvcPtsPerGame: gp > 0 ? Math.round((cvcPts / gp) * 100) / 100 : 0 };
 }
 
 /** Fetches the last several years of season stats for one player from ESPN's public
  * gamelog API (no key required), computing CVC-specific fantasy points from the
  * season's actual scoring_rule rows rather than a hardcoded formula. Years with no
  * data (e.g. before the player entered the league) are simply omitted. */
-export async function getCvcPlayerCareerStats(espnId: string, position: string, rules: CvcScoringRule[], currentYear: number, yearsBack = 5): Promise<CvcSeasonStatRow[]> {
+export async function getCvcPlayerCareerStats(espnId: string, position: string, rules: CvcScoringRule[], currentYear: number, yearsBack = 5, nflTeam?: string): Promise<CvcSeasonStatRow[]> {
   const years = Array.from({ length: yearsBack }, (_, index) => currentYear - index);
-  const results = await Promise.all(years.map(year => fetchOneSeason(espnId, year, position, rules).catch(() => null)));
+  const results = await Promise.all(years.map(year => fetchOneSeason(espnId, year, position, rules, nflTeam).catch(() => null)));
   return results.filter((row): row is CvcSeasonStatRow => row !== null).sort((a, b) => b.season - a.season);
 }
 

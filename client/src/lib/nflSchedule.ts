@@ -85,6 +85,29 @@ export function gameOpponent(game: TankRecord, team: string) {
   return away.toUpperCase() === abv ? { opponent: home, atOrVs: "@" } : { opponent: away, atOrVs: "vs" };
 }
 
+/** Confirmed live shape of a getNFLTeamSchedule game: homePts/awayPts carry the score
+ * (as strings), present only once the game has actually been played -- a "Scheduled"
+ * game carries neither field at all, which is what null-checking myPts/oppPts here
+ * detects, rather than trusting gameStatus text. Derives W/L/T from the two scores
+ * directly (matching WRC's PlayerPage.tsx, the confirmed-working reference
+ * implementation) rather than trusting the separate homeResult/awayResult letter
+ * fields Tank01 also returns -- one fewer field name to get wrong, and ties resolve
+ * correctly where a lone "W"/"L" letter couldn't. */
+export function gameResultFor(game: TankRecord, team: string): string | null {
+  const abv = normalizeTeam(team).toUpperCase();
+  const away = firstOf(game, ["away", "awayTeam", "away_team"]);
+  const home = firstOf(game, ["home", "homeTeam", "home_team"]);
+  if (!away || !home) return null;
+  const isHome = home.toUpperCase() === abv;
+  const myPts = firstOf(game, [isHome ? "homePts" : "awayPts"]);
+  const oppPts = firstOf(game, [isHome ? "awayPts" : "homePts"]);
+  if (myPts == null || oppPts == null) return null;
+  const myScore = Number(myPts);
+  const oppScore = Number(oppPts);
+  const outcome = myScore > oppScore ? "W" : myScore < oppScore ? "L" : "T";
+  return `${outcome} ${myPts}-${oppPts}`;
+}
+
 /** Schedule rows in week-number order, with a synthetic BYE WEEK row inserted at any
  * gap in the sequence (Tank01's schedule response has no explicit bye-week entry). */
 export function buildScheduleWithBye(schedule: TankRecord[], team: string) {

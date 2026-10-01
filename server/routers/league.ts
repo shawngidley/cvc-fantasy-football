@@ -1041,11 +1041,11 @@ export const leagueRouter = router({
   // ESPN's public gamelog API (no key required) but computes CVC's own fantasy points
   // from this season's actual scoring_rule rows, not a hardcoded formula.
   playerCareerSeasonStats: publicProcedure.input(z.object({ playerId: z.string().uuid(), espnId: z.string().min(1) })).query(async ({ input }) => {
-    const player = unwrap(await supabase.from("player").select("position").eq("id", input.playerId).maybeSingle());
+    const player = unwrap(await supabase.from("player").select("position, nfl_team").eq("id", input.playerId).maybeSingle());
     if (!player?.position) return { seasons: [] };
     const { season } = await getCurrentLeagueAndSeason();
     const rules = unwrap(await supabase.from("scoring_rule").select("stat_key, value, applies_to_positions").eq("season_id", season.id)) ?? [];
-    const seasons = await getCvcPlayerCareerStats(input.espnId, player.position, rules, season.year);
+    const seasons = await getCvcPlayerCareerStats(input.espnId, player.position, rules, season.year, 5, player.nfl_team ?? undefined);
     return { seasons };
   }),
 

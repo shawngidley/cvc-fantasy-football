@@ -5,7 +5,7 @@ import { trpc } from "@/lib/trpc";
 import { normalizePlayerName } from "@shared/playerNameMatch";
 import { useCvcOwnerAuth } from "@/hooks/useCvcOwnerAuth";
 import { CvcNewsRow, type CvcNewsItem } from "@/components/CvcNewsRow";
-import { buildScheduleWithBye, fmtDate, normalizeTeam, shortenTeamName, teamLogoUrl, useTeamSchedule, type TankRecord } from "@/lib/nflSchedule";
+import { buildScheduleWithBye, fmtDate, gameResultFor, normalizeTeam, shortenTeamName, teamLogoUrl, useTeamSchedule, type TankRecord } from "@/lib/nflSchedule";
 
 type TankPlayerInfo = { body?: TankRecord | TankRecord[] };
 type TankNewsItem = { title?: string; link?: string; image?: string; playerIDs?: string[] };
@@ -264,7 +264,7 @@ export function CvcPlayerProfile() {
                 <td className="px-3 py-2.5 text-slate-500">{fmtDate(firstOf(row.game, ["gameDate", "date"]))}</td>
                 <td className="px-3 py-2.5"><span className="inline-flex items-center gap-1.5"><img src={teamLogoUrl(row.opponent.opponent)} alt="" className="h-4 w-4 object-contain" />{row.opponent.atOrVs} {row.opponent.opponent}</span></td>
                 <td className="px-3 py-2.5 text-slate-500">{firstOf(row.game, ["gameTime", "time"]) ?? "—"}</td>
-                <td className="px-3 py-2.5 text-slate-400">—</td>
+                <td className={`px-3 py-2.5 font-bold ${(() => { const result = gameResultFor(row.game, player.nfl_team ?? ""); return result?.startsWith("W") ? "text-emerald-700" : result?.startsWith("L") ? "text-red-700" : "text-slate-400"; })()}`}>{gameResultFor(row.game, player.nfl_team ?? "") ?? "—"}</td>
               </tr>)}</tbody>
         </table> : <div className="p-5"><p className="text-sm text-slate-500">Schedule data is unavailable for this player right now.</p></div>}
       </div> : null}
