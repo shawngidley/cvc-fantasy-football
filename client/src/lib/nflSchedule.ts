@@ -85,6 +85,16 @@ export function gameOpponent(game: TankRecord, team: string) {
   return away.toUpperCase() === abv ? { opponent: home, atOrVs: "@" } : { opponent: away, atOrVs: "vs" };
 }
 
+/** Shared by gameResultFor and resultFromScheduleGame below -- both resolve to "my
+ * points" vs. "opponent's points" once isHome is known, then format identically. */
+function formatResult(myPts: string | null, oppPts: string | null): string | null {
+  if (myPts == null || oppPts == null) return null;
+  const myScore = Number(myPts);
+  const oppScore = Number(oppPts);
+  const outcome = myScore > oppScore ? "W" : myScore < oppScore ? "L" : "T";
+  return `${outcome} ${myPts}-${oppPts}`;
+}
+
 /** Confirmed live shape of a getNFLTeamSchedule game: homePts/awayPts carry the score
  * (as strings), present only once the game has actually been played -- a "Scheduled"
  * game carries neither field at all, which is what null-checking myPts/oppPts here
@@ -99,13 +109,20 @@ export function gameResultFor(game: TankRecord, team: string): string | null {
   const home = firstOf(game, ["home", "homeTeam", "home_team"]);
   if (!away || !home) return null;
   const isHome = home.toUpperCase() === abv;
-  const myPts = firstOf(game, [isHome ? "homePts" : "awayPts"]);
-  const oppPts = firstOf(game, [isHome ? "awayPts" : "homePts"]);
-  if (myPts == null || oppPts == null) return null;
-  const myScore = Number(myPts);
-  const oppScore = Number(oppPts);
-  const outcome = myScore > oppScore ? "W" : myScore < oppScore ? "L" : "T";
-  return `${outcome} ${myPts}-${oppPts}`;
+  return formatResult(firstOf(game, [isHome ? "homePts" : "awayPts"]), firstOf(game, [isHome ? "awayPts" : "homePts"]));
+}
+
+/** Confirmed live: Tank01's player-specific getNFLGamesForPlayer endpoint carries no
+ * score/result field at all (no gameResult, no homePts/awayPts) -- only per-category
+ * stat totals, snap counts, and team identity. The only place the actual final score
+ * exists is the separate per-team getNFLTeamSchedule endpoint. This resolves one
+ * Game Log row's result by matching its gameID against that team schedule (which the
+ * player-profile page already fetches for its own Schedule tab), taking isHome
+ * directly rather than re-deriving it from a team abbreviation the caller may not have
+ * on hand for this already-resolved row. */
+export function resultFromScheduleGame(scheduleGame: TankRecord | undefined, isHome: boolean): string | null {
+  if (!scheduleGame) return null;
+  return formatResult(firstOf(scheduleGame, [isHome ? "homePts" : "awayPts"]), firstOf(scheduleGame, [isHome ? "awayPts" : "homePts"]));
 }
 
 /** Schedule rows in week-number order, with a synthetic BYE WEEK row inserted at any

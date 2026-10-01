@@ -5,7 +5,7 @@ import { trpc } from "@/lib/trpc";
 import { normalizePlayerName } from "@shared/playerNameMatch";
 import { useCvcOwnerAuth } from "@/hooks/useCvcOwnerAuth";
 import { CvcNewsRow, type CvcNewsItem } from "@/components/CvcNewsRow";
-import { buildScheduleWithBye, fmtDate, gameResultFor, normalizeTeam, shortenTeamName, teamLogoUrl, useTeamSchedule, type TankRecord } from "@/lib/nflSchedule";
+import { buildScheduleWithBye, fmtDate, gameResultFor, normalizeTeam, resultFromScheduleGame, shortenTeamName, teamLogoUrl, useTeamSchedule, type TankRecord } from "@/lib/nflSchedule";
 
 type TankPlayerInfo = { body?: TankRecord | TankRecord[] };
 type TankNewsItem = { title?: string; link?: string; image?: string; playerIDs?: string[] };
@@ -169,6 +169,11 @@ export function CvcPlayerProfile() {
   // the first game with a resolvable opponent, which was always Week 1.
   const currentWeekRow = currentWeekIndex >= 0 ? scheduleRows[currentWeekIndex] : undefined;
   const upcoming = currentWeekRow?.type === "game" ? currentWeekRow : undefined;
+  // Tank01's player-specific getNFLGamesForPlayer endpoint carries no score/result
+  // field at all (confirmed live) -- only the separate per-team getNFLTeamSchedule
+  // endpoint (already fetched above for the Schedule tab) has the actual final score.
+  // Keyed by gameID so each Game Log row can look up its own result by matching game.
+  const scheduleByGameId = new Map((schedule ?? []).map(game => [firstOf(game, ["gameID", "gameId"]), game] as const));
   const gameLogYearOptions = Array.from({ length: 5 }, (_, index) => currentSeasonYear - index);
   const gameLogColumns = GAME_LOG_COLUMNS[pos] ?? [];
   const espnPlayerUrl = espnId ? `https://www.espn.com/nfl/player/_/id/${espnId}` : null;
@@ -277,7 +282,7 @@ export function CvcPlayerProfile() {
               <tbody>{gameLog.data.games.map((game, index) => <tr key={game.gameId} className="border-b border-slate-100 last:border-b-0 hover:bg-slate-50">
                 <td className="px-5 py-2.5 text-slate-500">{fmtDate(game.gameDate)}</td>
                 <td className="px-3 py-2.5"><span className="inline-flex items-center gap-1.5"><img src={teamLogoUrl(game.opponent)} alt="" className="h-4 w-4 object-contain" />{game.isHome ? "vs" : "@"} {game.opponent}</span></td>
-                <td className="px-3 py-2.5 text-slate-500">{game.result ?? "—"}</td>
+                <td className={`px-3 py-2.5 font-bold ${(() => { const result = resultFromScheduleGame(scheduleByGameId.get(game.gameId), game.isHome); return result?.startsWith("W") ? "text-emerald-700" : result?.startsWith("L") ? "text-red-700" : "text-slate-500"; })()}`}>{resultFromScheduleGame(scheduleByGameId.get(game.gameId), game.isHome) ?? game.result ?? "—"}</td>
                 <td className="px-3 py-2.5 text-right font-bold text-emerald-700">{game.cvcPts.toFixed(1)}</td>
                 {gameLogColumns.map(column => <td key={column.key} className="px-3 py-2.5 text-right text-cvc-deep">{(game as unknown as Record<string, number | undefined>)[column.key] ?? "—"}</td>)}
               </tr>)}</tbody>

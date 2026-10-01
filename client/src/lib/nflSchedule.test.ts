@@ -1,5 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { extractScheduleGames, buildScheduleWithBye, summarizeSchedule } from "./nflSchedule";
+import { extractScheduleGames, buildScheduleWithBye, summarizeSchedule, gameResultFor, resultFromScheduleGame } from "./nflSchedule";
+
+// Real, confirmed-live getNFLTeamSchedule entries for PHI (DeVonta Smith's team) --
+// homePts/awayPts carry the score as strings, and a "Scheduled" (unplayed) game has
+// neither field at all rather than a null/empty placeholder.
+const PHI_WEEK1_PLAYED = { gameID: "20260913_WSH@PHI", seasonType: "Regular Season", away: "WSH", home: "PHI", awayResult: "L", homePts: "24", homeResult: "W", awayPts: "22", gameStatus: "Completed" };
+const PHI_WEEK2_AWAY_WIN = { gameID: "20260920_PHI@TEN", seasonType: "Regular Season", away: "PHI", home: "TEN", awayResult: "W", homePts: "20", homeResult: "L", awayPts: "24", gameStatus: "Completed" };
+const PHI_WEEK4_SCHEDULED = { gameID: "20261004_LAR@PHI", seasonType: "Regular Season", away: "LAR", home: "PHI", gameStatus: "Scheduled" };
 
 // Trimmed but real, confirmed-live shape from a getNFLTeamSchedule response for KC:
 // { body: { team: "KC", schedule: [...] } } -- games nested under "schedule", not
@@ -45,5 +52,36 @@ describe("buildScheduleWithBye + summarizeSchedule with the real KC shape", () =
 
     const summary = summarizeSchedule(games, "KC");
     expect(summary.byeWeek).not.toBeNull();
+  });
+});
+
+describe("gameResultFor (Schedule tab -- derives W/L/T from scores, by team abbreviation)", () => {
+  it("formats a home win from the home team's perspective", () => {
+    expect(gameResultFor(PHI_WEEK1_PLAYED, "PHI")).toBe("W 24-22");
+  });
+
+  it("formats the same game from the opponent's (away team's) perspective", () => {
+    expect(gameResultFor(PHI_WEEK1_PLAYED, "WSH")).toBe("L 22-24");
+  });
+
+  it("formats an away win correctly (not just home wins)", () => {
+    expect(gameResultFor(PHI_WEEK2_AWAY_WIN, "PHI")).toBe("W 24-20");
+    expect(gameResultFor(PHI_WEEK2_AWAY_WIN, "TEN")).toBe("L 20-24");
+  });
+
+  it("returns null for a game that hasn't been played yet (no score fields at all)", () => {
+    expect(gameResultFor(PHI_WEEK4_SCHEDULED, "PHI")).toBeNull();
+  });
+});
+
+describe("resultFromScheduleGame (Game Log tab -- same formatting, joined by gameID+isHome instead of team abv)", () => {
+  it("matches gameResultFor's output when isHome is known directly", () => {
+    expect(resultFromScheduleGame(PHI_WEEK1_PLAYED, true)).toBe("W 24-22");
+    expect(resultFromScheduleGame(PHI_WEEK2_AWAY_WIN, false)).toBe("W 24-20");
+  });
+
+  it("returns null when no matching schedule game was found (undefined) or it has no score yet", () => {
+    expect(resultFromScheduleGame(undefined, true)).toBeNull();
+    expect(resultFromScheduleGame(PHI_WEEK4_SCHEDULED, false)).toBeNull();
   });
 });
