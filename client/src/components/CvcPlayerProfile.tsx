@@ -22,22 +22,42 @@ function looksLikeInjury(text: string) { return /injur|questionable|doubtful| ru
 /** Fetches Tank01's getNFLPlayerInfo for one player, cached by name for the session. Every
  * field below beyond `espnHeadshot` (already used in Protections.tsx/CvcOwnerLineup.tsx)
  * is read defensively and simply omitted if Tank01 doesn't return it — this endpoint requires
- * TANK01_RAPIDAPI_KEY, which is not configured in every environment. */
-function useTank01PlayerInfo(displayName: string | undefined) {
+ * TANK01_RAPIDAPI_KEY, which is not configured in every environment.
+ *
+ * Tank01's name search is a real name search, not a lookup by a unique key -- two
+ * different real NFL players can share a display name (confirmed live: "DeVonta
+ * Smith" matches both the Philadelphia Eagles WR this app means and an unrelated
+ * Carolina Panthers CB, and Tank01 returns the CB first). Taking body[0] unconditionally
+ * silently picked whichever one Tank01's own search ranked first. When the player's
+ * nfl_team is known, this prefers whichever candidate's team matches it, falling back
+ * to the first candidate only when there's no team to compare against or none match. */
+function useTank01PlayerInfo(displayName: string | undefined, nflTeam?: string | null) {
   const [row, setRow] = useState<TankRecord | null>(null);
   const [loading, setLoading] = useState(false);
   useEffect(() => {
     if (!displayName) return;
-    if (infoCache.has(displayName)) { setRow(infoCache.get(displayName) ?? null); return; }
+    const cacheKey = `${displayName}|${nflTeam ?? ""}`;
+    if (infoCache.has(cacheKey)) { setRow(infoCache.get(cacheKey) ?? null); return; }
     let ignore = false;
     setLoading(true);
     fetch(`/api/tank01/getNFLPlayerInfo?playerName=${encodeURIComponent(displayName)}&getStats=true`)
       .then(response => (response.ok ? response.json() : null) as Promise<TankPlayerInfo | null>)
-      .then(payload => { const next = Array.isArray(payload?.body) ? payload!.body[0] as TankRecord : (payload?.body as TankRecord | undefined) ?? null; infoCache.set(displayName, next); if (!ignore) setRow(next); })
-      .catch(() => { infoCache.set(displayName, null); if (!ignore) setRow(null); })
+      .then(payload => {
+        let next: TankRecord | null;
+        if (Array.isArray(payload?.body)) {
+          const candidates = payload!.body as TankRecord[];
+          const wantedTeam = nflTeam ? normalizeTeam(nflTeam) : null;
+          next = (wantedTeam ? candidates.find(candidate => normalizeTeam(String(candidate.team ?? "")) === wantedTeam) : undefined) ?? candidates[0] ?? null;
+        } else {
+          next = (payload?.body as TankRecord | undefined) ?? null;
+        }
+        infoCache.set(cacheKey, next);
+        if (!ignore) setRow(next);
+      })
+      .catch(() => { infoCache.set(cacheKey, null); if (!ignore) setRow(null); })
       .finally(() => { if (!ignore) setLoading(false); });
     return () => { ignore = true; };
-  }, [displayName]);
+  }, [displayName, nflTeam]);
   return { row, loading };
 }
 
@@ -89,7 +109,7 @@ export function CvcPlayerProfile() {
   const detail = trpc.league.playerDetail.useQuery({ playerId: valid ? playerId : "00000000-0000-0000-0000-000000000000" }, { enabled: valid });
   const [tab, setTab] = useState<"stats" | "schedule" | "gamelog">("stats");
   const [showAllNews, setShowAllNews] = useState(false);
-  const { row: tank } = useTank01PlayerInfo(detail.data?.display_name);
+  const { row: tank } = useTank01PlayerInfo(detail.data?.display_name, detail.data?.nfl_team);
   const { items: news, loading: loadingNews } = usePlayerNews(detail.data?.display_name);
   const fantasyProsNews = trpc.league.fantasyProsNews.useQuery({ limit: 100 }, { staleTime: 15 * 60_000 });
   const normalizedPlayerName = detail.data?.display_name ? normalizePlayerName(detail.data.display_name) : "";

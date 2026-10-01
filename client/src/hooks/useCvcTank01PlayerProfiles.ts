@@ -1,8 +1,31 @@
 import { useEffect, useState } from "react";
 import type { Tank01LiveStats } from "@shared/cvcScoring";
 
-export type Tank01Profile = { espnHeadshot?: string; espnId?: string; age?: string; stats?: Tank01LiveStats & { gamesPlayed?: string | number } };
-export type ProfileLookupPlayer = { display_name: string; metadata?: { tank01_id?: unknown } | null };
+export type Tank01Profile = { espnHeadshot?: string; espnId?: string; age?: string; team?: string; stats?: Tank01LiveStats & { gamesPlayed?: string | number } };
+export type ProfileLookupPlayer = { display_name: string; metadata?: { tank01_id?: unknown } | null; nfl_team?: string | null; position?: string | null };
+
+const normalizeTeamLoose = (team: unknown) => String(team ?? "").trim().toLowerCase();
+
+/** Tank01's name search is a real name search, not a lookup by a unique key -- two
+ * different real NFL players can share a display name (confirmed live: "DeVonta
+ * Smith" matches both the Philadelphia Eagles WR and an unrelated Carolina Panthers
+ * CB, and Tank01 returns the CB first). Blindly taking body[0] silently picks
+ * whichever one Tank01's own search happens to rank first, independent of which real
+ * person the roster actually means. When the player's own nfl_team is known, prefer
+ * whichever candidate's team matches it; this is the same kind of team-qualified
+ * disambiguation resolveStatLine already does server-side for box-score stat lines
+ * (server/cvcScoringShared.ts), just applied to this separate player-search endpoint.
+ * Falls back to the first candidate when there's no team to compare against, or none
+ * of them match (e.g. an offseason team change Tank01 hasn't reflected yet). */
+export function pickBestTank01Match(candidates: Tank01Profile[], player: { nfl_team?: string | null }): Tank01Profile | null {
+  if (!candidates.length) return null;
+  if (player.nfl_team) {
+    const wantedTeam = normalizeTeamLoose(player.nfl_team);
+    const teamMatch = candidates.find(candidate => normalizeTeamLoose(candidate.team) === wantedTeam);
+    if (teamMatch) return teamMatch;
+  }
+  return candidates[0];
+}
 
 type CacheEntry = { value: Tank01Profile | null; expiresAt: number };
 
@@ -100,7 +123,7 @@ async function fetchTank01Profile(player: ProfileLookupPlayer): Promise<Tank01Pr
     try {
       const byIdResponse = await fetch(`/api/tank01/getNFLPlayerInfo?playerID=${encodeURIComponent(tank01Id)}&getStats=true`);
       const byIdPayload = await byIdResponse.json() as { body?: Tank01Profile | Tank01Profile[] };
-      value = (Array.isArray(byIdPayload.body) ? byIdPayload.body[0] : byIdPayload.body) ?? null;
+      value = (Array.isArray(byIdPayload.body) ? pickBestTank01Match(byIdPayload.body, player) : byIdPayload.body) ?? null;
     } catch {
       value = null;
     } finally {
@@ -112,7 +135,7 @@ async function fetchTank01Profile(player: ProfileLookupPlayer): Promise<Tank01Pr
     try {
       const response = await fetch(`/api/tank01/getNFLPlayerInfo?playerName=${encodeURIComponent(player.display_name)}&getStats=true`);
       const payload = await response.json() as { body?: Tank01Profile[] };
-      value = payload.body?.[0] ?? null;
+      value = pickBestTank01Match(payload.body ?? [], player);
     } catch {
       value = null;
     } finally {

@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { acquirePlayerInfoSlot, persistProfile, PROFILE_TTL_MS, profileKey, readPersistedProfile, releasePlayerInfoSlot } from "./useCvcTank01PlayerProfiles";
+import { acquirePlayerInfoSlot, persistProfile, pickBestTank01Match, PROFILE_TTL_MS, profileKey, readPersistedProfile, releasePlayerInfoSlot } from "./useCvcTank01PlayerProfiles";
 
 describe("CVC Tank01 player-info concurrency limiter (ported from WRC's confirmed fix)", () => {
   it("allows up to the concurrency limit (5) to acquire a slot immediately", async () => {
@@ -108,5 +108,38 @@ describe("localStorage-backed profile cache (persists across reloads/tabs, unlik
     Object.defineProperty(globalThis, "localStorage", { value: undefined, configurable: true, writable: true });
     expect(() => persistProfile("x", { value: null, expiresAt: Date.now() + 1000 })).not.toThrow();
     expect(readPersistedProfile("x")).toBeNull();
+  });
+});
+
+describe("pickBestTank01Match (disambiguates same-name real NFL players)", () => {
+  // Regression case: Tank01's own name search for "DeVonta Smith" returns two real
+  // players -- a Carolina Panthers CB first, then the Philadelphia Eagles WR this app
+  // actually means. Blindly taking the first result silently picked the wrong one.
+  const panthersCb = { team: "CAR", espnId: "4594449" };
+  const eaglesWr = { team: "PHI", espnId: "4241478" };
+
+  it("prefers the candidate whose team matches the player's nfl_team", () => {
+    expect(pickBestTank01Match([panthersCb, eaglesWr], { nfl_team: "PHI" })).toBe(eaglesWr);
+  });
+
+  it("matches case/format-insensitively (Tank01's team codes aren't guaranteed to match ours exactly)", () => {
+    expect(pickBestTank01Match([panthersCb, eaglesWr], { nfl_team: "phi" })).toBe(eaglesWr);
+  });
+
+  it("falls back to the first candidate when nfl_team is unknown", () => {
+    expect(pickBestTank01Match([panthersCb, eaglesWr], {})).toBe(panthersCb);
+  });
+
+  it("falls back to the first candidate when no team matches (e.g. an unreflected team change)", () => {
+    expect(pickBestTank01Match([panthersCb, eaglesWr], { nfl_team: "KC" })).toBe(panthersCb);
+  });
+
+  it("returns null for an empty candidate list", () => {
+    expect(pickBestTank01Match([], { nfl_team: "PHI" })).toBeNull();
+  });
+
+  it("returns the only candidate when there's no ambiguity to resolve", () => {
+    expect(pickBestTank01Match([eaglesWr], { nfl_team: "PHI" })).toBe(eaglesWr);
+    expect(pickBestTank01Match([eaglesWr], {})).toBe(eaglesWr);
   });
 });
