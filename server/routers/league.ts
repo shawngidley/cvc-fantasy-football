@@ -1563,7 +1563,7 @@ export const leagueRouter = router({
     if (result.outcome === "already_claimed") throw new TRPCError({ code: "BAD_REQUEST", message: "This player was just claimed by another CVC franchise." });
     if (result.outcome === "rejected") throw new TRPCError({ code: "BAD_REQUEST", message: result.reason });
     const { league, season } = await getCurrentLeagueAndSeason();
-    await createAuditEvent(league.id, season.id, owner.id, "faab_bid", bid.id, "awarded", `${result.franchiseName} claimed ${result.playerName} for $0 FAAB ($1 salary, free agent period).`);
+    await createAuditEvent(league.id, season.id, owner.id, "faab_bid", bid.id, "awarded", `${result.franchiseName} claimed ${result.playerName} (free agent period).`);
     return { alreadyConfirmed: false, awarded: true };
   }),
 
@@ -2143,7 +2143,7 @@ export const leagueRouter = router({
       actor_owner_id: actor.id,
       transaction_type: "drop",
       status: "final",
-      summary: `${franchise.name} released ${player?.display_name ?? "a player"} with no contract penalty.`,
+      summary: `${franchise.name} released ${player?.display_name ?? "a player"}.`,
       details: { player_id: input.playerId, release_source: "protections", no_penalty: true },
     }).select("id").single());
     await createAuditEvent(league.id, season.id, actor.id, "player_contract", contract.id, "released", `${franchise.name} released ${player?.display_name ?? "a player"} from an active contract with no penalty.`);
