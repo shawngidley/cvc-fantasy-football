@@ -74,11 +74,27 @@
 --                   where x.player_id = '8a60ba10-5815-4710-bee4-edfc5f753df1'
 --                     and x.season_id = p.season_id);
 --
--- If the preflight returns a non-zero count, compare the two rows before choosing:
--- if they hold the same numbers (both derived from the same Tank01 line, which is the
--- expected case) the correct row's are already right and the wrong row's are the
--- redundant copy -- delete those, then re-run this script. If they differ, decide
--- which is authoritative first; do not delete blind.
+-- UPDATE -- preflight run 2026-09-30, both flagged tables confirmed as the expected
+-- "redundant copy" case, with one important wrinkle:
+--
+--   cvc_player_weekly_stat: weeks 2 and 3 are byte-for-byte identical duplicates under
+--   both ids (same stat line, same created_at -- both ids independently resolved to
+--   the same real Tank01 box score, since resolveStatLine matches by player name and
+--   falls back past team entirely). Week 1 has a row ONLY under the correct id --
+--   the wrong id's player row didn't exist yet at Week 1's finalization, so it was
+--   never in that week's scoring pool. This is a persisted-cache gap, not a scoring
+--   error: official weekly matchup scores are computed live at finalization time and
+--   never re-read from this table, so no past matchup result is affected either way.
+--
+--   cvc_season_stats_current: confirmed as the direct sum of the above -- correct id
+--   44.0 pts / 3 games (6.8 + 27.7 + 9.5), wrong id 37.2 pts / 2 games (27.7 + 9.5).
+--   The correct id's row is already the complete, accurate aggregate.
+--
+-- Given that, UPDATE ... SET player_id (the generic approach used for every other
+-- table below) is wrong for these two specifically -- it would try to move the wrong
+-- id's week-2/3 rows and season-aggregate row onto an id that already holds the same
+-- or better data, and fail with 23505 exactly as the preflight predicted. The correct
+-- fix is to DELETE the wrong id's rows in these two tables instead of reassigning them.
 --
 -- Not covered here, deliberately: cvc_fantasypros_news_archive.player_id is an
 -- INTEGER FantasyPros id, not a public.player uuid, so it does not reference either
@@ -88,8 +104,8 @@ begin;
 
 update public.roster_assignment set player_id = '8a60ba10-5815-4710-bee4-edfc5f753df1' where player_id = '25e20772-f149-43e4-bf10-13353abcf9dc';
 update public.player_contract set player_id = '8a60ba10-5815-4710-bee4-edfc5f753df1' where player_id = '25e20772-f149-43e4-bf10-13353abcf9dc';
-update public.cvc_player_weekly_stat set player_id = '8a60ba10-5815-4710-bee4-edfc5f753df1' where player_id = '25e20772-f149-43e4-bf10-13353abcf9dc';
-update public.cvc_season_stats_current set player_id = '8a60ba10-5815-4710-bee4-edfc5f753df1' where player_id = '25e20772-f149-43e4-bf10-13353abcf9dc';
+delete from public.cvc_player_weekly_stat where player_id = '25e20772-f149-43e4-bf10-13353abcf9dc';
+delete from public.cvc_season_stats_current where player_id = '25e20772-f149-43e4-bf10-13353abcf9dc';
 update public.cvc_season_stats_historical set player_id = '8a60ba10-5815-4710-bee4-edfc5f753df1' where player_id = '25e20772-f149-43e4-bf10-13353abcf9dc';
 update public.player_season_stat set player_id = '8a60ba10-5815-4710-bee4-edfc5f753df1' where player_id = '25e20772-f149-43e4-bf10-13353abcf9dc';
 update public.faab_bid set player_id = '8a60ba10-5815-4710-bee4-edfc5f753df1' where player_id = '25e20772-f149-43e4-bf10-13353abcf9dc';
