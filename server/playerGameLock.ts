@@ -48,3 +48,40 @@ export async function isPlayerLockedForGameStart(nflTeam: string | null | undefi
     return true;
   }
 }
+
+/**
+ * Batch form of hasPlayerGameStarted, for rendering a whole list of free agents (up to
+ * ~300 players, but only ever 32 distinct NFL teams) without multiplying Tank01 API
+ * calls -- fetches the week's games exactly once, not once per player. Returns the set
+ * of normalized team codes whose game has already kicked off; a team on a bye or with
+ * no game found is simply absent from the set (not locked), matching
+ * hasPlayerGameStarted's own rule.
+ *
+ * Fails safe in the opposite direction from isPlayerLockedForGameStart: this is for
+ * *display* (dimming an already-started player's Bid button in a list the owner is
+ * just browsing), not the submission gate itself, so a schedule-fetch error here
+ * returns an empty set (nothing shown as locked) rather than locking the whole list --
+ * the real enforcement still happens at submitFaabBid's own isPlayerLockedForGameStart
+ * check regardless of what this displays.
+ */
+export async function getLockedNflTeamsForWeek(weekNumber: number, seasonYear: number): Promise<Set<string>> {
+  const adapter = getNFLDataAdapter();
+  if (!(adapter instanceof Tank01NFLDataAdapter)) return new Set();
+  try {
+    const games = await adapter.listGamesForWeek(weekNumber, seasonYear);
+    const locked = new Set<string>();
+    for (const game of games) {
+      if (!hasKickedOff(game.gameDate, game.gameTime)) continue;
+      if (game.away) locked.add(normalizeTeam(game.away));
+      if (game.home) locked.add(normalizeTeam(game.home));
+    }
+    return locked;
+  } catch {
+    return new Set();
+  }
+}
+
+/** Checks a single player's team against the batch result above. */
+export function isTeamLocked(nflTeam: string | null | undefined, lockedTeams: Set<string>): boolean {
+  return !!nflTeam && lockedTeams.has(normalizeTeam(nflTeam));
+}

@@ -9,7 +9,7 @@ vi.mock("./nflDataAdapter", () => {
 });
 
 const { getNFLDataAdapter, Tank01NFLDataAdapter } = await import("./nflDataAdapter");
-const { hasPlayerGameStarted, isPlayerLockedForGameStart } = await import("./playerGameLock");
+const { hasPlayerGameStarted, isPlayerLockedForGameStart, getLockedNflTeamsForWeek, isTeamLocked } = await import("./playerGameLock");
 
 function mockAdapter(games: { away?: string; home?: string; gameDate?: string; gameTime?: string }[]) {
   const adapter = Object.create(Tank01NFLDataAdapter.prototype);
@@ -72,5 +72,55 @@ describe("isPlayerLockedForGameStart (fail-safe wrapper)", () => {
   it("still correctly returns false (not locked) for a legitimately bye/no-game player", async () => {
     mockAdapter([{ away: "KC", home: "DEN", gameDate: "20260913", gameTime: "1:00p" }]);
     expect(await isPlayerLockedForGameStart("NE", 1, 2026)).toBe(false);
+  });
+});
+
+describe("getLockedNflTeamsForWeek + isTeamLocked (batch form, for rendering a whole free-agent list)", () => {
+  afterEach(() => { vi.useRealTimers(); vi.restoreAllMocks(); });
+
+  it("locks both teams of a game that already kicked off, regardless of which side is away/home", async () => {
+    // Regression case for the real bug this was added to fix: a Thursday-night game
+    // (CLE@PIT) that's already kicked off by the time this is checked Friday -- the
+    // free-agent list's previous client-side-only "next game" heuristic missed this
+    // because the daily schedule sync had already advanced each team's cached "next
+    // game" to the following week by then.
+    const kickoff = Date.UTC(2026, 9, 2, 0, 15, 0); // Thu Oct 1 2026, 8:15pm ET (= Oct 2 00:15 UTC)
+    vi.useFakeTimers();
+    vi.setSystemTime(kickoff + 60 * 60 * 1000); // Friday, 1 hour after kickoff
+    mockAdapter([
+      { away: "CLE", home: "PIT", gameDate: "20261001", gameTime: "8:15p" },
+      { away: "LAR", home: "SF", gameDate: "20261004", gameTime: "4:25p" }, // not kicked off yet
+    ]);
+    const locked = await getLockedNflTeamsForWeek(4, 2026);
+    expect(isTeamLocked("CLE", locked)).toBe(true);
+    expect(isTeamLocked("PIT", locked)).toBe(true);
+    expect(isTeamLocked("SF", locked)).toBe(false); // this week's game, but not kicked off yet
+    expect(isTeamLocked("LAR", locked)).toBe(false);
+  });
+
+  it("locks no one for a bye team or a team with no game this week", async () => {
+    mockAdapter([{ away: "KC", home: "DEN", gameDate: "20260913", gameTime: "1:00p" }]);
+    const locked = await getLockedNflTeamsForWeek(1, 2026);
+    expect(isTeamLocked("NE", locked)).toBe(false);
+  });
+
+  it("isTeamLocked returns false for a null/undefined team rather than throwing", () => {
+    const locked = new Set(["kc"]);
+    expect(isTeamLocked(null, locked)).toBe(false);
+    expect(isTeamLocked(undefined, locked)).toBe(false);
+  });
+
+  it("fails open (empty set, nothing shown as locked) rather than throwing when the schedule fetch errors -- this is a display hint, not the enforcement gate", async () => {
+    const adapter = Object.create(Tank01NFLDataAdapter.prototype);
+    adapter.listGamesForWeek = vi.fn().mockRejectedValue(new Error("Tank01 schedule request failed"));
+    (getNFLDataAdapter as any).mockReturnValue(adapter);
+    const locked = await getLockedNflTeamsForWeek(4, 2026);
+    expect(locked.size).toBe(0);
+  });
+
+  it("fails open when the adapter isn't configured at all", async () => {
+    (getNFLDataAdapter as any).mockReturnValue({});
+    const locked = await getLockedNflTeamsForWeek(4, 2026);
+    expect(locked.size).toBe(0);
   });
 });

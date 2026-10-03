@@ -18,7 +18,7 @@ import { getWaiverAwardDate, hasClearedWaiverHold } from "../waiverHold";
 import { syncFantasyProsSnapshot, syncFantasyProsActiveFlags, syncFantasyProsRookieFlags } from "../fantasyProsSync";
 import { syncTank01SeasonStats } from "../tank01SeasonStatsSync";
 import { syncTank01Scores } from "../tank01ScoringSync";
-import { isPlayerLockedForGameStart } from "../playerGameLock";
+import { isPlayerLockedForGameStart, getLockedNflTeamsForWeek, isTeamLocked } from "../playerGameLock";
 import { loadEffectiveFutureLineup } from "../plannedLineup";
 import { aggregateDstSeasonStats } from "../dstSeasonAggregation";
 import { syncNflTeamSchedules } from "../nflTeamScheduleSync";
@@ -162,10 +162,16 @@ async function applyRookieLotteryResults(lotteryId: string, draftId: string, rou
  * awarded -- the first Thu/Sun resolution at least 48h after the cut; not
  * meaningful once a free-period claim clears the hold, since that's awarded
  * immediately on confirm rather than at a scheduled resolution -- see
- * awardFreeAgentClaimNow). Batched to keep the .in() URL within limits, same as
- * attachSeasonStats. */
-async function attachWaiverTiming<T extends { id: string }>(players: T[], seasonId: string): Promise<(T & { droppedAt: string | null; heldForWaiver: boolean; awardDate: string })[]> {
-  if (!players.length) return players as (T & { droppedAt: string | null; heldForWaiver: boolean; awardDate: string })[];
+ * awardFreeAgentClaimNow). Also attaches gameLocked -- whether this player's NFL team
+ * has already kicked off this CVC week, same rule submitFaabBid itself enforces
+ * (playerGameLock.ts) -- so the list can dim/disable the Bid button instead of
+ * showing a normal award date for a player a bid would actually get rejected for.
+ * Computed once per call via getLockedNflTeamsForWeek (one schedule fetch total, not
+ * one per player) rather than calling isPlayerLockedForGameStart per player, which
+ * would multiply Tank01 API calls across a 200+ player list. Batched to keep the
+ * .in() URL within limits, same as attachSeasonStats. */
+async function attachWaiverTiming<T extends { id: string; nfl_team?: string | null }>(players: T[], seasonId: string, seasonYear: number): Promise<(T & { droppedAt: string | null; heldForWaiver: boolean; awardDate: string; gameLocked: boolean })[]> {
+  if (!players.length) return players as (T & { droppedAt: string | null; heldForWaiver: boolean; awardDate: string; gameLocked: boolean })[];
   const ids = players.map(player => player.id);
   const releasedByPlayer = new Map<string, string>();
   for (let index = 0; index < ids.length; index += 150) {
@@ -176,10 +182,13 @@ async function attachWaiverTiming<T extends { id: string }>(players: T[], season
       if (!current || new Date(row.released_at).getTime() > new Date(current).getTime()) releasedByPlayer.set(row.player_id, row.released_at);
     }
   }
+  const weeks = unwrap(await supabase.from("schedule_week").select("week_number, status").eq("season_id", seasonId).order("week_number")) ?? [];
+  const currentWeek = await resolveEffectivePlanningWeek(weeks, seasonId);
+  const lockedTeams = currentWeek ? await getLockedNflTeamsForWeek(currentWeek.week_number, seasonYear) : new Set<string>();
   const nowDate = new Date();
   return players.map(player => {
     const droppedAt = releasedByPlayer.get(player.id) ?? null;
-    return { ...player, droppedAt, heldForWaiver: !hasClearedWaiverHold(droppedAt, nowDate), awardDate: getWaiverAwardDate(droppedAt, nowDate).toISOString() };
+    return { ...player, droppedAt, heldForWaiver: !hasClearedWaiverHold(droppedAt, nowDate), awardDate: getWaiverAwardDate(droppedAt, nowDate).toISOString(), gameLocked: isTeamLocked(player.nfl_team, lockedTeams) };
   });
 }
 
@@ -831,7 +840,7 @@ export const leagueRouter = router({
       }
       tagged.sort((a, b) => a.display_name.localeCompare(b.display_name));
       const page = tagged.slice(0, limit);
-      return attachWaiverTiming(await attachSeasonStats(page, season.id, input?.year, season.year), season.id);
+      return attachWaiverTiming(await attachSeasonStats(page, season.id, input?.year, season.year), season.id, season.year);
     }
 
     let playerQuery = supabase.from("player").select("id, provider, display_name, position, nfl_team, status, metadata").neq("provider", "placeholder").in("position", eligiblePositions).order("display_name").limit(limit + 220);
@@ -871,7 +880,7 @@ export const leagueRouter = router({
       const tag = latestCutTagByPlayerId.get(player.id);
       return tag ? { ...player, cutByFranchiseName: tag.franchiseName, cutTagType: tag.tagType } : player;
     });
-    return attachWaiverTiming(await attachSeasonStats(tagged, season.id, input?.year, season.year), season.id);
+    return attachWaiverTiming(await attachSeasonStats(tagged, season.id, input?.year, season.year), season.id, season.year);
   }),
 
   // "All Players" tab equivalent -- same eligible-position pool as freeAgents, but
@@ -903,7 +912,11 @@ export const leagueRouter = router({
       const franchise = franchiseByPlayerId.get(player.id);
       return franchise ? { ...player, rosteredByFranchiseName: franchise.name, rosteredByFranchiseAbbreviation: franchise.abbreviation } : player;
     });
-    return attachSeasonStats(tagged, season.id, input?.year, season.year);
+    // Unrostered players on this tab hit the exact same Bid/Claim flow as the Free
+    // Agents tab (same row renderer client-side), so they need the same gameLocked
+    // check -- attachWaiverTiming's droppedAt/heldForWaiver/awardDate fields are unused
+    // here but harmless to carry along.
+    return attachWaiverTiming(await attachSeasonStats(tagged, season.id, input?.year, season.year), season.id, season.year);
   }),
 
   // Watchlist tab: resolves the owner's saved player ids into full player + season-stat
@@ -917,7 +930,7 @@ export const leagueRouter = router({
     const watched = unwrap(await supabase.from("watchlist").select("player_id").eq("franchise_id", franchise.id)) ?? [];
     if (!watched.length) return [];
     const players = unwrap(await supabase.from("player").select("id, provider, display_name, position, nfl_team, status, metadata").in("id", watched.map(row => row.player_id))) ?? [];
-    return attachSeasonStats(players, season.id, input?.year, season.year);
+    return attachWaiverTiming(await attachSeasonStats(players, season.id, input?.year, season.year), season.id, season.year);
   }),
 
 
