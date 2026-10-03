@@ -370,7 +370,7 @@ export function CvcFreeAgents() {
         <p className="mt-4 text-center text-xs text-cvc-muted">{waiver.data?.period?.label ?? "Waiver"} · Bids are blind until the commissioner's resolution runs</p>
         {submit.error ? <p className="mt-2 text-center text-sm text-red-300">{submit.error.message}</p> : null}
 
-        <div className="mt-4 flex gap-3"><button onClick={() => setSelectedPlayerId("")} className="flex-1 rounded-lg border border-white/20 py-2.5 text-sm font-bold text-white hover:bg-white/10">Cancel</button><button disabled={submit.isPending || (!isFreePeriod && (Number(amount) < 1 || Number(amount) > 30))} onClick={() => submit.mutate({ playerId: selectedPlayerId, amount: isFreePeriod ? 1 : Number(amount) })} className="cvc-button-compact flex-[2] justify-center disabled:opacity-50">{submit.isPending ? "Submitting…" : `Submit $${isFreePeriod ? 1 : Number(amount) || 0} ${isFreePeriod ? "claim" : "bid"}`}</button></div>
+        <div className="mt-4 flex gap-3"><button onClick={() => setSelectedPlayerId("")} className="flex-1 rounded-lg border border-white/20 py-2.5 text-sm font-bold text-white hover:bg-white/10">Cancel</button><button disabled={submit.isPending || (!isFreePeriod && (Number(amount) < 1 || Number(amount) > 30))} onClick={() => submit.mutate({ playerId: selectedPlayerId, amount: isFreePeriod ? 1 : Number(amount) })} className="cvc-button-compact flex-[2] justify-center disabled:opacity-50">{submit.isPending ? "Submitting…" : isFreePeriod ? "Submit claim" : `Submit $${Number(amount) || 0} bid`}</button></div>
         <p className="mt-3 text-[11px] leading-4 text-cvc-muted">You can raise how many you're willing to win at this position afterward on the Manage Bids tab.</p>
       </div>
     </div> : null}
