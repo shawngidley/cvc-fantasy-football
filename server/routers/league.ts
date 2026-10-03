@@ -2580,4 +2580,40 @@ export const leagueRouter = router({
     if (!item) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Financial entry could not be saved." });
     await createAuditEvent(league.id, season.id, commissioner.id, "league_financial_entry", item.id, "created", `Created ${input.entryType} entry`); return item;
   }),
+
+  seasonHistory: publicProcedure.query(async () => {
+    const { league } = await getCurrentLeagueAndSeason();
+    const seasons = unwrap(await supabase.from("cvc_season_history").select("id, year, champion_owner_name, champion_team_name, champion_score, runner_up_owner_name, runner_up_team_name, runner_up_score").eq("league_id", league.id).order("year", { ascending: false })) ?? [];
+    if (!seasons.length) return { seasons: [] as const, allTime: [] as const };
+    const seasonIds = seasons.map(season => season.id);
+    const standings = unwrap(await supabase.from("cvc_season_history_standing").select("season_history_id, division_name, owner_name, team_name, wins, losses, games_back, points_for, points_against, division_wins, division_losses, clinched, standing_order").in("season_history_id", seasonIds).order("standing_order")) ?? [];
+    const playoffGames = unwrap(await supabase.from("cvc_season_history_playoff_game").select("season_history_id, round_label, owner_a_name, score_a, owner_b_name, score_b, winner_owner_name, game_order").in("season_history_id", seasonIds).order("game_order")) ?? [];
+
+    const seasonsOut = seasons.map(season => ({
+      ...season,
+      standings: standings.filter(row => row.season_history_id === season.id),
+      playoffGames: playoffGames.filter(row => row.season_history_id === season.id),
+    }));
+
+    // All-time franchise records, aggregated by owner name across every imported season's
+    // standings rows (regular-season W-L) plus a title count from each season's champion.
+    const allTimeMap = new Map<string, { ownerName: string; wins: number; losses: number; titles: number }>();
+    for (const row of standings) {
+      const entry = allTimeMap.get(row.owner_name) ?? { ownerName: row.owner_name, wins: 0, losses: 0, titles: 0 };
+      entry.wins += row.wins;
+      entry.losses += row.losses;
+      allTimeMap.set(row.owner_name, entry);
+    }
+    for (const season of seasons) {
+      if (!season.champion_owner_name) continue;
+      const entry = allTimeMap.get(season.champion_owner_name) ?? { ownerName: season.champion_owner_name, wins: 0, losses: 0, titles: 0 };
+      entry.titles += 1;
+      allTimeMap.set(season.champion_owner_name, entry);
+    }
+    const allTime = Array.from(allTimeMap.values())
+      .map(row => ({ ...row, winPct: row.wins + row.losses > 0 ? row.wins / (row.wins + row.losses) : 0 }))
+      .sort((a, b) => b.winPct - a.winPct || b.titles - a.titles);
+
+    return { seasons: seasonsOut, allTime };
+  }),
 });
