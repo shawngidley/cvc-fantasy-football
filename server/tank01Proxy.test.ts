@@ -12,7 +12,13 @@ vi.mock("./supabase", () => ({
   },
 }));
 
-import { __clearTank01ProxyCacheForTests, proxyTank01Request } from "./tank01Proxy";
+import { __clearTank01ProxyCacheForTests, proxyTank01Request, resolveCacheTtlMs } from "./tank01Proxy";
+
+// A fixed, confirmed-live instant (Sun Oct 4 2026, 1:00pm ET / 17:00 UTC) and a fixed,
+// confirmed-off-window instant (Tue Oct 6 2026, 3:00pm ET / 19:00 UTC) -- see
+// tank01LiveWindow.test.ts for how these were verified against Intl, not assumed.
+const LIVE_WINDOW_INSTANT = Date.UTC(2026, 9, 4, 17, 0, 0);
+const OFF_WINDOW_INSTANT = Date.UTC(2026, 9, 6, 19, 0, 0);
 
 function mockReqRes(endpoint: string, query: Record<string, string>) {
   const req = { params: { endpoint }, query } as any;
@@ -76,5 +82,65 @@ describe("proxyTank01Request caching", () => {
     await proxyTank01Request(b.req, b.res);
 
     expect(fetchSpy).toHaveBeenCalledTimes(2); // gameA fetched once (a2 hit cache), gameB fetched separately
+  });
+});
+
+describe("resolveCacheTtlMs", () => {
+  it("gives getNFLBoxScore the short in-game TTL during a live window", () => {
+    expect(resolveCacheTtlMs("getNFLBoxScore", LIVE_WINDOW_INSTANT)).toBe(50_000);
+  });
+
+  it("gives getNFLBoxScore the long off-window TTL when no game could be live", () => {
+    expect(resolveCacheTtlMs("getNFLBoxScore", OFF_WINDOW_INSTANT)).toBe(15 * 60_000);
+  });
+
+  it("gives getNFLGamesForWeek the short in-game TTL during a live window", () => {
+    expect(resolveCacheTtlMs("getNFLGamesForWeek", LIVE_WINDOW_INSTANT)).toBe(5 * 60_000);
+  });
+
+  it("gives getNFLGamesForWeek the long off-window TTL when no game could be live", () => {
+    expect(resolveCacheTtlMs("getNFLGamesForWeek", OFF_WINDOW_INSTANT)).toBe(15 * 60_000);
+  });
+
+  it("gives every static endpoint its configured TTL regardless of live window", () => {
+    expect(resolveCacheTtlMs("getNFLNews", LIVE_WINDOW_INSTANT)).toBe(15 * 60_000);
+    expect(resolveCacheTtlMs("getNFLPlayerInfo", OFF_WINDOW_INSTANT)).toBe(15 * 60_000);
+    expect(resolveCacheTtlMs("getNFLGamesForPlayer", LIVE_WINDOW_INSTANT)).toBe(15 * 60_000);
+    expect(resolveCacheTtlMs("getNFLProjections", OFF_WINDOW_INSTANT)).toBe(60 * 60_000);
+    expect(resolveCacheTtlMs("getNFLTeamSchedule", LIVE_WINDOW_INSTANT)).toBe(6 * 60 * 60_000);
+    expect(resolveCacheTtlMs("getNFLTeams", OFF_WINDOW_INSTANT)).toBe(6 * 60 * 60_000);
+    expect(resolveCacheTtlMs("getNFLADP", LIVE_WINDOW_INSTANT)).toBe(6 * 60 * 60_000);
+    expect(resolveCacheTtlMs("getNFLDepthCharts", OFF_WINDOW_INSTANT)).toBe(6 * 60 * 60_000);
+  });
+
+  it("falls back to the 20s default for an unrecognized endpoint", () => {
+    expect(resolveCacheTtlMs("someFutureEndpoint", LIVE_WINDOW_INSTANT)).toBe(20_000);
+  });
+});
+
+describe("proxyTank01Request end-to-end: off-window TTL actually gets applied to a live endpoint", () => {
+  beforeEach(() => {
+    __clearTank01ProxyCacheForTests();
+    process.env.TANK01_RAPIDAPI_KEY = "test-key";
+    vi.restoreAllMocks();
+  });
+
+  it("serves a cached getNFLBoxScore response well past 50s (but under 15min) when outside the live window", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(OFF_WINDOW_INSTANT);
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue({
+      ok: true, status: 200, headers: { get: () => "application/json" }, text: async () => JSON.stringify({ body: "data" }),
+    } as any);
+
+    const first = mockReqRes("getNFLBoxScore", { gameID: "gameOffWindow" });
+    await proxyTank01Request(first.req, first.res);
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+
+    vi.setSystemTime(OFF_WINDOW_INSTANT + 5 * 60_000); // 5 minutes later -- would have expired under the old flat 20s TTL
+    const second = mockReqRes("getNFLBoxScore", { gameID: "gameOffWindow" });
+    await proxyTank01Request(second.req, second.res);
+    expect(fetchSpy).toHaveBeenCalledTimes(1); // still cached
+
+    vi.useRealTimers();
   });
 });

@@ -4,7 +4,7 @@ import { normalizePlayerName } from "@shared/playerNameMatch";
 import { getKickerEventsForPlayer, parseEspnKickerEvents, sumMadeFieldGoalYards, countMadeExtraPoints, type KickerPlayEvent } from "@shared/espnKickerEvents";
 
 const TANK01_BASE_URL = "/api/tank01";
-const POLL_INTERVAL_MS = 30_000;
+const POLL_INTERVAL_MS = 60_000;
 
 type TankGame = { gameID?: string; away?: string; home?: string; gameDate?: string; gameTime?: string };
 export type LiveStatMap = Record<string, Tank01LiveStats>;
@@ -31,7 +31,7 @@ export function computeKickoffUtc(gameDate: string | undefined, gameTime: string
 }
 
 // CRITICAL: these two checks must stay separate. Using one wide window for both
-// "should we fetch this game's box score at all" AND "should the recurring 30-second
+// "should we fetch this game's box score at all" AND "should the recurring 60-second
 // poll keep rescheduling itself" caused a real production incident in WRC (this same
 // architecture): once any game kicked off, the poll never stopped for the entire wide
 // window -- every open browser tab kept hitting Tank01/ESPN every 30 seconds,
@@ -113,7 +113,7 @@ export function useCvcTank01LiveScores(week: number | undefined, season: number 
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   // Guards against the effect re-running (e.g. because `rules` -- an array built with
   // `rules.data ?? []` in the caller -- gets a new reference on every render, which it
-  // does here every 30s as this hook's own state updates trigger a parent re-render)
+  // does here every 60s as this hook's own state updates trigger a parent re-render)
   // and firing an unconditional "initial fetch" again even after polling had already
   // determined no game is in progress for this week. Once set, every fetch attempt --
   // including that unconditional initial one -- is skipped for as long as `week`
@@ -123,7 +123,7 @@ export function useCvcTank01LiveScores(week: number | undefined, season: number 
   // The full fetch-eligible (wide) box-score fetch, which populates already-final
   // games, runs only once per week; every recurring poll after that fetches box
   // scores only for games isGameCurrentlyLive still considers in progress. Final
-  // games' stats don't change, so refetching all of them every 30s was the bulk of
+  // games' stats don't change, so refetching all of them every 60s was the bulk of
   // Tank01 call volume during a live week. Persists across effect re-runs like
   // stoppedForWeekRef, for the same reason.
   const initialFetchDoneForWeekRef = useRef<number | null>(null);
@@ -256,7 +256,7 @@ export function useCvcTank01LiveScores(week: number | undefined, season: number 
       } catch { /* ESPN kicker-event fetch failing shouldn't break the rest of live scoring */ }
       // CRITICAL: this must be anyCurrentlyLive (narrow window), not
       // fetchEligibleGames.length > 0 (wide window). Returning true here is what tells
-      // the poll loop to reschedule itself again in 30 seconds -- tying that decision to
+      // the poll loop to reschedule itself again in 60 seconds -- tying that decision to
       // the wide window is exactly what caused the runaway-polling incident: the poll
       // would never stop for up to 24 hours after any kickoff, regardless of whether the
       // game itself had already ended hours earlier.
