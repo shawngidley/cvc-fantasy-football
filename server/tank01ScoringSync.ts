@@ -18,6 +18,12 @@ export { normalizeTeam };
  * 3=postponed, 4=suspended), checked as a string here since its exact wire type isn't
  * confirmed; falls back to the gameStatus text itself for defense-in-depth in case
  * that field is ever missing or an unexpected type. */
+// Note for playerGameLock.ts's getCachedGamesForWeek (a 10-minute cache on
+// getNFLGamesForWeek, used only by the kickoff lock, not by this file): that TTL is
+// only safe because the lock treats kickoff time as the primary signal and never reads
+// gameStatus at all. If this module's gameStatus check is ever promoted to be the
+// lock's primary signal too, a 10-minute-stale schedule read becomes a correctness
+// bug there, not just a cost saving -- revisit that cache at the same time.
 export function isGameFinal(body: { gameStatus?: unknown; gameStatusCode?: unknown } | null | undefined): boolean {
   const code = body?.gameStatusCode !== undefined ? String(body.gameStatusCode) : undefined;
   if (code !== undefined) return code === "2";

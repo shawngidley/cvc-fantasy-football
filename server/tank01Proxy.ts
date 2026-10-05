@@ -120,7 +120,10 @@ const responseCache = new Map<string, { status: number; contentType: string; bod
 // supabase/migrations/202609210001_cvc_tank01_response_cache.sql to create the table.
 const SHARED_CACHE_TABLE = "tank01_response_cache";
 
-async function readSharedCache(cacheKey: string, ttlMs: number): Promise<{ status: number; contentType: string; body: string } | null> {
+// Exported so playerGameLock.ts's own cache (a different key prefix, "lock:...", so it
+// can never collide with this proxy's own "${endpoint}?${query}" keys) can reuse the
+// exact same shared table and best-effort error handling rather than duplicating it.
+export async function readSharedCache(cacheKey: string, ttlMs: number): Promise<{ status: number; contentType: string; body: string } | null> {
   try {
     const { data, error } = await supabase
       .from(SHARED_CACHE_TABLE)
@@ -135,7 +138,7 @@ async function readSharedCache(cacheKey: string, ttlMs: number): Promise<{ statu
   }
 }
 
-async function writeSharedCache(cacheKey: string, status: number, contentType: string, body: string): Promise<void> {
+export async function writeSharedCache(cacheKey: string, status: number, contentType: string, body: string): Promise<void> {
   try {
     await supabase
       .from(SHARED_CACHE_TABLE)

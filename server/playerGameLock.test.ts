@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("./nflDataAdapter", () => {
   class Tank01NFLDataAdapter {}
@@ -8,8 +8,19 @@ vi.mock("./nflDataAdapter", () => {
   };
 });
 
+// playerGameLock.ts's own 10-minute cache (getCachedGamesForWeek) reuses tank01Proxy's
+// shared-cache helpers for its L2 -- mocked here so these tests exercise the module's
+// L1 in-memory memo deterministically, without a real (and in this sandbox, doomed)
+// network round trip to Supabase. Defaults to "always miss" (null)/"always succeeds";
+// individual tests override these to simulate a real L2 hit.
+vi.mock("./tank01Proxy", () => ({
+  readSharedCache: vi.fn().mockResolvedValue(null),
+  writeSharedCache: vi.fn().mockResolvedValue(undefined),
+}));
+
 const { getNFLDataAdapter, Tank01NFLDataAdapter } = await import("./nflDataAdapter");
-const { hasPlayerGameStarted, isPlayerLockedForGameStart, getLockedNflTeamsForWeek, isTeamLocked } = await import("./playerGameLock");
+const { readSharedCache, writeSharedCache } = await import("./tank01Proxy");
+const { hasPlayerGameStarted, isPlayerLockedForGameStart, getLockedNflTeamsForWeek, isTeamLocked, __clearLockGamesCacheForTests } = await import("./playerGameLock");
 
 function mockAdapter(games: { away?: string; home?: string; gameDate?: string; gameTime?: string }[]) {
   const adapter = Object.create(Tank01NFLDataAdapter.prototype);
@@ -17,6 +28,17 @@ function mockAdapter(games: { away?: string; home?: string; gameDate?: string; g
   (getNFLDataAdapter as any).mockReturnValue(adapter);
   return adapter;
 }
+
+// The lock's own cache (getCachedGamesForWeek) is module-level state shared across
+// every test in this file (by design -- it's meant to persist across requests within
+// the same process). Reset it, and the shared-cache mocks' default behavior, before
+// each test so one test's cached result can't leak into the next and silently skip a
+// mocked adapter that test expects to be called.
+beforeEach(() => {
+  __clearLockGamesCacheForTests();
+  (readSharedCache as any).mockReset().mockResolvedValue(null);
+  (writeSharedCache as any).mockReset().mockResolvedValue(undefined);
+});
 
 describe("hasPlayerGameStarted", () => {
   afterEach(() => { vi.useRealTimers(); vi.restoreAllMocks(); });
@@ -122,5 +144,79 @@ describe("getLockedNflTeamsForWeek + isTeamLocked (batch form, for rendering a w
     (getNFLDataAdapter as any).mockReturnValue({});
     const locked = await getLockedNflTeamsForWeek(4, 2026);
     expect(locked.size).toBe(0);
+  });
+});
+
+describe("getCachedGamesForWeek (the lock's own 10-minute cache, shared by hasPlayerGameStarted + getLockedNflTeamsForWeek)", () => {
+  it("shares one upstream call across repeated lock checks for the same week+season", async () => {
+    const adapter = mockAdapter([{ away: "KC", home: "DEN", gameDate: "20260913", gameTime: "1:00p" }]);
+    await getLockedNflTeamsForWeek(4, 2026);
+    await getLockedNflTeamsForWeek(4, 2026);
+    await getLockedNflTeamsForWeek(4, 2026);
+    expect(adapter.listGamesForWeek).toHaveBeenCalledTimes(1);
+  });
+
+  it("shares the cached list across different lock functions that key identically", async () => {
+    const adapter = mockAdapter([{ away: "KC", home: "DEN", gameDate: "20260913", gameTime: "1:00p" }]);
+    await getLockedNflTeamsForWeek(4, 2026); // populates the cache for week 4 / 2026
+    await hasPlayerGameStarted("KC", 4, 2026); // same week+season -- must reuse it, not refetch
+    expect(adapter.listGamesForWeek).toHaveBeenCalledTimes(1);
+  });
+
+  it("scopes the cache per week+season -- a different week or season is a separate cache entry", async () => {
+    const adapter = mockAdapter([{ away: "KC", home: "DEN", gameDate: "20260913", gameTime: "1:00p" }]);
+    await getLockedNflTeamsForWeek(4, 2026);
+    await getLockedNflTeamsForWeek(5, 2026); // different week
+    await getLockedNflTeamsForWeek(4, 2027); // different season
+    expect(adapter.listGamesForWeek).toHaveBeenCalledTimes(3);
+  });
+
+  it("warms the shared L2 cache (writeSharedCache) after a real fetch, keyed with the lock-specific prefix", async () => {
+    mockAdapter([{ away: "KC", home: "DEN", gameDate: "20260913", gameTime: "1:00p" }]);
+    await getLockedNflTeamsForWeek(4, 2026);
+    expect(writeSharedCache).toHaveBeenCalledTimes(1);
+    const [cacheKey] = (writeSharedCache as any).mock.calls[0];
+    expect(cacheKey).toBe("lock:getNFLGamesForWeek?week=4&season=2026");
+  });
+
+  it("reads the shared L2 cache (readSharedCache) before falling back to the adapter", async () => {
+    // Far-future kickoff on both the adapter's and the cache's game, so "has it kicked
+    // off" is unambiguously false on either real-clock test run -- what's under test
+    // here is WHICH list gets used (cached vs. adapter), not the kickoff math itself.
+    const adapter = mockAdapter([{ away: "KC", home: "DEN", gameDate: "20991231", gameTime: "1:00p" }]);
+    (readSharedCache as any).mockResolvedValueOnce({
+      status: 200, contentType: "application/json",
+      body: JSON.stringify([{ away: "SF", home: "LAR", gameDate: "20991231", gameTime: "1:00p" }]),
+    });
+    const locked = await getLockedNflTeamsForWeek(4, 2026);
+    // The real proof this came from the cache and not the adapter: the adapter (KC/DEN)
+    // was never called at all -- only the cached list (SF/LAR) was available to read from.
+    expect(adapter.listGamesForWeek).not.toHaveBeenCalled();
+    expect(locked.size).toBe(0); // neither game has kicked off
+  });
+
+  // GUARD TEST -- load-bearing. Verified by temporarily deleting the two `if (games.length)`
+  // guards in getCachedGamesForWeek (so it would cache/accept an empty list) and
+  // confirming this test fails, then restoring them.
+  it("never accepts an empty list from the shared cache -- treats it as a miss and refetches", async () => {
+    const adapter = mockAdapter([{ away: "KC", home: "DEN", gameDate: "20991231", gameTime: "1:00p" }]);
+    (readSharedCache as any).mockResolvedValueOnce({ status: 200, contentType: "application/json", body: JSON.stringify([]) });
+    const locked = await getLockedNflTeamsForWeek(4, 2026);
+    // If the empty cached list had been trusted, this would return with nothing locked
+    // and never touch the adapter at all -- a real kickoff would stay invisible to every
+    // owner, league-wide, for the rest of the 10-minute window.
+    expect(adapter.listGamesForWeek).toHaveBeenCalledTimes(1);
+    expect(locked.size).toBe(0); // KC/DEN game here hasn't kicked off yet -- correctly not locked for the RIGHT reason
+  });
+
+  // GUARD TEST -- load-bearing, same verification method as above.
+  it("never writes an empty list to the cache -- a later call still refetches instead of trusting it", async () => {
+    const adapter = mockAdapter([]); // simulates a Tank01 200-with-empty-body blip
+    await getLockedNflTeamsForWeek(6, 2026);
+    expect(writeSharedCache).not.toHaveBeenCalled(); // the empty result must never be published
+    adapter.listGamesForWeek.mockResolvedValue([{ away: "KC", home: "DEN", gameDate: "20991231", gameTime: "1:00p" }]);
+    await getLockedNflTeamsForWeek(6, 2026); // same cache key -- if the empty list had been
+    // memoed, this would short-circuit and never reach the adapter a second time
+    expect(adapter.listGamesForWeek).toHaveBeenCalledTimes(2);
   });
 });
