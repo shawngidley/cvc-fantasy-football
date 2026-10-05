@@ -87,34 +87,34 @@ describe("proxyTank01Request caching", () => {
 
 describe("resolveCacheTtlMs", () => {
   it("gives getNFLBoxScore the short in-game TTL during a live window", () => {
-    expect(resolveCacheTtlMs("getNFLBoxScore", LIVE_WINDOW_INSTANT)).toBe(50_000);
+    expect(resolveCacheTtlMs("getNFLBoxScore", new URLSearchParams(), LIVE_WINDOW_INSTANT)).toBe(50_000);
   });
 
   it("gives getNFLBoxScore the long off-window TTL when no game could be live", () => {
-    expect(resolveCacheTtlMs("getNFLBoxScore", OFF_WINDOW_INSTANT)).toBe(15 * 60_000);
+    expect(resolveCacheTtlMs("getNFLBoxScore", new URLSearchParams(), OFF_WINDOW_INSTANT)).toBe(15 * 60_000);
   });
 
   it("gives getNFLGamesForWeek the short in-game TTL during a live window", () => {
-    expect(resolveCacheTtlMs("getNFLGamesForWeek", LIVE_WINDOW_INSTANT)).toBe(5 * 60_000);
+    expect(resolveCacheTtlMs("getNFLGamesForWeek", new URLSearchParams(), LIVE_WINDOW_INSTANT)).toBe(5 * 60_000);
   });
 
-  it("gives getNFLGamesForWeek the long off-window TTL when no game could be live", () => {
-    expect(resolveCacheTtlMs("getNFLGamesForWeek", OFF_WINDOW_INSTANT)).toBe(15 * 60_000);
+  it("gives getNFLGamesForWeek a full hour off-window -- the week's kickoff times are set once no game can be live", () => {
+    expect(resolveCacheTtlMs("getNFLGamesForWeek", new URLSearchParams(), OFF_WINDOW_INSTANT)).toBe(60 * 60_000);
   });
 
   it("gives every static endpoint its configured TTL regardless of live window", () => {
-    expect(resolveCacheTtlMs("getNFLNews", LIVE_WINDOW_INSTANT)).toBe(15 * 60_000);
-    expect(resolveCacheTtlMs("getNFLPlayerInfo", OFF_WINDOW_INSTANT)).toBe(15 * 60_000);
-    expect(resolveCacheTtlMs("getNFLGamesForPlayer", LIVE_WINDOW_INSTANT)).toBe(15 * 60_000);
-    expect(resolveCacheTtlMs("getNFLProjections", OFF_WINDOW_INSTANT)).toBe(60 * 60_000);
-    expect(resolveCacheTtlMs("getNFLTeamSchedule", LIVE_WINDOW_INSTANT)).toBe(6 * 60 * 60_000);
-    expect(resolveCacheTtlMs("getNFLTeams", OFF_WINDOW_INSTANT)).toBe(6 * 60 * 60_000);
-    expect(resolveCacheTtlMs("getNFLADP", LIVE_WINDOW_INSTANT)).toBe(6 * 60 * 60_000);
-    expect(resolveCacheTtlMs("getNFLDepthCharts", OFF_WINDOW_INSTANT)).toBe(6 * 60 * 60_000);
+    expect(resolveCacheTtlMs("getNFLNews", new URLSearchParams(), LIVE_WINDOW_INSTANT)).toBe(15 * 60_000);
+    expect(resolveCacheTtlMs("getNFLPlayerInfo", new URLSearchParams(), OFF_WINDOW_INSTANT)).toBe(15 * 60_000);
+    expect(resolveCacheTtlMs("getNFLGamesForPlayer", new URLSearchParams(), LIVE_WINDOW_INSTANT)).toBe(15 * 60_000);
+    expect(resolveCacheTtlMs("getNFLProjections", new URLSearchParams(), OFF_WINDOW_INSTANT)).toBe(60 * 60_000);
+    expect(resolveCacheTtlMs("getNFLTeamSchedule", new URLSearchParams(), LIVE_WINDOW_INSTANT)).toBe(6 * 60 * 60_000);
+    expect(resolveCacheTtlMs("getNFLTeams", new URLSearchParams(), OFF_WINDOW_INSTANT)).toBe(6 * 60 * 60_000);
+    expect(resolveCacheTtlMs("getNFLADP", new URLSearchParams(), LIVE_WINDOW_INSTANT)).toBe(6 * 60 * 60_000);
+    expect(resolveCacheTtlMs("getNFLDepthCharts", new URLSearchParams(), OFF_WINDOW_INSTANT)).toBe(6 * 60 * 60_000);
   });
 
   it("falls back to the 20s default for an unrecognized endpoint", () => {
-    expect(resolveCacheTtlMs("someFutureEndpoint", LIVE_WINDOW_INSTANT)).toBe(20_000);
+    expect(resolveCacheTtlMs("someFutureEndpoint", new URLSearchParams(), LIVE_WINDOW_INSTANT)).toBe(20_000);
   });
 });
 
@@ -140,6 +140,76 @@ describe("proxyTank01Request end-to-end: off-window TTL actually gets applied to
     const second = mockReqRes("getNFLBoxScore", { gameID: "gameOffWindow" });
     await proxyTank01Request(second.req, second.res);
     expect(fetchSpy).toHaveBeenCalledTimes(1); // still cached
+
+    vi.useRealTimers();
+  });
+});
+
+// The quiet-day leak these cover: Live Scoring re-pulls every fetch-eligible game from
+// roughly the last 10 days to populate finals, so without a past-day rule every owner's
+// page open re-fetched last week's already-final box scores upstream every 15 minutes.
+describe("resolveCacheTtlMs: past-day (final) box scores", () => {
+  const boxScore = (gameId: string) => new URLSearchParams({ gameID: gameId });
+
+  it("caches a box score from a previous ET day for 12h, even inside a live window", () => {
+    // Oct 3 game, clock pinned to Oct 4 1:00pm ET -- in-window, but that game is final.
+    expect(resolveCacheTtlMs("getNFLBoxScore", boxScore("20261003_NE@SEA"), LIVE_WINDOW_INSTANT)).toBe(12 * 60 * 60_000);
+  });
+
+  it("caches a past-day box score for 12h off-window too", () => {
+    expect(resolveCacheTtlMs("getNFLBoxScore", boxScore("20261003_NE@SEA"), OFF_WINDOW_INSTANT)).toBe(12 * 60 * 60_000);
+  });
+
+  it("keeps TODAY's game on the short live TTL -- it may still be in progress", () => {
+    expect(resolveCacheTtlMs("getNFLBoxScore", boxScore("20261004_NE@SEA"), LIVE_WINDOW_INSTANT)).toBe(50_000);
+  });
+
+  it("keeps a SAME-DAY game on the normal off-window TTL, not the 12h final TTL", () => {
+    // gameID day == the pinned clock's ET day (Oct 6, the off-window instant), so it is
+    // not past: a game that ended an hour ago can still pick up a stat correction.
+    expect(resolveCacheTtlMs("getNFLBoxScore", boxScore("20261006_ARI@LAC"), OFF_WINDOW_INSTANT)).toBe(15 * 60_000);
+  });
+
+  it("does NOT treat a FUTURE-dated game as final", () => {
+    expect(resolveCacheTtlMs("getNFLBoxScore", boxScore("20261011_NE@SEA"), LIVE_WINDOW_INSTANT)).toBe(50_000);
+  });
+
+  it("falls back to the normal TTL for a missing or unparseable gameID rather than caching 12h", () => {
+    expect(resolveCacheTtlMs("getNFLBoxScore", new URLSearchParams(), LIVE_WINDOW_INSTANT)).toBe(50_000);
+    expect(resolveCacheTtlMs("getNFLBoxScore", boxScore("not-a-date_NE@SEA"), LIVE_WINDOW_INSTANT)).toBe(50_000);
+  });
+
+  it("uses the ET calendar day, not UTC -- a game 'yesterday' in UTC is still today in ET", () => {
+    // Mon Oct 5 2026, 00:30 UTC = Sun Oct 4, 8:30pm ET. An Oct 4 game is TODAY in ET
+    // (live TTL) even though UTC has already rolled over to the 5th.
+    const lateSundayNightEt = Date.UTC(2026, 9, 5, 0, 30, 0);
+    expect(resolveCacheTtlMs("getNFLBoxScore", boxScore("20261004_NE@SEA"), lateSundayNightEt)).toBe(50_000);
+    expect(resolveCacheTtlMs("getNFLBoxScore", boxScore("20261003_NE@SEA"), lateSundayNightEt)).toBe(12 * 60 * 60_000);
+  });
+});
+
+describe("proxyTank01Request end-to-end: a past-day box score survives far past the live TTL", () => {
+  beforeEach(() => {
+    __clearTank01ProxyCacheForTests();
+    process.env.TANK01_RAPIDAPI_KEY = "test-key";
+    vi.restoreAllMocks();
+  });
+
+  it("serves an Oct 3 box score from cache an hour later while the clock sits in Oct 4's live window", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(LIVE_WINDOW_INSTANT);
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue({
+      ok: true, status: 200, headers: { get: () => "application/json" }, text: async () => JSON.stringify({ body: "final" }),
+    } as any);
+
+    const first = mockReqRes("getNFLBoxScore", { gameID: "20261003_NE@SEA" });
+    await proxyTank01Request(first.req, first.res);
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+
+    vi.setSystemTime(LIVE_WINDOW_INSTANT + 60 * 60_000); // 1 hour: way past 50s and past 15min
+    const second = mockReqRes("getNFLBoxScore", { gameID: "20261003_NE@SEA" });
+    await proxyTank01Request(second.req, second.res);
+    expect(fetchSpy).toHaveBeenCalledTimes(1); // still cached under the 12h final TTL
 
     vi.useRealTimers();
   });

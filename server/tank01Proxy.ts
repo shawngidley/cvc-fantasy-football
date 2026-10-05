@@ -30,15 +30,34 @@ const DEFAULT_CACHE_TTL_MS = 20_000;
 // The two "live" endpoints -- an in-game-caliber box score, and the week's schedule
 // (used to tell which games are even worth polling) -- get a short TTL just under the
 // client's 60s poll interval, but ONLY while an NFL game could plausibly be in progress
-// (see tank01LiveWindow.ts). Outside that window (the other ~5.5 days of a typical
-// week), both fall back to a long 15-minute TTL instead: nothing about either response
-// changes meaningfully between a game ending Monday night and the next game kicking off
-// Thursday, so there's no reason to keep paying for 50s/5min freshness around the clock.
+// (see tank01LiveWindow.ts). Outside that window -- roughly half of a typical week
+// (85 of 168 hours are in-window: ~9am-2am Thu/Fri/Sat/Sun/Mon, so the off-window time
+// is Tue/Wed plus the nightly 2am-9am gap) -- both fall back to a much longer TTL
+// instead: nothing about either response changes meaningfully between a game ending
+// Monday night and the next game kicking off Thursday, so there's no reason to keep
+// paying for 50s/5min freshness around the clock.
 const LIVE_ENDPOINT_IN_WINDOW_TTL_MS: Record<string, number> = {
   getNFLBoxScore: 50_000, // just under the 60s client poll interval
   getNFLGamesForWeek: 5 * 60_000, // matchups/kickoff times are static during games
 };
-const LIVE_ENDPOINT_OFF_WINDOW_TTL_MS = 15 * 60_000;
+// Off-window, per endpoint. The week's schedule gets a full hour rather than 15 minutes:
+// once no game can be in progress, kickoff times for the week are simply set, so
+// re-pulling the schedule every 15 minutes on every page load buys nothing.
+const LIVE_ENDPOINT_OFF_WINDOW_TTL_MS: Record<string, number> = {
+  getNFLBoxScore: 15 * 60_000,
+  getNFLGamesForWeek: 60 * 60_000,
+};
+
+// A finished game's box score is immutable, so once its calendar day (ET) is in the
+// past it can be cached far longer than any live window. This is the big quiet-day
+// saver: opening Live Scoring re-pulls every fetch-eligible game from roughly the last
+// 10 days to populate finals (useCvcTank01LiveScores.ts's fetchEligibleGames), and
+// without this each of those already-final games fell back to the 15-minute off-window
+// TTL -- so every page open, for every owner, re-fetched last week's finished games
+// upstream. Now the first load of the day warms them and the rest of the day is served
+// from cache. Official weekly scoring reads Tank01 through nflDataAdapter, bypassing
+// this proxy cache entirely, so a rare next-day stat correction is never blocked by it.
+const FINAL_GAME_TTL_MS = 12 * 60 * 60_000;
 
 // Everything else: a flat per-endpoint TTL, no time-of-week awareness needed because
 // these don't carry live in-game data at all.
@@ -55,11 +74,37 @@ const STATIC_ENDPOINT_TTL_MS: Record<string, number> = {
   getNFLDepthCharts: 6 * 60 * 60_000,
 };
 
-/** Picks the cache TTL for one endpoint at one moment -- the only place that decides
+/** Today's date as YYYYMMDD in America/New_York, to compare against the date prefix of
+ * a box score's gameID (e.g. "20261004_DAL@HOU"). Intl-based for the same reason
+ * isLiveGameWindow is: a hardcoded UTC offset breaks across the DST boundary. */
+function etDateYyyymmdd(now: number): string {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "America/New_York", year: "numeric", month: "2-digit", day: "2-digit",
+  }).formatToParts(new Date(now));
+  const year = parts.find(part => part.type === "year")?.value ?? "";
+  const month = parts.find(part => part.type === "month")?.value ?? "";
+  const day = parts.find(part => part.type === "day")?.value ?? "";
+  return `${year}${month}${day}`;
+}
+
+/** True for a getNFLBoxScore whose game falls on a past calendar day in ET -- a final
+ * game whose stats can't change any more. Today's games (still live, or just finished)
+ * keep the normal live/off-window TTL, since a game that ended an hour ago can still
+ * pick up a stat correction. An unparseable or missing gameID returns false, so an
+ * unexpected request shape degrades to the normal TTL rather than caching for 12h. */
+function isPastDayBoxScore(endpoint: string, query: URLSearchParams, now: number): boolean {
+  if (endpoint !== "getNFLBoxScore") return false;
+  const datePart = (query.get("gameID") ?? "").slice(0, 8);
+  if (!/^\d{8}$/.test(datePart)) return false;
+  return datePart < etDateYyyymmdd(now); // zero-padded YYYYMMDD compares correctly as a string
+}
+
+/** Picks the cache TTL for one request at one moment -- the only place that decides
  * "how fresh does this need to be". Exported for the proxy's own tests. */
-export function resolveCacheTtlMs(endpoint: string, now: number = Date.now()): number {
+export function resolveCacheTtlMs(endpoint: string, query: URLSearchParams = new URLSearchParams(), now: number = Date.now()): number {
+  if (isPastDayBoxScore(endpoint, query, now)) return FINAL_GAME_TTL_MS;
   if (endpoint in LIVE_ENDPOINT_IN_WINDOW_TTL_MS) {
-    return isLiveGameWindow(now) ? LIVE_ENDPOINT_IN_WINDOW_TTL_MS[endpoint] : LIVE_ENDPOINT_OFF_WINDOW_TTL_MS;
+    return isLiveGameWindow(now) ? LIVE_ENDPOINT_IN_WINDOW_TTL_MS[endpoint] : LIVE_ENDPOINT_OFF_WINDOW_TTL_MS[endpoint];
   }
   return STATIC_ENDPOINT_TTL_MS[endpoint] ?? DEFAULT_CACHE_TTL_MS;
 }
@@ -126,7 +171,7 @@ export async function proxyTank01Request(req: Request, res: Response): Promise<v
   }
   query.sort(); // stable cache key regardless of param insertion order
   const cacheKey = `${endpoint}?${query.toString()}`;
-  const ttlMs = resolveCacheTtlMs(endpoint);
+  const ttlMs = resolveCacheTtlMs(endpoint, query);
 
   const cached = responseCache.get(cacheKey);
   if (cached && cached.expiresAt > Date.now()) {
