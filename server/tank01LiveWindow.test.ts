@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { isLiveGameWindow } from "./tank01LiveWindow";
+import { isLiveGameWindow, nySlate } from "./tank01LiveWindow";
 
 // All instants are fixed UTC epoch times (via Date.UTC), not wall-clock-dependent on the
 // test runner's own timezone. Each comment gives the equivalent America/New_York local
@@ -44,5 +44,21 @@ describe("isLiveGameWindow", () => {
   it("still gets the right local hour across the EDT->EST shift (no hardcoded UTC offset)", () => {
     // Sun Dec 6 2026, 1:00pm ET (EST, UTC-5 -- after the Nov 1 2026 fall-back)
     expect(isLiveGameWindow(Date.UTC(2026, 11, 6, 18, 0, 0))).toBe(true);
+  });
+});
+
+describe("nySlate (shared slate-date rule)", () => {
+  it("rolls 12:30am back to the previous calendar day", () => {
+    expect(nySlate(Date.UTC(2026, 9, 5, 4, 30, 0)).slateDate).toBe("20261004"); // Mon Oct 5 12:30am ET
+  });
+  it("does not roll back at 2:00am or later", () => {
+    expect(nySlate(Date.UTC(2026, 9, 5, 6, 0, 0)).slateDate).toBe("20261005"); // 2:00am ET
+  });
+  it("crosses month and year boundaries via a UTC-anchored date", () => {
+    expect(nySlate(Date.UTC(2026, 10, 1, 4, 30, 0)).slateDate).toBe("20261031"); // Nov 1 12:30am ET
+    expect(nySlate(Date.UTC(2027, 0, 1, 5, 30, 0)).slateDate).toBe("20261231"); // Jan 1 12:30am ET
+  });
+  it("derives the slate weekday from the rolled-back date", () => {
+    expect(nySlate(Date.UTC(2026, 9, 6, 4, 30, 0)).slateWeekday).toBe(1); // Tue 12:30am ET -> Monday
   });
 });

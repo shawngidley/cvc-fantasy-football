@@ -188,6 +188,46 @@ describe("resolveCacheTtlMs: past-day (final) box scores", () => {
   });
 });
 
+// Midnight-rollover regression: during 12:00am-1:59am ET the previous day's slate is still
+// live (a Sunday night game in overtime at 12:30am Monday). A past-day check built on the
+// raw ET date saw gameID 20261004 vs a clock already reading 20261005, called the game a
+// final, and cached its box score for 12h -- freezing Live Scoring for that game all night.
+// Fixed by comparing against the ET SLATE date (tank01LiveWindow.ts nySlate).
+describe("resolveCacheTtlMs: post-midnight games stay live (slate date, not raw ET date)", () => {
+  const boxScore = (gameId: string) => new URLSearchParams({ gameID: gameId });
+  const LIVE = 50_000;
+  const FINAL = 12 * 60 * 60_000;
+
+  it("keeps a Sunday game live at 12:30am ET Monday", () => {
+    // Mon Oct 5 2026, 12:30am EDT = 04:30Z
+    expect(resolveCacheTtlMs("getNFLBoxScore", boxScore("20261004_DAL@HOU"), Date.UTC(2026, 9, 5, 4, 30, 0))).toBe(LIVE);
+  });
+
+  it("keeps a Monday-night game live at 12:30am ET Tuesday", () => {
+    // Tue Oct 6 2026, 12:30am EDT = 04:30Z
+    expect(resolveCacheTtlMs("getNFLBoxScore", boxScore("20261005_NE@SEA"), Date.UTC(2026, 9, 6, 4, 30, 0))).toBe(LIVE);
+  });
+
+  it("crosses a MONTH boundary: an Oct 31 game is still live at 12:30am ET Nov 1", () => {
+    // Sun Nov 1 2026, 12:30am EDT (fall-back isn't until 2am) = 04:30Z
+    expect(resolveCacheTtlMs("getNFLBoxScore", boxScore("20261031_NE@SEA"), Date.UTC(2026, 10, 1, 4, 30, 0))).toBe(LIVE);
+  });
+
+  it("crosses a YEAR boundary: a Dec 31 game is still live at 12:30am ET Jan 1", () => {
+    // Fri Jan 1 2027, 12:30am EST = 05:30Z
+    expect(resolveCacheTtlMs("getNFLBoxScore", boxScore("20261231_NE@SEA"), Date.UTC(2027, 0, 1, 5, 30, 0))).toBe(LIVE);
+  });
+
+  it("still treats that same game as a final once the slate rolls over at 2:00am ET", () => {
+    // Mon Oct 5 2026, 2:00am EDT = 06:00Z
+    expect(resolveCacheTtlMs("getNFLBoxScore", boxScore("20261004_DAL@HOU"), Date.UTC(2026, 9, 5, 6, 0, 0))).toBe(FINAL);
+  });
+
+  it("still treats the day-before-yesterday's game as final at 12:30am", () => {
+    expect(resolveCacheTtlMs("getNFLBoxScore", boxScore("20261003_NE@SEA"), Date.UTC(2026, 9, 5, 4, 30, 0))).toBe(FINAL);
+  });
+});
+
 describe("proxyTank01Request end-to-end: a past-day box score survives far past the live TTL", () => {
   beforeEach(() => {
     __clearTank01ProxyCacheForTests();

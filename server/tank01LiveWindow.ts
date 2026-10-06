@@ -11,18 +11,36 @@
 // broke kickoffUtcMs/computeKickoffUtc after a DST fall-back): asking Intl for the
 // wall-clock hour and weekday in America/New_York handles the EDT/EST transition
 // automatically, so this doesn't need its own DST table.
-function nyHourAndWeekday(now: Date): { hour: number; weekday: number } {
+// Hours 0 and 1 (12:00am-1:59am ET) still belong to the PREVIOUS day's slate: a Sunday
+// night game running long is still a Sunday game at 12:30am Monday, and a Monday night
+// game in overtime is still Monday Night Football at 12:30am Tuesday. This one constant
+// and nySlate() below are the single source of that rule -- both isLiveGameWindow and the
+// proxy's past-day box-score check (tank01Proxy.ts) read it, so they cannot drift apart
+// (a past-day check built on the raw ET date instead froze a live game's box score for
+// 12 hours the moment the clock crossed midnight).
+const SLATE_ROLLOVER_HOUR = 2;
+
+/** The America/New_York "slate" at an instant: the wall-clock hour, plus the calendar date
+ * and weekday of the slate that instant belongs to (the previous calendar day during
+ * 12:00am-1:59am). The roll-back goes through a UTC-anchored Date, not a decremented day
+ * number, so it crosses month and year boundaries correctly (Nov 1 12:30am -> Oct 31,
+ * Jan 1 12:30am -> Dec 31). */
+export function nySlate(now: Date | number): { hour: number; slateDate: string; slateWeekday: number } {
+  const date = typeof now === "number" ? new Date(now) : now;
   const parts = new Intl.DateTimeFormat("en-US", {
     timeZone: "America/New_York",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
     hour: "numeric",
     hour12: false,
-    weekday: "short",
-  }).formatToParts(now);
-  const hourPart = parts.find(part => part.type === "hour")?.value ?? "0";
-  const weekdayPart = parts.find(part => part.type === "weekday")?.value ?? "Sun";
-  const hour = Number(hourPart) % 24; // some locales render midnight as "24" rather than "0"
-  const weekday = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].indexOf(weekdayPart);
-  return { hour, weekday };
+  }).formatToParts(date);
+  const read = (type: string) => Number(parts.find(part => part.type === type)?.value ?? "0");
+  const hour = read("hour") % 24; // some locales render midnight as "24" rather than "0"
+  const dayOffset = hour < SLATE_ROLLOVER_HOUR ? -1 : 0;
+  const slate = new Date(Date.UTC(read("year"), read("month") - 1, read("day") + dayOffset));
+  const slateDate = `${slate.getUTCFullYear()}${String(slate.getUTCMonth() + 1).padStart(2, "0")}${String(slate.getUTCDate()).padStart(2, "0")}`;
+  return { hour, slateDate, slateWeekday: slate.getUTCDay() };
 }
 
 /**
@@ -42,10 +60,8 @@ function nyHourAndWeekday(now: Date): { hour: number; weekday: number } {
  *   live window.
  */
 export function isLiveGameWindow(now: Date | number = Date.now()): boolean {
-  const date = typeof now === "number" ? new Date(now) : now;
-  const { hour, weekday } = nyHourAndWeekday(date);
-  if (hour >= 2 && hour < 9) return false; // overnight gap
-  const effectiveWeekday = hour < 2 ? (weekday + 6) % 7 : weekday; // reattribute 12am-2am to the previous day
-  if (effectiveWeekday === 2 || effectiveWeekday === 3) return false; // Tue/Wed: gameless (see caveat above)
+  const { hour, slateWeekday } = nySlate(now);
+  if (hour >= SLATE_ROLLOVER_HOUR && hour < 9) return false; // overnight gap
+  if (slateWeekday === 2 || slateWeekday === 3) return false; // Tue/Wed: gameless (see caveat above)
   return true;
 }

@@ -1,6 +1,6 @@
 import type { Request, Response } from "express";
 import { supabase } from "./supabase";
-import { isLiveGameWindow } from "./tank01LiveWindow";
+import { isLiveGameWindow, nySlate } from "./tank01LiveWindow";
 
 const TANK01_HOST = "tank01-nfl-live-in-game-real-time-statistics-nfl.p.rapidapi.com";
 const TANK01_TIMEOUT_MS = 15_000;
@@ -74,19 +74,6 @@ const STATIC_ENDPOINT_TTL_MS: Record<string, number> = {
   getNFLDepthCharts: 6 * 60 * 60_000,
 };
 
-/** Today's date as YYYYMMDD in America/New_York, to compare against the date prefix of
- * a box score's gameID (e.g. "20261004_DAL@HOU"). Intl-based for the same reason
- * isLiveGameWindow is: a hardcoded UTC offset breaks across the DST boundary. */
-function etDateYyyymmdd(now: number): string {
-  const parts = new Intl.DateTimeFormat("en-CA", {
-    timeZone: "America/New_York", year: "numeric", month: "2-digit", day: "2-digit",
-  }).formatToParts(new Date(now));
-  const year = parts.find(part => part.type === "year")?.value ?? "";
-  const month = parts.find(part => part.type === "month")?.value ?? "";
-  const day = parts.find(part => part.type === "day")?.value ?? "";
-  return `${year}${month}${day}`;
-}
-
 /** True for a getNFLBoxScore whose game falls on a past calendar day in ET -- a final
  * game whose stats can't change any more. Today's games (still live, or just finished)
  * keep the normal live/off-window TTL, since a game that ended an hour ago can still
@@ -96,7 +83,11 @@ function isPastDayBoxScore(endpoint: string, query: URLSearchParams, now: number
   if (endpoint !== "getNFLBoxScore") return false;
   const datePart = (query.get("gameID") ?? "").slice(0, 8);
   if (!/^\d{8}$/.test(datePart)) return false;
-  return datePart < etDateYyyymmdd(now); // zero-padded YYYYMMDD compares correctly as a string
+  // Compare against the ET SLATE date, not the raw ET calendar date: during 12:00am-1:59am a
+  // game from the previous day (a Sunday night game in overtime at 12:30am Monday, gameID
+  // 20261004) is still live, but the raw date already reads 20261005 and would misclassify
+  // it as a past-day final -- freezing its box score for 12 hours mid-game.
+  return datePart < nySlate(now).slateDate; // zero-padded YYYYMMDD compares correctly as a string
 }
 
 /** Picks the cache TTL for one request at one moment -- the only place that decides
