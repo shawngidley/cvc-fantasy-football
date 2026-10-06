@@ -6,6 +6,7 @@ import { promotePlannedLineupForWeek } from "./plannedLineup";
 import { mapWithConcurrencyLimit, normalizeTeam, resolveStatLine, type SnapshotRow } from "./cvcScoringShared";
 import { normalizePlayerName } from "@shared/playerNameMatch";
 import { getKickerEventsForPlayer, parseEspnKickerEvents, sumMadeFieldGoalYards, countMadeExtraPoints, type KickerPlayEvent } from "@shared/espnKickerEvents";
+import { listGamesForWeekForCron } from "./tank01ScheduleCache";
 import { persistWeeklyStats, refreshSeasonStatsCurrent, type WeeklyStatPlayer } from "./cvcPlayerWeeklyStats";
 
 export { normalizeTeam };
@@ -318,7 +319,7 @@ async function tankStatLinesForWeek(adapter: Tank01NFLDataAdapter, games: Awaite
  * specific week regardless of its current status -- the only way to reach an
  * already-final week, since the normal lookup only ever considers live/upcoming
  * weeks. */
-export async function syncTank01Scores(now = new Date(), forceWeekNumber?: number): Promise<Tank01SyncSummary> {
+export async function syncTank01Scores(now = new Date(), forceWeekNumber?: number, options: { cachedOffWindowSchedule?: boolean } = {}): Promise<Tank01SyncSummary> {
   const { season, week, weeks } = await currentContext(forceWeekNumber);
   if (!week) return { status: "skipped", matchupsUpdated: 0, reason: forceWeekNumber !== undefined ? `No CVC week numbered ${forceWeekNumber} was found.` : "No live or upcoming CVC week." };
   const adapter = getNFLDataAdapter();
@@ -329,7 +330,10 @@ export async function syncTank01Scores(now = new Date(), forceWeekNumber?: numbe
   const franchiseIds = Array.from(new Set(matchups.flatMap(item => [item.home_franchise_id, item.away_franchise_id])));
   const alreadySnapshotted = unwrap(await supabase.from("weekly_lineup_snapshot").select("id").eq("schedule_week_id", week.id).limit(1)) ?? [];
   if (!alreadySnapshotted.length) await promotePlannedLineupForWeek(season.id, week.id, week.week_number, franchiseIds);
-  const games = await adapter.listGamesForWeek(week.week_number, season.year);
+  // Only the 5 minute cron opts in, and never a forced week: manual and forced syncs always read fresh.
+  const games = options.cachedOffWindowSchedule && forceWeekNumber === undefined
+    ? await listGamesForWeekForCron(adapter, week.week_number, season.year, now)
+    : await adapter.listGamesForWeek(week.week_number, season.year);
   // Reconciles every sync call, not just the first one for the week -- see
   // reconcileLineupSnapshot's own comment for why a one-time snapshot silently
   // undercounted legitimate pre-kickoff roster moves.

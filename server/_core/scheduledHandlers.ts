@@ -39,7 +39,7 @@ async function getCurrentSeason() {
 export async function runTank01ScoringSync(req: Request, res: Response) {
   if (!checkCronAuth(req, res)) return;
   try {
-    res.json({ ok: true, ...(await syncTank01Scores()) });
+    res.json({ ok: true, ...(await syncTank01Scores(new Date(), undefined, { cachedOffWindowSchedule: true })) });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     console.error("Tank01 scoring sync failed", error);
