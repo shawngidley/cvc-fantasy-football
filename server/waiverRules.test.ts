@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { rankBidPeriodCandidates, resolveWaiverAssignments, selectFreeAgentCandidates, sortByWorstRecordFirst, type FranchiseStanding, type WaiverCandidateBid } from "./waiverRules";
+import { describeLossReason, nextClaimPriority, rankBidPeriodCandidates, resolveWaiverAssignments, selectFreeAgentCandidates, sortByWorstRecordFirst, type FranchiseStanding, type WaiverCandidateBid } from "./waiverRules";
 
 describe("selectFreeAgentCandidates (fix for a real gap: free-period claims were being auto-awarded exactly like bid-period FAAB claims, but per commissioner they must not be -- the claiming owner has to explicitly confirm their own claim first, and anything never confirmed by close time is dropped entirely, no award)", () => {
   it("excludes an unconfirmed claim from the candidate pool entirely -- it can never win", () => {
@@ -218,5 +218,75 @@ describe("resolveWaiverAssignments (the cascade: an owner's own claims collide w
     expect(winnerByPlayer.get("playerA")).toBe("bid-a1");
     expect(winnerByPlayer.has("playerB")).toBe(false); // independent max-players pool, but budget is still shared
     expect(rejectionReasonByBid.get("bid-b1")).toEqual({ type: "budget", cost: 20, remaining: 10 });
+  });
+});
+
+describe("the Oct 8 Doubs case: one limit shared by ungrouped claims, all at the same priority and amount", () => {
+  const candidate = (id: string, franchiseId: string, opts: Partial<WaiverCandidateBid> = {}): WaiverCandidateBid => ({ id, franchiseId, cost: 2, priority: 1, maxPlayersDesired: 1, dropPlayerId: null, groupKey: "__default__", ...opts });
+  const capacity = new Map([["legends", { rosterCount: 15, budget: 30 }], ["devices", { rosterCount: 15, budget: 30 }]]);
+
+  it("same priority and amount: the EARLIER submitted claim is kept, not whichever id sorts first", () => {
+    // Legends tie-break winner on both players. Brissett's id sorts before Doubs' id, which
+    // is what used to decide it. Doubs was submitted first here, so Doubs must win.
+    const ranked = new Map([
+      ["brissett", [candidate("92d4-brissett", "legends", { submittedAt: "2026-10-07T20:05:00Z" })]],
+      ["doubs", [candidate("a685-doubs", "legends", { submittedAt: "2026-10-07T20:01:00Z" }), candidate("b68e-doubs", "devices")]],
+    ]);
+    const { winnerByPlayer, rejectionReasonByBid } = resolveWaiverAssignments(ranked, capacity, 22);
+    expect(winnerByPlayer.get("doubs")).toBe("a685-doubs");
+    expect(winnerByPlayer.has("brissett")).toBe(false);
+    expect(rejectionReasonByBid.get("92d4-brissett")).toEqual({ type: "max_players_desired", limit: 1 });
+  });
+
+  it("an explicit rank still beats submission time", () => {
+    const ranked = new Map([
+      ["brissett", [candidate("92d4-brissett", "legends", { priority: 1, submittedAt: "2026-10-07T20:05:00Z" })]],
+      ["doubs", [candidate("a685-doubs", "legends", { priority: 2, submittedAt: "2026-10-07T20:01:00Z" }), candidate("b68e-doubs", "devices")]],
+    ]);
+    const { winnerByPlayer } = resolveWaiverAssignments(ranked, capacity, 22);
+    expect(winnerByPlayer.get("brissett")).toBe("92d4-brissett");
+    expect(winnerByPlayer.get("doubs")).toBe("b68e-doubs"); // Legends ranked Brissett first, so Doubs falls to the next bidder
+  });
+
+  it("legacy claims with no submittedAt still resolve the same way as before (id order)", () => {
+    const ranked = new Map([
+      ["brissett", [candidate("92d4-brissett", "legends")]],
+      ["doubs", [candidate("a685-doubs", "legends"), candidate("b68e-doubs", "devices")]],
+    ]);
+    const { winnerByPlayer } = resolveWaiverAssignments(ranked, capacity, 22);
+    expect(winnerByPlayer.get("brissett")).toBe("92d4-brissett");
+  });
+});
+
+describe("nextClaimPriority", () => {
+  it("starts at 1 for an owner's first claim", () => expect(nextClaimPriority([])).toBe(1));
+  it("goes one step behind the lowest ranked existing claim", () => expect(nextClaimPriority([1, 2, 3])).toBe(4));
+  it("copes with legacy claims that all sit at rank 1", () => expect(nextClaimPriority([1, 1, 1])).toBe(2));
+  it("never goes past the schema maximum of 99", () => expect(nextClaimPriority([99])).toBe(99));
+});
+
+describe("describeLossReason", () => {
+  const base = { periodType: "bid" as const, bidAmount: 2, confirmed: true, groupLabel: null, wonInSamePool: [], winnerFranchiseName: null, winnerAmount: null };
+  it("names the higher ranked players that used up a limit, in the default pool", () => {
+    expect(describeLossReason({ ...base, rejection: { type: "max_players_desired", limit: 1 }, wonInSamePool: ["Jacoby Brissett"] }))
+      .toBe("Your limit for your default pool was 1. Jacoby Brissett ranked higher, so this claim was skipped.");
+  });
+  it("names a custom group", () => {
+    expect(describeLossReason({ ...base, rejection: { type: "max_players_desired", limit: 2 }, groupLabel: "Handcuffs", wonInSamePool: ["A", "B"] }))
+      .toBe('Your limit for your "Handcuffs" group was 2. A and B ranked higher, so this claim was skipped.');
+  });
+  it("explains a budget rejection", () => {
+    expect(describeLossReason({ ...base, rejection: { type: "budget", cost: 5, remaining: 3 } })).toBe("This would cost $5, but you had only $3 of FAAB left this season.");
+  });
+  it("says outbid when the winner paid more", () => {
+    expect(describeLossReason({ ...base, winnerFranchiseName: "Shepard's Pie", winnerAmount: 4 })).toBe("Outbid. Shepard's Pie won this player for $4.");
+  });
+  it("explains the tiebreak when the winner paid the same", () => {
+    expect(describeLossReason({ ...base, winnerFranchiseName: "Dresser Drawer Devices", winnerAmount: 2 }))
+      .toBe("Tied at $2. Dresser Drawer Devices won on the tiebreak: worse record first, then fewer points scored.");
+  });
+  it("free period: unconfirmed and lower priority read differently", () => {
+    expect(describeLossReason({ ...base, periodType: "free", confirmed: false })).toBe("You did not confirm this claim before the free agent period closed.");
+    expect(describeLossReason({ ...base, periodType: "free" })).toBe("A team with higher waiver priority claimed this player.");
   });
 });

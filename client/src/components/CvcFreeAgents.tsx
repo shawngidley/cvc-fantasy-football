@@ -3,7 +3,7 @@ import { trpc } from "@/lib/trpc";
 import { useCvcOwnerAuth } from "@/hooks/useCvcOwnerAuth";
 import { Link } from "wouter";
 import { toast } from "sonner";
-import { ArrowDownUp, DollarSign, Search, ShieldCheck, Star, Users, X } from "lucide-react";
+import { ArrowDownUp, ChevronDown, ChevronUp, DollarSign, Search, ShieldCheck, Star, Users, X } from "lucide-react";
 import { useMemo, useState } from "react";
 import { teamLogoUrl as scheduleTeamLogoUrl, shortenTeamName } from "@/lib/nflSchedule";
 import { useConfirmDialog } from "@/hooks/useConfirmDialog";
@@ -132,7 +132,8 @@ export function CvcFreeAgents() {
       list.push(bid);
       map.set(key, list);
     }
-    for (const list of Array.from(map.values())) list.sort((a, b) => (a.priority ?? 1) - (b.priority ?? 1));
+    // Same order the server resolves a tie in: rank, then bigger bid, then earlier submitted.
+    for (const list of Array.from(map.values())) list.sort((a, b) => (a.priority ?? 1) - (b.priority ?? 1) || b.amount - a.amount || String(a.submitted_at ?? "").localeCompare(String(b.submitted_at ?? "")));
     return map;
   }, [myBids.data]);
   const invalidateBidsAndGroups = async () => { await Promise.all([utils.league.myFaabBids.invalidate(), utils.league.myFaabBidGroups.invalidate()]); };
@@ -140,6 +141,24 @@ export function CvcFreeAgents() {
   const confirmClaim = trpc.league.confirmFreeAgentClaim.useMutation({ onSuccess: async () => { await utils.league.myFaabBids.invalidate(); }, onError: error => toast.error(error.message) });
   const cancelClaim = trpc.league.cancelFaabBid.useMutation({ onSuccess: async () => { await Promise.all([utils.league.myFaabBids.invalidate(), utils.league.myFaabBalance.invalidate()]); }, onError: error => toast.error(error.message) });
   const setPriority = trpc.league.setFaabBidPriority.useMutation({ onSuccess: async () => { await utils.league.myFaabBids.invalidate(); }, onError: error => toast.error(error.message) });
+  // Re-ranks a pool's pending claims after moving one up or down. Rewrites every rank to
+  // 1, 2, 3 ... so claims that used to sit at the same rank (the old default) get a real order.
+  const [movingClaim, setMovingClaim] = useState(false);
+  const moveClaim = async (list: any[], index: number, delta: number) => {
+    const target = index + delta;
+    if (target < 0 || target >= list.length || movingClaim) return;
+    const next = [...list];
+    const [moved] = next.splice(index, 1);
+    next.splice(target, 0, moved);
+    setMovingClaim(true);
+    try {
+      for (let position = 0; position < next.length; position++) {
+        if (next[position].priority !== position + 1) await setPriority.mutateAsync({ bidId: next[position].id, priority: position + 1 });
+      }
+    } finally {
+      setMovingClaim(false);
+    }
+  };
   const setBidAmount = trpc.league.setFaabBidAmount.useMutation({ onSuccess: async () => { await utils.league.myFaabBids.invalidate(); }, onError: error => toast.error(error.message) });
   const setGroupMaxPlayers = trpc.league.setFaabBidGroupMaxPlayers.useMutation({ onSuccess: invalidateBidsAndGroups, onError: error => toast.error(error.message) });
   const createGroup = trpc.league.createFaabBidGroup.useMutation({ onError: error => toast.error(error.message) });
@@ -223,11 +242,23 @@ export function CvcFreeAgents() {
     return `${dayNames[date.getDay()]} ${time} ET`;
   }
 
+  // One plain sentence per pool saying how many claims can win, with a one tap fix when
+  // there are more claims than the limit. Bid periods only: the free agent period awards
+  // each confirmed claim immediately.
+  const renderPoolNote = (count: number, max: number, raise?: () => void) => {
+    if (count === 0 || isFreePeriod) return null;
+    const over = count > max;
+    return <p className={over ? "mt-2 rounded border border-amber-400/40 bg-amber-500/10 px-3 py-2 text-xs text-amber-200" : "mt-2 text-xs text-cvc-muted"}>
+      {over ? `You have ${count} claims here but can win only ${max}. If more than ${max} would win, your top ${max} ranked claims are kept and the rest are skipped.` : `You can win up to ${max} of these ${count} claim${count === 1 ? "" : "s"}.`}
+      {over && raise ? <button type="button" onClick={raise} disabled={setGroupMaxPlayers.isPending} className="ml-2 rounded bg-amber-500 px-2 py-0.5 font-bold text-white hover:bg-amber-600">Raise limit to {Math.min(10, count)}</button> : null}
+    </p>;
+  };
+
   // Shared row renderer for a single pending (or resolved) claim, used inside both the
   // default-pool card and every custom-group card on Manage Bids -- identical to how
   // each claim already rendered before groups had their own cards, plus the new
   // "move to group" select.
-  const renderClaimRow = (bid: any) => {
+  const renderClaimRow = (bid: any, index = 0, list: any[] = []) => {
     const period = Array.isArray(bid.period) ? bid.period[0] : bid.period;
     const isFreePeriodClaim = period?.period_type === "free";
     const needsConfirmation = bid.status === "pending" && isFreePeriodClaim && period?.status === "open" && !bid.confirmed_at;
@@ -237,7 +268,7 @@ export function CvcFreeAgents() {
       <span className="flex shrink-0 items-center gap-2">
         {isPending ? <select value={bid.bid_group_id ?? ""} disabled={assignToGroup.isPending || createGroup.isPending} onChange={event => { const value = event.target.value; if (value === "__new__") createGroupAndAssign(bid.id); else assignToGroup.mutate({ bidId: bid.id, groupId: value || null }); }} className="rounded border border-white/20 bg-black/20 px-2 py-1 text-[10px] uppercase tracking-[.04em] text-white"><option value="">Default pool</option>{(myGroups.data ?? []).map((group: any) => <option key={group.id} value={group.id}>{group.label}</option>)}<option value="__new__" style={{ color: "#e6a43b", backgroundColor: "#ffffff", fontWeight: 700 }}>+ Create new group</option></select> : null}
         {isPending && !isFreePeriodClaim ? <label className="flex items-center gap-1 text-[10px] uppercase tracking-[.06em] text-cvc-muted">$<input type="number" min={1} max={30} defaultValue={bid.amount} key={`${bid.id}-amount-${bid.amount}`} onBlur={event => { const next = Number(event.target.value); if (Number.isInteger(next) && next >= 1 && next <= 30 && next !== bid.amount) setBidAmount.mutate({ bidId: bid.id, amount: next }); }} className="w-14 rounded border border-white/20 bg-black/20 px-2 py-1 text-center text-xs text-white" /></label> : null}
-        {isPending ? <label className="flex items-center gap-1 text-[10px] uppercase tracking-[.06em] text-cvc-muted">Priority<input type="number" min={1} max={99} defaultValue={bid.priority ?? 1} key={`${bid.id}-${bid.priority}`} onBlur={event => { const next = Number(event.target.value); if (Number.isInteger(next) && next >= 1 && next <= 99 && next !== bid.priority) setPriority.mutate({ bidId: bid.id, priority: next }); }} className="w-14 rounded border border-white/20 bg-black/20 px-2 py-1 text-center text-xs text-white" /></label> : null}
+        {isPending && !isFreePeriodClaim && list.length > 0 ? <span className="flex items-center gap-1"><span className="rounded bg-white/10 px-1.5 py-1 text-xs font-bold text-white" title="Rank in this group. If you would win more than your limit, #1 is kept first.">#{index + 1}</span><button type="button" aria-label="Move up in rank" disabled={index === 0 || movingClaim} onClick={() => moveClaim(list, index, -1)} className="rounded bg-white/10 p-1 text-white hover:bg-white/20 disabled:opacity-30"><ChevronUp size={12} /></button><button type="button" aria-label="Move down in rank" disabled={index >= list.length - 1 || movingClaim} onClick={() => moveClaim(list, index, 1)} className="rounded bg-white/10 p-1 text-white hover:bg-white/20 disabled:opacity-30"><ChevronDown size={12} /></button></span> : null}
         {needsConfirmation ? <button onClick={() => confirmClaim.mutate({ bidId: bid.id })} disabled={confirmClaim.isPending} className="rounded bg-amber-500 px-2.5 py-1 text-xs font-bold text-white hover:bg-amber-600">Confirm claim</button> : null}
         {isPending ? <button onClick={() => cancelClaim.mutate({ bidId: bid.id })} disabled={cancelClaim.isPending} className="rounded bg-white/10 px-2.5 py-1 text-xs font-bold text-white hover:bg-white/20">Cancel</button> : null}
       </span>
@@ -268,7 +299,7 @@ export function CvcFreeAgents() {
       <div className="grid gap-5">
         <section className="rounded-xl border border-white/10 bg-cvc-deep/60 p-5">
           <div className="flex items-center gap-2 text-cvc-accent"><DollarSign size={16} /><p className="font-display text-lg uppercase">My claim status</p></div>
-          <p className="mt-2 text-xs text-cvc-muted">Every claim starts in the shared default pool below. Create a group to give some of your claims their own independent max instead -- move any claim into it with the dropdown on that claim.{(myBids.data?.filter((bid: any) => bid.status === "pending").length ?? 0) > 1 ? " If a pool's claims would collectively exceed your roster limit, budget, or its stated max, your lowest-numbered priority claims are kept first and the rest fall through to the next bidder." : ""}</p>
+          <p className="mt-2 text-xs text-cvc-muted">Your claims sit in groups, and every group has a "Max to win" limit. If more of a group's claims would win than its limit, your highest ranked claims (#1 first) are kept and the rest are skipped. Use the arrows to set your order. Every claim starts in the default pool; create a group to give some claims their own limit.</p>
           <div className="mt-4 space-y-4">
             {owner?.franchise ? ((pendingBidsByGroup.size || myGroups.data?.length) ? <>
               {(() => {
@@ -279,6 +310,7 @@ export function CvcFreeAgents() {
                     <span className="text-sm text-white"><b>Default pool</b> · {defaultBids.length} pending claim{defaultBids.length === 1 ? "" : "s"}</span>
                     <label className="flex items-center gap-2 text-[10px] uppercase tracking-[.06em] text-cvc-muted">Max to win<select value={defaultMax} disabled={setGroupMaxPlayers.isPending} onChange={event => setGroupMaxPlayers.mutate({ groupId: null, maxPlayers: Number(event.target.value) })} className="rounded border border-white/20 bg-black/20 px-2 py-1 text-xs text-white">{Array.from({ length: 10 }, (_, index) => index + 1).map(value => <option key={value} value={value}>{value}</option>)}</select></label>
                   </div>
+                  {renderPoolNote(defaultBids.length, defaultMax, () => setGroupMaxPlayers.mutate({ groupId: null, maxPlayers: Math.min(10, defaultBids.length) }))}
                   <div className="mt-2 space-y-2">{defaultBids.length ? defaultBids.map(renderClaimRow) : <p className="text-xs text-cvc-muted">No claims in the default pool.</p>}</div>
                 </div>;
               })()}
@@ -292,12 +324,27 @@ export function CvcFreeAgents() {
                       <button onClick={() => confirmDialog.confirm({ title: `Delete "${group.label}"?`, description: "Its claims move back to the default pool.", confirmLabel: "Delete", destructive: true, onConfirm: () => deleteGroup.mutateAsync({ groupId: group.id }) })} disabled={deleteGroup.isPending} className="rounded bg-white/10 px-2.5 py-1 text-[10px] font-bold uppercase tracking-[.04em] text-white hover:bg-white/20">Delete</button>
                     </span>
                   </div>
+                  {renderPoolNote(groupBids.length, group.max_players_desired ?? 1, () => setGroupMaxPlayers.mutate({ groupId: group.id, maxPlayers: Math.min(10, groupBids.length) }))}
                   <div className="mt-2 space-y-2">{groupBids.length ? groupBids.map(renderClaimRow) : <p className="text-xs text-cvc-muted">No claims in this group yet.</p>}</div>
                 </div>;
               })}
             </> : <p className="text-sm text-cvc-muted">No pending CVC waiver claims this period.</p>) : <p className="text-sm text-cvc-muted">Sign in with an owner account to submit and review claims.</p>}
           </div>
         </section>
+        {(() => {
+          const resolved = (myBids.data ?? []).filter((bid: any) => bid.status === "won" || bid.status === "lost").slice(0, 12);
+          if (!resolved.length) return null;
+          return <section className="rounded-xl border border-white/10 bg-cvc-deep/60 p-5">
+            <div className="flex items-center gap-2 text-cvc-accent"><DollarSign size={16} /><p className="font-display text-lg uppercase">Recent results</p></div>
+            <div className="mt-3 space-y-2">{resolved.map((bid: any) => {
+              const name = (Array.isArray(bid.player) ? bid.player[0] : bid.player)?.display_name ?? "Player";
+              return <div key={bid.id} className="rounded bg-white/5 px-3 py-2 text-sm text-white">
+                <div className="flex items-center justify-between gap-3"><span><b>{name}</b> · ${bid.amount}</span><span className={bid.status === "won" ? "text-xs font-bold uppercase text-emerald-300" : "text-xs font-bold uppercase text-red-300"}>{bid.status}</span></div>
+                {bid.status === "lost" && bid.loss_reason ? <p className="mt-1 text-xs text-cvc-muted">{bid.loss_reason}</p> : null}
+              </div>;
+            })}</div>
+          </section>;
+        })()}
       </div>
     ) : (
       <section className="overflow-hidden rounded-xl bg-white shadow-xl">
@@ -348,7 +395,7 @@ export function CvcFreeAgents() {
     {selectedPlayerId ? <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4" onClick={() => setSelectedPlayerId("")}>
       <div className="max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-xl border border-cvc-accent/40 bg-cvc-deep p-5 shadow-2xl" onClick={event => event.stopPropagation()}>
         <div className="flex items-start justify-between gap-3"><div className="flex items-center gap-2 text-cvc-accent"><DollarSign size={18} /><p className="font-display text-xl uppercase text-white">{isFreePeriod ? "Free agent claim" : "FAAB bid"} — {selectedPlayer?.display_name ?? ""}</p></div><button onClick={() => setSelectedPlayerId("")} className="text-cvc-muted hover:text-white" aria-label="Close"><X size={20} /></button></div>
-        <p className="mt-3 text-sm leading-5 text-cvc-muted">{isFreePeriod ? "This is the post-Sunday free agent period: every player signs for a $1 salary at $0 FAAB cost, bid-exempt, and awarded by waiver priority (worst-record-first, then rotates to the back after each win)." : "This is a blind auction. Your bid is sealed until the next Thursday or Sunday 9:00am ET resolution. Highest bid wins; ties go to the worse-record team."}</p>
+        <p className="mt-3 text-sm leading-5 text-cvc-muted">{isFreePeriod ? "This is the post-Sunday free agent period: every player signs for a $1 salary at $0 FAAB cost, bid-exempt, and awarded by waiver priority (worst-record-first, then rotates to the back after each win)." : "This is a blind auction. Your bid is sealed until the next Thursday or Sunday 9:00am ET resolution. Highest bid wins. Ties go to the team with the worse record, then fewer points scored."}</p>
 
         {selectedPlayer ? <div className="mt-4 flex items-center justify-between gap-3 rounded-lg bg-white px-4 py-3 text-cvc-deep">
           <div className="flex items-center gap-3">{selectedPlayer.nfl_team ? <img src={teamLogo(selectedPlayer.nfl_team)} alt="" className="h-9 w-9 rounded-full bg-slate-100 object-contain" /> : null}<div><p className="font-bold">{selectedPlayer.display_name}</p><p className="text-xs text-slate-500">{selectedPlayer.position} · {selectedPlayer.nfl_team ?? "FA"}</p></div></div>
@@ -367,11 +414,27 @@ export function CvcFreeAgents() {
             : <p className="mt-3 rounded-md border border-amber-400/40 bg-amber-500/10 px-3 py-2 text-center text-xs font-semibold text-amber-200">If you win, awarded {new Date(selectedPlayer.awardDate).toLocaleString("en-US", { weekday: "long", month: "short", day: "numeric", hour: "numeric", minute: "2-digit", timeZone: "America/New_York" })} ET</p>
         ) : null}
 
+        {!isFreePeriod && selectedPlayerId ? (() => {
+          const pool = pendingBidsByGroup.get(null) ?? [];
+          const playerOf = (bid: any) => Array.isArray(bid.player) ? bid.player[0] : bid.player;
+          const existingIndex = pool.findIndex((bid: any) => playerOf(bid)?.id === selectedPlayerId);
+          const others = existingIndex >= 0 ? pool.length - 1 : pool.length;
+          if (others < 1) return null;
+          const limit = Math.max(...pool.map((bid: any) => bid.max_players_desired ?? 1));
+          const total = others + 1;
+          const rank = existingIndex >= 0 ? existingIndex + 1 : total;
+          const over = total > limit;
+          return <div className={over ? "mt-4 rounded-md border border-amber-400/40 bg-amber-500/10 px-3 py-2 text-xs text-amber-200" : "mt-4 rounded-md border border-white/15 bg-white/5 px-3 py-2 text-xs text-cvc-muted"}>
+            <p>You already have {others} claim{others === 1 ? "" : "s"} in your default pool, and you can win up to {limit} from it.{over ? ` Only ${limit} of the ${total} can win, and this claim ranks #${rank}. You can reorder on the Manage Bids tab.` : ` All ${total} can win.`}</p>
+            {over ? <button type="button" onClick={() => setGroupMaxPlayers.mutate({ groupId: null, maxPlayers: Math.min(10, total) })} disabled={setGroupMaxPlayers.isPending} className="mt-2 rounded bg-amber-500 px-2.5 py-1 font-bold text-white hover:bg-amber-600">Raise my limit to {Math.min(10, total)}</button> : null}
+          </div>;
+        })() : null}
+
         <p className="mt-4 text-center text-xs text-cvc-muted">{waiver.data?.period?.label ?? "Waiver"} · Bids are blind until the commissioner's resolution runs</p>
         {submit.error ? <p className="mt-2 text-center text-sm text-red-300">{submit.error.message}</p> : null}
 
         <div className="mt-4 flex gap-3"><button onClick={() => setSelectedPlayerId("")} className="flex-1 rounded-lg border border-white/20 py-2.5 text-sm font-bold text-white hover:bg-white/10">Cancel</button><button disabled={submit.isPending || (!isFreePeriod && (Number(amount) < 1 || Number(amount) > 30))} onClick={() => submit.mutate({ playerId: selectedPlayerId, amount: isFreePeriod ? 1 : Number(amount) })} className="cvc-button-compact flex-[2] justify-center disabled:opacity-50">{submit.isPending ? "Submitting…" : isFreePeriod ? "Submit claim" : `Submit $${Number(amount) || 0} bid`}</button></div>
-        <p className="mt-3 text-[11px] leading-4 text-cvc-muted">You can raise how many you're willing to win at this position afterward on the Manage Bids tab.</p>
+        <p className="mt-3 text-[11px] leading-4 text-cvc-muted">Your claims share a limit on how many you can win. Change the limit or the order on the Manage Bids tab.</p>
       </div>
     </div> : null}
     {confirmDialog.dialog}

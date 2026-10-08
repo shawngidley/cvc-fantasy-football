@@ -11,7 +11,7 @@ import { archiveFantasyProsNews, getArchivedFantasyProsNews, mergeFantasyProsNew
 import { attachFantasyProsPlayerNames } from "../fantasyProsNewsNames";
 import { normalizePlayerName } from "@shared/playerNameMatch";
 import { syncNflTeamAssignments } from "../nflTeamAssignmentSync";
-import { getFaabBalance, MAX_ROSTER_SIZE, STARTING_FAAB } from "../waiverRules";
+import { getFaabBalance, MAX_ROSTER_SIZE, nextClaimPriority, STARTING_FAAB } from "../waiverRules";
 import { awardFreeAgentClaimNow, resolveOpenWaiverPeriod } from "../waiverResolution";
 import { computeNextResolutionTime, nextRosterCutDeadline } from "../waiverResolutionTiming";
 import { getWaiverAwardDate, hasClearedWaiverHold } from "../waiverHold";
@@ -1484,7 +1484,7 @@ export const leagueRouter = router({
     return period;
   }),
 
-  submitFaabBid: protectedProcedure.input(z.object({ playerId: z.string().uuid(), amount: z.number().int().min(1).max(30), maxPlayersDesired: z.number().int().min(1).max(10).default(1), priority: z.number().int().min(1).max(99).default(1), dropPlayerId: z.string().uuid().optional() })).mutation(async ({ ctx, input }) => {
+  submitFaabBid: protectedProcedure.input(z.object({ playerId: z.string().uuid(), amount: z.number().int().min(1).max(30), maxPlayersDesired: z.number().int().min(1).max(10).default(1), priority: z.number().int().min(1).max(99).optional(), dropPlayerId: z.string().uuid().optional() })).mutation(async ({ ctx, input }) => {
     const owner = await getOwnerAccess({ openId: ctx.user.openId });
     if (!owner) throw new TRPCError({ code: "FORBIDDEN", message: "A CVC owner session is required to submit a waiver claim." });
     const { league, season } = await getCurrentLeagueAndSeason();
@@ -1553,11 +1553,17 @@ export const leagueRouter = router({
     // the stored value from drifting from what resolveOpenWaiverPeriod actually caps
     // the pool at. Free-period claims don't have this pool concept.
     let maxPlayersDesired = input.maxPlayersDesired;
+    // A new claim ranks behind the owner's existing pending claims (1, 2, 3 ...) instead of
+    // every claim defaulting to rank 1, which left same priority, same amount claims to be
+    // ordered by their database id. Re-submitting a claim for the same player keeps its rank.
+    const ownPendingClaims = unwrap(await supabase.from("faab_bid").select("player_id, priority").eq("waiver_period_id", period.id).eq("franchise_id", franchise.id).eq("status", "pending")) ?? [];
+    const existingClaimForPlayer = ownPendingClaims.find(row => row.player_id === input.playerId);
+    const claimPriority = input.priority ?? existingClaimForPlayer?.priority ?? nextClaimPriority(ownPendingClaims.map(row => row.priority));
     if (!isFreePeriod) {
       const existingPoolBids = unwrap(await supabase.from("faab_bid").select("max_players_desired").eq("waiver_period_id", period.id).eq("franchise_id", franchise.id).eq("status", "pending").is("bid_group_id", null)) ?? [];
       maxPlayersDesired = existingPoolBids.length ? Math.max(...existingPoolBids.map(row => row.max_players_desired)) : 1;
     }
-    const bid = unwrap(await supabase.from("faab_bid").upsert({ waiver_period_id: period.id, franchise_id: franchise.id, player_id: input.playerId, drop_player_id: input.dropPlayerId ?? null, amount, priority: input.priority, max_players_desired: maxPlayersDesired, status: "pending", confirmed_at: isFreePeriod ? null : new Date().toISOString() }, { onConflict: "waiver_period_id,franchise_id,player_id" }).select("id, amount, priority, status, confirmed_at").single());
+    const bid = unwrap(await supabase.from("faab_bid").upsert({ waiver_period_id: period.id, franchise_id: franchise.id, player_id: input.playerId, drop_player_id: input.dropPlayerId ?? null, amount, priority: claimPriority, max_players_desired: maxPlayersDesired, status: "pending", confirmed_at: isFreePeriod ? null : new Date().toISOString() }, { onConflict: "waiver_period_id,franchise_id,player_id" }).select("id, amount, priority, status, confirmed_at").single());
     if (!bid) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "CVC waiver claim could not be saved." });
     await createAuditEvent(league.id, season.id, owner.id, "faab_bid", bid.id, "submitted", `Submitted ${period.label} claim for ${playerRow.display_name}`);
     return bid;
@@ -1769,7 +1775,12 @@ export const leagueRouter = router({
     if (!owner) throw new TRPCError({ code: "FORBIDDEN", message: "A CVC owner session is required." });
     const franchise = unwrap(await supabase.from("franchise").select("id").eq("current_owner_id", owner.id).eq("is_active", true).limit(1).maybeSingle());
     if (!franchise) return [];
-    return unwrap(await supabase.from("faab_bid").select("id, amount, priority, max_players_desired, bid_group_id, status, submitted_at, confirmed_at, player:player_id(id, display_name, position, nfl_team), period:waiver_period_id(label, closes_at, status, period_type)").eq("franchise_id", franchise.id).order("submitted_at", { ascending: false }).limit(100)) ?? [];
+    const baseColumns = "id, amount, priority, max_players_desired, bid_group_id, status, submitted_at, confirmed_at, player:player_id(id, display_name, position, nfl_team), period:waiver_period_id(label, closes_at, status, period_type)";
+    // loss_reason comes from migration 202610080001. Until it has been run, fall back to the
+    // original columns so My Bids keeps working.
+    const withReason = await supabase.from("faab_bid").select(`${baseColumns}, loss_reason`).eq("franchise_id", franchise.id).order("submitted_at", { ascending: false }).limit(100);
+    if (!withReason.error) return (withReason.data ?? []) as any[];
+    return (unwrap(await supabase.from("faab_bid").select(baseColumns).eq("franchise_id", franchise.id).order("submitted_at", { ascending: false }).limit(100)) ?? []) as any[];
   }),
 
   // CVC's real season FAAB budget: $30 per franchise, spent in $1 increments across the

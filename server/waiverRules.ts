@@ -113,6 +113,9 @@ export type WaiverCandidateBid = {
   // player's position for every bid), so "1 RB, 1 WR" is two independent pools rather
   // than one shared cap of 1.
   groupKey: string;
+  // When the claim was submitted. Last stop before the id in the same priority, same
+  // amount tie so the order is the owner's order, not a random id sort.
+  submittedAt?: string | null;
 };
 
 export type FranchiseCapacity = { rosterCount: number; budget: number };
@@ -177,7 +180,7 @@ export function resolveWaiverAssignments(
     }
 
     for (const [franchiseId, tentativeWins] of Array.from(tentativeByFranchise.entries())) {
-      const ordered = [...tentativeWins].sort((a, b) => a.priority - b.priority || b.cost - a.cost || a.id.localeCompare(b.id));
+      const ordered = [...tentativeWins].sort((a, b) => a.priority - b.priority || b.cost - a.cost || (a.submittedAt ?? "").localeCompare(b.submittedAt ?? "") || a.id.localeCompare(b.id));
       const capacity = capacityByFranchise.get(franchiseId) ?? { rosterCount: 0, budget: 0 };
       let rosterRunning = capacity.rosterCount;
       let budgetRunning = capacity.budget;
@@ -214,4 +217,45 @@ export function resolveWaiverAssignments(
     if (leader) winnerByPlayer.set(playerId, leader.id);
   }
   return { winnerByPlayer, rejectionReasonByBid };
+}
+
+/** Priority for a brand new claim: one step behind the owner's lowest ranked pending
+ * claim, so the owner's list has a real order from the start (1, 2, 3 ...) instead of
+ * every claim defaulting to rank 1. Capped at 99, the schema maximum. */
+export function nextClaimPriority(existingPriorities: number[]): number {
+  if (!existingPriorities.length) return 1;
+  return Math.min(99, Math.max(...existingPriorities) + 1);
+}
+
+export type LossReasonInput = {
+  periodType: "bid" | "free";
+  bidAmount: number;
+  confirmed: boolean;
+  rejection?: WaiverRejectionReason;
+  /** Group label for a named group, or null for the default pool. */
+  groupLabel: string | null;
+  /** Players this franchise won in the same pool, which is what used up its limit. */
+  wonInSamePool: string[];
+  winnerFranchiseName: string | null;
+  winnerAmount: number | null;
+};
+
+/** Plain language reason shown to the owner on a lost claim. */
+export function describeLossReason(input: LossReasonInput): string {
+  const { rejection } = input;
+  if (rejection?.type === "max_players_desired") {
+    const where = input.groupLabel ? `your "${input.groupLabel}" group` : "your default pool";
+    const names = input.wonInSamePool.length ? ` ${input.wonInSamePool.join(" and ")} ranked higher, so this claim was skipped.` : " Your higher ranked claims used it up.";
+    return `Your limit for ${where} was ${rejection.limit}.${names}`;
+  }
+  if (rejection?.type === "budget") return `This would cost $${rejection.cost}, but you had only $${rejection.remaining} of FAAB left this season.`;
+  if (rejection?.type === "roster") return `Awarding this player would exceed the ${rejection.cap} player roster limit.`;
+  if (input.periodType === "free") {
+    return input.confirmed ? "A team with higher waiver priority claimed this player." : "You did not confirm this claim before the free agent period closed.";
+  }
+  if (input.winnerFranchiseName && input.winnerAmount !== null) {
+    if (input.winnerAmount > input.bidAmount) return `Outbid. ${input.winnerFranchiseName} won this player for $${input.winnerAmount}.`;
+    return `Tied at $${input.bidAmount}. ${input.winnerFranchiseName} won on the tiebreak: worse record first, then fewer points scored.`;
+  }
+  return "No claim could be awarded for this player.";
 }

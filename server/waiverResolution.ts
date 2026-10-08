@@ -1,9 +1,18 @@
 import { supabase, unwrap } from "./supabase";
-import { computeFranchiseStandings, getFaabBalance, MAX_ROSTER_SIZE, rankBidPeriodCandidates, resolveWaiverAssignments, selectFreeAgentCandidates, sortByWorstRecordFirst, type WaiverCandidateBid } from "./waiverRules";
+import { computeFranchiseStandings, describeLossReason, getFaabBalance, MAX_ROSTER_SIZE, rankBidPeriodCandidates, resolveWaiverAssignments, selectFreeAgentCandidates, sortByWorstRecordFirst, type WaiverCandidateBid } from "./waiverRules";
 import { computeNextResolutionTime, nextEasternWeekdayAt, sameEasternDayAt } from "./waiverResolutionTiming";
 import { hasClearedWaiverHold } from "./waiverHold";
 
-type PendingBid = { id: string; franchise_id: string; player_id: string; drop_player_id: string | null; amount: number; max_players_desired: number; priority: number; bid_group_id: string | null; confirmed_at: string | null };
+type PendingBid = { id: string; franchise_id: string; player_id: string; drop_player_id: string | null; amount: number; max_players_desired: number; priority: number; bid_group_id: string | null; confirmed_at: string | null; submitted_at: string | null };
+
+/** Marks a claim lost and saves the plain language reason shown on My Bids. The
+ * loss_reason column comes from migration 202610080001; if it has not been run yet the
+ * reason is simply skipped, so a missing column can never block a waiver resolution. */
+async function markBidLost(bidId: string, reason: string | null, resolvedAt: string) {
+  const withReason = await supabase.from("faab_bid").update({ status: "lost", resolved_at: resolvedAt, loss_reason: reason }).eq("id", bidId).select("id").single();
+  if (!withReason.error) return;
+  unwrap(await supabase.from("faab_bid").update({ status: "lost", resolved_at: resolvedAt }).eq("id", bidId).select("id").single());
+}
 
 // Every ungrouped ("default pool") bid shares this one sentinel group -- matches the
 // original pre-grouping behavior exactly: one shared cap, off the bid's own
@@ -235,7 +244,7 @@ export async function resolveOpenWaiverPeriod(): Promise<WaiverResolutionSummary
 
   const seasonId = period.season_id;
   const periodType = (period.period_type ?? "bid") as "bid" | "free";
-  const allPendingBids = (unwrap(await supabase.from("faab_bid").select("id, franchise_id, player_id, drop_player_id, amount, max_players_desired, priority, bid_group_id, confirmed_at").eq("waiver_period_id", period.id).eq("status", "pending")) ?? []) as PendingBid[];
+  const allPendingBids = (unwrap(await supabase.from("faab_bid").select("id, franchise_id, player_id, drop_player_id, amount, max_players_desired, priority, bid_group_id, confirmed_at, submitted_at").eq("waiver_period_id", period.id).eq("status", "pending")) ?? []) as PendingBid[];
 
   // 48-hour waiver hold + already-rostered guard, applied before anything is
   // awarded. A player cut less than 48 hours before this resolution is HELD: on a
@@ -263,12 +272,12 @@ export async function resolveOpenWaiverPeriod(): Promise<WaiverResolutionSummary
   const pendingBids: PendingBid[] = [];
   for (const bid of allPendingBids) {
     if (rosteredPlayerIds.has(bid.player_id)) {
-      unwrap(await supabase.from("faab_bid").update({ status: "lost", resolved_at: now.toISOString() }).eq("id", bid.id).select("id").single());
+      await markBidLost(bid.id, "This player was already on a roster.", now.toISOString());
       continue;
     }
     if (!hasClearedWaiverHold(droppedAtByPlayer.get(bid.player_id) ?? null, now)) {
       if (periodType === "bid") { carriedOverCount += 1; continue; } // held: stays pending, carried forward
-      unwrap(await supabase.from("faab_bid").update({ status: "lost", resolved_at: now.toISOString() }).eq("id", bid.id).select("id").single());
+      await markBidLost(bid.id, "This player was cut less than 48 hours ago, so he was not eligible for the free pickup.", now.toISOString());
       continue;
     }
     pendingBids.push(bid);
@@ -372,6 +381,7 @@ export async function resolveOpenWaiverPeriod(): Promise<WaiverResolutionSummary
         maxPlayersDesired,
         dropPlayerId: bid.drop_player_id,
         groupKey: bid.bid_group_id ?? DEFAULT_GROUP_KEY,
+        submittedAt: bid.submitted_at,
       };
     }));
   }
@@ -383,6 +393,16 @@ export async function resolveOpenWaiverPeriod(): Promise<WaiverResolutionSummary
   }
 
   const { winnerByPlayer, rejectionReasonByBid } = resolveWaiverAssignments(rankedCandidatesByPlayer, capacityByFranchise, MAX_ROSTER_SIZE);
+
+  // What each franchise actually won, per pool, so a claim skipped for a limit can say
+  // which higher ranked players used that limit up.
+  const wonNamesByPool = new Map<string, string[]>();
+  for (const [wonPlayerId, wonBidId] of Array.from(winnerByPlayer.entries())) {
+    const wonBid = byPlayer.get(wonPlayerId)?.find(candidate => candidate.id === wonBidId);
+    if (!wonBid) continue;
+    const poolKey = `${wonBid.franchise_id}|${wonBid.bid_group_id ?? DEFAULT_GROUP_KEY}`;
+    wonNamesByPool.set(poolKey, [...(wonNamesByPool.get(poolKey) ?? []), playerById.get(wonPlayerId)?.display_name ?? "a player"]);
+  }
 
   for (const [playerId, bidsForPlayer] of orderedPlayers) {
     const playerName = playerById.get(playerId)?.display_name ?? "Unknown player";
@@ -401,7 +421,18 @@ export async function resolveOpenWaiverPeriod(): Promise<WaiverResolutionSummary
           : `Awarding this player would exceed the ${rejection.cap}-player CVC roster limit.`;
         skipped.push({ playerName, franchiseName, reason });
       }
-      unwrap(await supabase.from("faab_bid").update({ status: "lost", resolved_at: now.toISOString() }).eq("id", bid.id).select("id").single());
+      const winnerFranchiseName = winner ? (franchiseById.get(winner.franchise_id)?.name ?? null) : null;
+      const reasonText = describeLossReason({
+        periodType,
+        bidAmount: bid.amount,
+        confirmed: bid.confirmed_at != null,
+        rejection,
+        groupLabel: bid.bid_group_id ? (groupById.get(bid.bid_group_id)?.label ?? null) : null,
+        wonInSamePool: wonNamesByPool.get(`${bid.franchise_id}|${bid.bid_group_id ?? DEFAULT_GROUP_KEY}`) ?? [],
+        winnerFranchiseName,
+        winnerAmount: winner ? winner.amount : null,
+      });
+      await markBidLost(bid.id, reasonText, now.toISOString());
     }
     if (!winner) continue;
 
