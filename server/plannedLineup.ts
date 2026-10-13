@@ -1,7 +1,8 @@
 import { supabase, unwrap } from "./supabase";
+import { resolveRosterPlayerForLineupEntry, type RosterPlayerRef } from "../shared/rosterPlayerResolution";
 
 export type CurrentAssignment = { id: string; player_id: string; franchise_id: string; assigned_slot_code: string | null };
-export type PlannedRow = { week_number: number; player_id: string; slot_code: string };
+export type PlannedRow = { week_number: number; player_id: string; slot_code: string; display_name?: string | null; position?: string | null; nfl_team?: string | null };
 
 /**
  * Pure cascading resolution: for a target future week, each player's effective slot
@@ -17,12 +18,31 @@ export type PlannedRow = { week_number: number; player_id: string; slot_code: st
  * BENCH until the owner places them, which is exactly the right default; no special
  * casing needed for "when were they acquired".
  */
-export function resolveEffectiveLineupForWeek(targetWeekNumber: number, currentAssignments: CurrentAssignment[], plannedRows: PlannedRow[]): Map<string, string> {
-  const latestPlannedByPlayer = new Map<string, { week_number: number; slot_code: string }>();
+export function resolveEffectiveLineupForWeek(targetWeekNumber: number, currentAssignments: CurrentAssignment[], plannedRows: PlannedRow[], rosterPlayers?: RosterPlayerRef[]): Map<string, string> {
+  // When roster rows are supplied, a planned row saved under a stale or duplicate player id
+  // is re-pointed at the roster row for the same person (see resolveRosterPlayerForLineupEntry).
+  // Rows for people no longer on this franchise's roster resolve to null and are dropped.
+  const remap = new Map<string, string | null>();
+  const claimed = new Set<string>();
+  const targetFor = (row: PlannedRow): string | null => {
+    if (!rosterPlayers) return row.player_id;
+    const key = `${row.player_id}|${row.display_name ?? ""}`;
+    if (!remap.has(key)) {
+      const hit = resolveRosterPlayerForLineupEntry(row, rosterPlayers, rosterPlayers.some(p => p.id === row.player_id) ? undefined : claimed);
+      remap.set(key, hit?.id ?? null);
+    }
+    return remap.get(key) ?? null;
+  };
+  const latestPlannedByPlayer = new Map<string, { week_number: number; slot_code: string; exact: boolean }>();
   for (const row of plannedRows) {
     if (row.week_number > targetWeekNumber) continue;
-    const existing = latestPlannedByPlayer.get(row.player_id);
-    if (!existing || row.week_number > existing.week_number) latestPlannedByPlayer.set(row.player_id, { week_number: row.week_number, slot_code: row.slot_code });
+    const target = targetFor(row);
+    if (!target) continue;
+    const exact = target === row.player_id;
+    const existing = latestPlannedByPlayer.get(target);
+    if (!existing || row.week_number > existing.week_number || (row.week_number === existing.week_number && exact && !existing.exact)) {
+      latestPlannedByPlayer.set(target, { week_number: row.week_number, slot_code: row.slot_code, exact });
+    }
   }
   const result = new Map<string, string>();
   for (const assignment of currentAssignments) {
@@ -32,16 +52,23 @@ export function resolveEffectiveLineupForWeek(targetWeekNumber: number, currentA
   return result;
 }
 
+const PLAYER_JOIN = "player:player_id(display_name, position, nfl_team)";
+const one = (v: any) => (Array.isArray(v) ? v[0] : v);
+const toRoster = (rows: any[]): RosterPlayerRef[] => rows.map(r => ({ id: r.player_id, display_name: one(r.player)?.display_name ?? "", position: one(r.player)?.position ?? null, nfl_team: one(r.player)?.nfl_team ?? null }));
+const toPlanned = (rows: any[]): PlannedRow[] => rows
+  .map((row: any) => ({ player_id: row.player_id, slot_code: row.slot_code, week_number: one(row.schedule_week)?.week_number, display_name: one(row.player)?.display_name ?? null, position: one(row.player)?.position ?? null, nfl_team: one(row.player)?.nfl_team ?? null }))
+  .filter((row: any) => typeof row.week_number === "number") as PlannedRow[];
+
 /** Loads the effective lineup for a franchise for a specific future week (not the
  * current live week -- callers use roster_assignment directly for that, and
  * weekly_lineup_snapshot for a past/final week). */
 export async function loadEffectiveFutureLineup(seasonId: string, franchiseId: string, targetWeekNumber: number): Promise<Map<string, string>> {
   const [currentAssignments, plannedRows] = await Promise.all([
-    supabase.from("roster_assignment").select("id, player_id, franchise_id, assigned_slot_code").eq("season_id", seasonId).eq("franchise_id", franchiseId).is("released_at", null).then(result => unwrap(result) as CurrentAssignment[]),
-    supabase.from("planned_lineup_assignment").select("player_id, slot_code, schedule_week:schedule_week_id(week_number)").eq("season_id", seasonId).eq("franchise_id", franchiseId)
-      .then(result => (result.error ? [] : (result.data ?? [])).map((row: any) => ({ player_id: row.player_id, slot_code: row.slot_code, week_number: (Array.isArray(row.schedule_week) ? row.schedule_week[0] : row.schedule_week)?.week_number })).filter((row: any) => typeof row.week_number === "number") as PlannedRow[]),
+    supabase.from("roster_assignment").select(`id, player_id, franchise_id, assigned_slot_code, ${PLAYER_JOIN}`).eq("season_id", seasonId).eq("franchise_id", franchiseId).is("released_at", null).then(result => unwrap(result) as any[]),
+    supabase.from("planned_lineup_assignment").select(`player_id, slot_code, schedule_week:schedule_week_id(week_number), ${PLAYER_JOIN}`).eq("season_id", seasonId).eq("franchise_id", franchiseId)
+      .then(result => (result.error ? [] : toPlanned(result.data ?? []))),
   ]);
-  return resolveEffectiveLineupForWeek(targetWeekNumber, currentAssignments, plannedRows);
+  return resolveEffectiveLineupForWeek(targetWeekNumber, currentAssignments as CurrentAssignment[], plannedRows, toRoster(currentAssignments));
 }
 
 /** Applies every currently-rostered player's effective lineup for `week` into
@@ -53,17 +80,16 @@ export async function promotePlannedLineupForWeek(seasonId: string, weekId: stri
   let slotsPromoted = 0;
   let franchisesUpdated = 0;
   for (const franchiseId of franchiseIds) {
-    const currentAssignments = unwrap(await supabase.from("roster_assignment").select("id, player_id, franchise_id, assigned_slot_code").eq("season_id", seasonId).eq("franchise_id", franchiseId).is("released_at", null)) as CurrentAssignment[] ?? [];
+    const currentAssignments = unwrap(await supabase.from("roster_assignment").select(`id, player_id, franchise_id, assigned_slot_code, ${PLAYER_JOIN}`).eq("season_id", seasonId).eq("franchise_id", franchiseId).is("released_at", null)) as any[] ?? [];
     // Gracefully treats a failed query here (confirmed real cause: the
     // planned_lineup_assignment table's own migration was never actually run against
     // the real database) the same as "nothing was ever planned ahead" -- this feature
     // is purely additive on top of the current roster, so a missing/broken table
     // should never block the core weekly sync/recompute flow that calls this.
-    const plannedResult = await supabase.from("planned_lineup_assignment").select("player_id, slot_code, schedule_week:schedule_week_id(week_number)").eq("season_id", seasonId).eq("franchise_id", franchiseId);
-    const plannedRowsRaw = plannedResult.error ? [] : (plannedResult.data ?? []);
-    const plannedRows = plannedRowsRaw.map((row: any) => ({ player_id: row.player_id, slot_code: row.slot_code, week_number: (Array.isArray(row.schedule_week) ? row.schedule_week[0] : row.schedule_week)?.week_number })).filter((row: any) => typeof row.week_number === "number") as PlannedRow[];
+    const plannedResult = await supabase.from("planned_lineup_assignment").select(`player_id, slot_code, schedule_week:schedule_week_id(week_number), ${PLAYER_JOIN}`).eq("season_id", seasonId).eq("franchise_id", franchiseId);
+    const plannedRows = plannedResult.error ? [] : toPlanned(plannedResult.data ?? []);
     if (!plannedRows.length) continue; // nothing was ever planned ahead -- current roster_assignment is already correct, no writes needed
-    const effective = resolveEffectiveLineupForWeek(weekNumber, currentAssignments, plannedRows);
+    const effective = resolveEffectiveLineupForWeek(weekNumber, currentAssignments as CurrentAssignment[], plannedRows, toRoster(currentAssignments));
     let franchiseChanged = false;
     for (const assignment of currentAssignments) {
       const slot = effective.get(assignment.player_id);
