@@ -12,7 +12,8 @@ import { CvcInjuryBadge } from "@/components/CvcInjuryBadge";
 import { normalizePlayerName } from "@shared/playerNameMatch";
 import { trpc } from "@/lib/trpc";
 import { toast } from "sonner";
-import { Scissors } from "lucide-react";
+import { AlertTriangle, Scissors } from "lucide-react";
+import { getRosterCompliance } from "@shared/rosterCompliance";
 import { useConfirmDialog } from "@/hooks/useConfirmDialog";
 import { groupCvcLineup, type CvcLineupAssignment, type CvcLineupGroup, type CvcLineupPlayer } from "@/lib/cvcLineupGrouping";
 import { TeamLogo } from "@/components/TeamLogo";
@@ -204,6 +205,7 @@ export function CvcOwnerLineup() {
 
   const displayName = viewedFranchise?.name ?? roster.data?.franchise.name ?? "Franchise";
   const isMine = viewedFranchiseId === mine.data?.id;
+  const rosterCompliance = getRosterCompliance(roster.data?.players as any[] | undefined);
   const hasPending = Object.keys(pendingSlots).length > 0;
 
   return <div className="space-y-5">
@@ -215,6 +217,7 @@ export function CvcOwnerLineup() {
         {hasPending ? <span className="text-xs font-bold uppercase tracking-[0.08em] text-amber-300">Unsaved changes</span> : null}
       </div>
       {saveError ? <p className="mt-2 text-sm font-medium text-red-300">{saveError}</p> : null}
+      {rosterCompliance.warnings.length ? <div className="mt-3 space-y-2" role="alert">{rosterCompliance.warnings.map(warning => <div key={warning.kind} className="flex items-center gap-2 rounded-lg border border-red-300 bg-red-50 px-3 py-2 text-xs font-bold text-red-800"><AlertTriangle size={14} className="shrink-0" /><span className="rounded bg-red-600 px-1.5 py-0.5 text-[9px] font-black uppercase tracking-[0.08em] text-white">{warning.kind === "salary" ? "Cap" : "Roster"}</span>{warning.message}</div>)}</div> : null}
     </div>
     
     {injuryStatuses.isError ? <p className="rounded-xl border border-amber-300/30 bg-amber-50 px-4 py-3 text-sm text-amber-950">Injury status is unavailable right now — the absence of a badge below doesn't necessarily mean a player is healthy. Check the Injury Report or the NFL's official report before kickoff.</p> : null}
