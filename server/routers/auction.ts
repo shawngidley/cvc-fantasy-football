@@ -1,5 +1,4 @@
 import { TRPCError } from "@trpc/server";
-import { seenCutoffIso, passesSeenFilter } from "../playerSeenCutoff";
 import { z } from "zod";
 import { supabase, unwrap } from "../supabase";
 import { protectedProcedure, publicProcedure, router } from "../_core/trpc";
@@ -93,7 +92,7 @@ export const auctionRouter = router({
     // sync has actually run (max is non-null); before that, last_seen_at is null for
     // every player, and requiring it would hide the entire pool rather than narrow it.
     const mostRecentSync = unwrap(await supabase.from("player").select("last_seen_at").not("last_seen_at", "is", null).order("last_seen_at", { ascending: false }).limit(1).maybeSingle());
-    if (mostRecentSync?.last_seen_at) playerQuery = playerQuery.gte("last_seen_at", seenCutoffIso(mostRecentSync.last_seen_at)!);
+    if (mostRecentSync?.last_seen_at) playerQuery = playerQuery.gte("last_seen_at", mostRecentSync.last_seen_at);
     if (input?.search) playerQuery = playerQuery.ilike("display_name", `%${input.search.replace(/[%_]/g, "")}%`);
     if (input?.position) playerQuery = playerQuery.eq("position", input.position);
     const [playersResult, activeAssignmentsResult, awardedResult, rookieDraftResult] = await Promise.all([

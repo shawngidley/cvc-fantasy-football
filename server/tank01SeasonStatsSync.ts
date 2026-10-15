@@ -1,5 +1,4 @@
 import { calculateCvcFantasyPoints, type CvcScoringRule, type Tank01LiveStats } from "@shared/cvcScoring";
-import { seenCutoffIso, passesSeenFilter } from "./playerSeenCutoff";
 import { normalizeNFLTeamCode } from "@shared/nflTeamCodes";
 import { getNFLDataAdapter, Tank01NFLDataAdapter } from "./nflDataAdapter";
 import { supabase, unwrap } from "./supabase";
@@ -103,7 +102,7 @@ export async function syncTank01SeasonStats(seasonId: string, limit = 40): Promi
   // because of a lookup bug but because most of that batch was never going to be found
   // by design. This also means far fewer wasted API calls overall.
   const mostRecentSync = unwrap(await supabase.from("player").select("last_seen_at").not("last_seen_at", "is", null).order("last_seen_at", { ascending: false }).limit(1).maybeSingle());
-  if (mostRecentSync?.last_seen_at) playerQuery = playerQuery.gte("last_seen_at", seenCutoffIso(mostRecentSync.last_seen_at)!);
+  if (mostRecentSync?.last_seen_at) playerQuery = playerQuery.gte("last_seen_at", mostRecentSync.last_seen_at);
   const players = unwrap(await playerQuery) as CvcPlayer[] ?? [];
   if (!players.length) return { status: "completed", attempted: 0, updated: 0, notFound: 0, remaining: 0, teamsUpdated: 0 };
 
