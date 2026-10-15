@@ -1,4 +1,5 @@
 import { TRPCError } from "@trpc/server";
+import { seenCutoffIso, passesSeenFilter } from "../playerSeenCutoff";
 import { z } from "zod";
 import { protectedProcedure, publicProcedure, router } from "../_core/trpc";
 import { getFantasyProsDataAdapter, getNFLDataAdapter, Tank01NFLDataAdapter } from "../nflDataAdapter";
@@ -851,10 +852,24 @@ export const leagueRouter = router({
     // more specific signal on its own. Skipped entirely if no active-flag sync has ever
     // run (fails open, not closed, so it never hides the whole pool).
     const mostRecentSync = unwrap(await supabase.from("player").select("last_seen_at").not("last_seen_at", "is", null).order("last_seen_at", { ascending: false }).limit(1).maybeSingle());
-    if (mostRecentSync?.last_seen_at) playerQuery = playerQuery.gte("last_seen_at", mostRecentSync.last_seen_at);
+    if (mostRecentSync?.last_seen_at) playerQuery = playerQuery.gte("last_seen_at", seenCutoffIso(mostRecentSync.last_seen_at)!);
     if (input?.search) playerQuery = playerQuery.ilike("display_name", `%${input.search.replace(/[%_]/g, "")}%`);
     if (input?.position) playerQuery = playerQuery.eq("position", input.position.toUpperCase());
-    const players = unwrap(await playerQuery) ?? [];
+    const poolPlayers = unwrap(await playerQuery) ?? [];
+    // Anyone cut from a CVC roster this season always belongs in the pool, even if neither
+    // active-list sync has stamped them recently (same reasoning as the matchingRightsOnly path:
+    // being rostered a moment ago is a stronger signal than a ranking list).
+    const releasedRows = unwrap(await supabase.from("roster_assignment").select("player_id").eq("season_id", season.id).not("released_at", "is", null)) ?? [];
+    const seenInPool = new Set(poolPlayers.map(player => player.id));
+    const releasedIds = Array.from(new Set(releasedRows.map(row => row.player_id))).filter(id => !activePlayerIds.has(id) && !seenInPool.has(id));
+    let extraPlayers: typeof poolPlayers = [];
+    if (releasedIds.length) {
+      let extraQuery = supabase.from("player").select("id, provider, display_name, position, nfl_team, status, metadata").neq("provider", "placeholder").in("position", eligiblePositions).in("id", releasedIds);
+      if (input?.search) extraQuery = extraQuery.ilike("display_name", `%${input.search.replace(/[%_]/g, "")}%`);
+      if (input?.position) extraQuery = extraQuery.eq("position", input.position.toUpperCase());
+      extraPlayers = unwrap(await extraQuery) ?? [];
+    }
+    const players = [...poolPlayers, ...extraPlayers].sort((a, b) => a.display_name.localeCompare(b.display_name));
     const rosteredPlayers = activePlayerIds.size ? unwrap(await supabase.from("player").select("display_name").in("id", Array.from(activePlayerIds))) ?? [] : [];
     const activePlayerNames = new Set(rosteredPlayers.map(player => player.display_name.trim().toLowerCase().replace(/\s+/g, " ")));
     const freeAgentPool = players.filter(player => !activePlayerIds.has(player.id) && !activePlayerNames.has(player.display_name.trim().toLowerCase().replace(/\s+/g, " "))).slice(0, limit);
@@ -1337,7 +1352,7 @@ export const leagueRouter = router({
     const activeAssignmentsResult = await supabase.from("roster_assignment").select("player_id").eq("season_id", season.id).is("released_at", null);
     const activePlayerIds = new Set((unwrap(activeAssignmentsResult) ?? []).map(a => a.player_id));
     let testQuery = supabase.from("player").select("id, display_name, position").neq("provider", "placeholder").in("position", ["QB", "RB", "WR", "TE", "K", "DST"]).order("display_name").limit(1220).ilike("display_name", "%Prentice%");
-    if (mostRecentSync?.last_seen_at) testQuery = testQuery.gte("last_seen_at", mostRecentSync.last_seen_at);
+    if (mostRecentSync?.last_seen_at) testQuery = testQuery.gte("last_seen_at", seenCutoffIso(mostRecentSync.last_seen_at)!);
     const testQueryResult = await testQuery;
     const testPlayers = testQueryResult.data ?? [];
     const freeAgentPoolTest = testPlayers.filter(p => !activePlayerIds.has(p.id));
@@ -1350,7 +1365,7 @@ export const leagueRouter = router({
       mostRecentActiveSyncCutoff: mostRecentSync?.last_seen_at ?? null,
       sampleRows: (sampleResult.data ?? []).map(row => {
         const lastSeen = lastSeenById.get(row.player_id);
-        const passesActiveFilter = !mostRecentSync?.last_seen_at || (lastSeen?.last_seen_at != null && lastSeen.last_seen_at >= mostRecentSync.last_seen_at);
+        const passesActiveFilter = !mostRecentSync?.last_seen_at || (lastSeen?.last_seen_at != null && passesSeenFilter(lastSeen.last_seen_at, mostRecentSync.last_seen_at));
         return { ...row, display_name: playerById.get(row.player_id)?.display_name ?? "?", position: playerById.get(row.player_id)?.position ?? "?", rosteredBy: rosteredByPlayerId.get(row.player_id) ?? null, last_seen_at: lastSeen?.last_seen_at ?? null, status: lastSeen?.status ?? null, passesActiveFilter };
       }),
       sampleErrorText: sampleResult.error?.message ?? null,
