@@ -1,9 +1,28 @@
 import { supabase, unwrap } from "./supabase";
+import { remapBidsToCanonicalPlayers } from "./waiverDuplicates";
+import { playerIdentityKey } from "../shared/playerIdentity";
 import { computeFranchiseStandings, describeLossReason, getFaabBalance, MAX_ROSTER_SIZE, rankBidPeriodCandidates, resolveWaiverAssignments, selectFreeAgentCandidates, sortByWorstRecordFirst, type WaiverCandidateBid } from "./waiverRules";
 import { computeNextResolutionTime, nextEasternWeekdayAt, sameEasternDayAt } from "./waiverResolutionTiming";
 import { hasClearedWaiverHold } from "./waiverHold";
 
 type PendingBid = { id: string; franchise_id: string; player_id: string; drop_player_id: string | null; amount: number; max_players_desired: number; priority: number; bid_group_id: string | null; confirmed_at: string | null; submitted_at: string | null };
+
+async function loadIdentityRow(playerId: string) {
+  const row = unwrap(await supabase.from("player").select("display_name, position, nfl_team").eq("id", playerId).maybeSingle());
+  return { display_name: row?.display_name ?? "", position: row?.position ?? null, nfl_team: row?.nfl_team ?? null };
+}
+
+/** Identity keys of everyone on an active CVC roster this season. Two `player` rows can exist for
+ * one real player or defense, so "already rostered" has to be decided by identity, not row id. */
+export async function loadRosteredIdentityKeys(seasonId: string): Promise<Set<string>> {
+  const rows = (unwrap(await supabase.from("roster_assignment").select("player:player_id(display_name, position, nfl_team)").eq("season_id", seasonId).is("released_at", null)) ?? []) as any[];
+  const keys = new Set<string>();
+  for (const row of rows) {
+    const player = Array.isArray(row.player) ? row.player[0] : row.player;
+    if (player?.display_name) keys.add(playerIdentityKey(player));
+  }
+  return keys;
+}
 
 /** Marks a claim lost and saves the plain language reason shown on My Bids. The
  * loss_reason column comes from migration 202610080001; if it has not been run yet the
@@ -58,7 +77,8 @@ export async function awardFreeAgentClaimNow(bidId: string): Promise<ImmediateFr
   const franchise = unwrap(franchiseResult);
   if (!period || !player || !franchise) return { outcome: "rejected", reason: "Claim details could not be loaded." };
 
-  if (unwrap(alreadyRosteredResult)) {
+  const rosteredByIdentity = period ? (await loadRosteredIdentityKeys(period.season_id)).has(playerIdentityKey(await loadIdentityRow(bid.player_id))) : false;
+  if (unwrap(alreadyRosteredResult) || rosteredByIdentity) {
     unwrap(await supabase.from("faab_bid").update({ status: "lost", resolved_at: new Date().toISOString() }).eq("id", bidId).select("id").single());
     return { outcome: "already_claimed" };
   }
@@ -244,7 +264,16 @@ export async function resolveOpenWaiverPeriod(): Promise<WaiverResolutionSummary
 
   const seasonId = period.season_id;
   const periodType = (period.period_type ?? "bid") as "bid" | "free";
-  const allPendingBids = (unwrap(await supabase.from("faab_bid").select("id, franchise_id, player_id, drop_player_id, amount, max_players_desired, priority, bid_group_id, confirmed_at, submitted_at").eq("waiver_period_id", period.id).eq("status", "pending")) ?? []) as PendingBid[];
+  const rawPendingBids = (unwrap(await supabase.from("faab_bid").select("id, franchise_id, player_id, drop_player_id, amount, max_players_desired, priority, bid_group_id, confirmed_at, submitted_at").eq("waiver_period_id", period.id).eq("status", "pending")) ?? []) as PendingBid[];
+  // Two player rows can exist for one real player or defense (e.g. Chiefs D/ST from the workbook
+  // and from FantasyPros). Bids are grouped by player_id below, so without this a bid on each
+  // duplicate would be uncontested and BOTH would win. Re-point duplicate bids at one row so they
+  // compete, and retire bids on anyone already rostered under another row.
+  const identityPlayerIds = Array.from(new Set(rawPendingBids.map(bid => bid.player_id)));
+  const identityRows = identityPlayerIds.length ? (unwrap(await supabase.from("player").select("id, display_name, position, nfl_team, provider").in("id", identityPlayerIds)) ?? []) : [];
+  const duplicateSafe = remapBidsToCanonicalPlayers(rawPendingBids, identityRows as any[], await loadRosteredIdentityKeys(seasonId));
+  const allPendingBids = duplicateSafe.bids;
+  for (const bid of duplicateSafe.alreadyRostered) await markBidLost(bid.id, "This player was already on a roster.", now.toISOString());
 
   // 48-hour waiver hold + already-rostered guard, applied before anything is
   // awarded. A player cut less than 48 hours before this resolution is HELD: on a

@@ -12,7 +12,8 @@ import { attachFantasyProsPlayerNames } from "../fantasyProsNewsNames";
 import { normalizePlayerName } from "@shared/playerNameMatch";
 import { syncNflTeamAssignments } from "../nflTeamAssignmentSync";
 import { getFaabBalance, MAX_ROSTER_SIZE, nextClaimPriority, STARTING_FAAB } from "../waiverRules";
-import { awardFreeAgentClaimNow, resolveOpenWaiverPeriod } from "../waiverResolution";
+import { awardFreeAgentClaimNow, loadRosteredIdentityKeys, resolveOpenWaiverPeriod } from "../waiverResolution";
+import { playerIdentityKey } from "../../shared/playerIdentity";
 import { computeNextResolutionTime, nextRosterCutDeadline } from "../waiverResolutionTiming";
 import { getWaiverAwardDate, hasClearedWaiverHold } from "../waiverHold";
 import { syncFantasyProsSnapshot, syncFantasyProsActiveFlags, syncFantasyProsRookieFlags } from "../fantasyProsSync";
@@ -1533,7 +1534,7 @@ export const leagueRouter = router({
       }
     }
     const [player, activeAssignment] = await Promise.all([
-      supabase.from("player").select("id, display_name, nfl_team").eq("id", input.playerId).maybeSingle(),
+      supabase.from("player").select("id, display_name, position, nfl_team").eq("id", input.playerId).maybeSingle(),
       supabase.from("roster_assignment").select("id").eq("season_id", season.id).eq("player_id", input.playerId).is("released_at", null).limit(1).maybeSingle(),
     ]);
     const playerRow = unwrap(player);
@@ -1557,6 +1558,11 @@ export const leagueRouter = router({
     const currentWeek = await resolveEffectivePlanningWeek(weeks, season.id);
     if (currentWeek && await isPlayerLockedForGameStart(playerRow.nfl_team, currentWeek.week_number, season.year)) {
       throw new TRPCError({ code: "BAD_REQUEST", message: `${playerRow.display_name}'s game has already started -- they can't be picked up until next week.` });
+    }
+    // A second player row for someone already on a roster (e.g. a defense that exists under two
+    // providers) counts as rostered too, so nobody can bid on the "other copy".
+    if ((await loadRosteredIdentityKeys(season.id)).has(playerIdentityKey(playerRow))) {
+      throw new TRPCError({ code: "BAD_REQUEST", message: `${playerRow.display_name} is already on a CVC roster.` });
     }
     if (input.dropPlayerId) {
       const drop = unwrap(await supabase.from("roster_assignment").select("id, locked_until").eq("season_id", season.id).eq("franchise_id", franchise.id).eq("player_id", input.dropPlayerId).is("released_at", null).maybeSingle());
