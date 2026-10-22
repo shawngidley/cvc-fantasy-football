@@ -95,6 +95,25 @@ export function countMadeExtraPoints(events: KickerPlayEvent[]): number {
   return events.filter(event => event.type === "xp" && event.outcome === "made").length;
 }
 
+/** Builds a kicker's Kicking stats from Tank01's box score plus ESPN play by play.
+ * Field goal yardage comes from ESPN, because Tank01 does not reliably send Kicking.fgYds and
+ * the scoring rule is per yard. Extra points are a flat value with no distance, so Tank01's
+ * own xpMade is trusted. ESPN's play text does not always match the parser (a made XP can be
+ * silently missing, which is how WRC under-scored Eddy Pineiro), so ESPN only RAISES the
+ * count, never lowers it. */
+export function applyKickerEventsToKicking(existingKicking: Record<string, unknown>, playerEvents: KickerPlayEvent[]): Record<string, unknown> {
+  const hasFgEvents = playerEvents.some(event => event.type === "fg");
+  const hasXpEvents = playerEvents.some(event => event.type === "xp");
+  const next: Record<string, unknown> = { ...existingKicking };
+  if (hasFgEvents) next.fgYds = sumMadeFieldGoalYards(playerEvents);
+  if (hasXpEvents) {
+    const tank01Xp = Number.parseFloat(String(existingKicking.xpMade ?? ""));
+    const espnXp = countMadeExtraPoints(playerEvents);
+    next.xpMade = Number.isFinite(tank01Xp) ? Math.max(tank01Xp, espnXp) : espnXp;
+  }
+  return next;
+}
+
 /** Formats a single kick event for display -- distance and outcome only, no attached
  * point value (unlike WRC's formatKickerEvent, which bakes in WRC's own hardcoded
  * scoring formula). CVC's actual point value for a made kick depends on its own

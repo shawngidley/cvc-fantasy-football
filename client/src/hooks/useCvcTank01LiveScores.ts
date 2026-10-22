@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { calculateCvcFantasyPoints, type CvcScoringRule, type Tank01LiveStats } from "@shared/cvcScoring";
 import { normalizePlayerName } from "@shared/playerNameMatch";
-import { getKickerEventsForPlayer, parseEspnKickerEvents, sumMadeFieldGoalYards, countMadeExtraPoints, type KickerPlayEvent } from "@shared/espnKickerEvents";
+import { applyKickerEventsToKicking, getKickerEventsForPlayer, parseEspnKickerEvents, type KickerPlayEvent } from "@shared/espnKickerEvents";
 
 const TANK01_BASE_URL = "/api/tank01";
 const POLL_INTERVAL_MS = 60_000;
@@ -127,12 +127,16 @@ export function useCvcTank01LiveScores(week: number | undefined, season: number 
   // Tank01 call volume during a live week. Persists across effect re-runs like
   // stoppedForWeekRef, for the same reason.
   const initialFetchDoneForWeekRef = useRef<number | null>(null);
+  // The week this hook is currently showing. Everything fetched is tagged with the week it was
+  // requested for, and a result that arrives after the week changed is thrown away.
+  const activeWeekRef = useRef<number | undefined>(week);
 
   const load = useCallback(async () => {
     if (!week || !season || !rules.length) return { loaded: false, fetchEligibleGames: [] as TankGame[], anyCurrentlyLive: false };
     const response = await fetch(`${TANK01_BASE_URL}/getNFLGamesForWeek?week=${week}&seasonType=Regular%20Season&season=${season}`);
     if (!response.ok) throw new Error(`Tank01 schedule request failed (${response.status})`);
     const payload = await response.json() as { body?: TankGame[] };
+    if (activeWeekRef.current !== week) return { loaded: false, fetchEligibleGames: [] as TankGame[], anyCurrentlyLive: false }; // week changed while this request was in flight
     const games = payload.body ?? [];
     const nextMatchups: Record<string, CvcNflMatchup> = {};
     for (const game of games) {
@@ -148,6 +152,7 @@ export function useCvcTank01LiveScores(week: number | undefined, season: number 
 
   const refresh = useCallback(async () => {
     if (week != null && stoppedForWeekRef.current === week) { setIsPolling(false); return false; }
+    const requestWeek = week;
     try {
       const { loaded, fetchEligibleGames, anyCurrentlyLive } = await load();
       // Back off for now, but NEVER latch the week off here. An empty list means either
@@ -201,6 +206,7 @@ export function useCvcTank01LiveScores(week: number | undefined, season: number 
           if (teamAbv) nextStatLines[`dst:${normalizeTeam(teamAbv)}`] = { Defense: stat as unknown as Record<string, string | number> };
         }
       }));
+      if (activeWeekRef.current !== requestWeek) return false; // the owner switched weeks mid-fetch: drop this week's data
       // Merge rather than replace: a recurring poll only fetches games still in
       // progress, so overwriting would wipe the stat lines already captured for
       // games that have since gone final.
@@ -215,6 +221,7 @@ export function useCvcTank01LiveScores(week: number | undefined, season: number 
       // yet), that kicker's stat line is left as Tank01 provided it, not blanked out.
       try {
         const kickerEvents = await fetchEspnKickerEvents(gamesToFetch);
+        if (activeWeekRef.current !== requestWeek) return false;
         // Merge rather than replace: a recurring poll only fetches games still in
         // progress, so overwriting would wipe the kicker events already captured
         // for games that have since gone final. Dedup by the same key the fetch
@@ -244,11 +251,7 @@ export function useCvcTank01LiveScores(week: number | undefined, season: number 
               if (!longName || !existingKicking || existingKicking.fgMade === undefined) continue;
               const playerEvents = getKickerEventsForPlayer(kickerEvents, longName);
               if (!playerEvents.length) continue;
-              const fgYds = sumMadeFieldGoalYards(playerEvents);
-              const xpMade = countMadeExtraPoints(playerEvents);
-              const hasFgEvents = playerEvents.some(event => event.type === "fg");
-              const hasXpEvents = playerEvents.some(event => event.type === "xp");
-              next[key] = { ...entry, Kicking: { ...existingKicking, ...(hasFgEvents ? { fgYds } : {}), ...(hasXpEvents ? { xpMade } : {}) } } as Tank01LiveStats;
+              next[key] = { ...entry, Kicking: applyKickerEventsToKicking(existingKicking, playerEvents) } as Tank01LiveStats;
             }
             return next;
           });
@@ -273,6 +276,23 @@ export function useCvcTank01LiveScores(week: number | undefined, season: number 
       return false;
     }
   }, [load, rules]);
+
+  // Switching weeks (the Lineup page has a week picker) must not carry the previous week's stat
+  // lines or kicker events into the new one. Stat lines and kicker events are merged across polls,
+  // so without this a kicker's old FG events were added to the new week's, and a player on a bye
+  // kept last week's points. This effect is declared before the polling effect so the reset
+  // happens first. The per week "already fetched / stopped" latches are cleared too, otherwise
+  // returning to a week that already finished would never reload its data.
+  useEffect(() => {
+    activeWeekRef.current = week;
+    stoppedForWeekRef.current = null;
+    initialFetchDoneForWeekRef.current = null;
+    setStatLines({});
+    setKickerEvents([]);
+    setNflMatchups({});
+    setLastUpdated(null);
+    setError(null);
+  }, [week]);
 
   useEffect(() => {
     let active = true;

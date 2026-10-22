@@ -5,7 +5,7 @@ import { resolveSkinForWeek } from "./cvcSkins";
 import { promotePlannedLineupForWeek } from "./plannedLineup";
 import { mapWithConcurrencyLimit, normalizeTeam, resolveStatLine, type SnapshotRow } from "./cvcScoringShared";
 import { normalizePlayerName } from "@shared/playerNameMatch";
-import { getKickerEventsForPlayer, parseEspnKickerEvents, sumMadeFieldGoalYards, countMadeExtraPoints, type KickerPlayEvent } from "@shared/espnKickerEvents";
+import { applyKickerEventsToKicking, getKickerEventsForPlayer, parseEspnKickerEvents, type KickerPlayEvent } from "@shared/espnKickerEvents";
 import { listGamesForWeekForCron } from "./tank01ScheduleCache";
 import { persistWeeklyStats, refreshSeasonStatsCurrent, type WeeklyStatPlayer } from "./cvcPlayerWeeklyStats";
 
@@ -279,11 +279,7 @@ export function applyEspnKickerOverrides(statLines: Map<string, Tank01LiveStats>
     if (!longName || !existingKicking || existingKicking.fgMade === undefined) continue;
     const playerEvents = getKickerEventsForPlayer(kickerEvents, longName);
     if (!playerEvents.length) continue;
-    const fgYds = sumMadeFieldGoalYards(playerEvents);
-    const xpMade = countMadeExtraPoints(playerEvents);
-    const hasFgEvents = playerEvents.some(event => event.type === "fg");
-    const hasXpEvents = playerEvents.some(event => event.type === "xp");
-    statLines.set(key, { ...entry, Kicking: { ...existingKicking, ...(hasFgEvents ? { fgYds } : {}), ...(hasXpEvents ? { xpMade } : {}) } } as Tank01LiveStats);
+    statLines.set(key, { ...entry, Kicking: applyKickerEventsToKicking(existingKicking, playerEvents) } as Tank01LiveStats);
   }
 }
 
