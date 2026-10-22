@@ -13,6 +13,8 @@ import { normalizePlayerName } from "@shared/playerNameMatch";
 import { syncNflTeamAssignments } from "../nflTeamAssignmentSync";
 import { getFaabBalance, MAX_ROSTER_SIZE, nextClaimPriority, STARTING_FAAB } from "../waiverRules";
 import { awardFreeAgentClaimNow, loadRosteredIdentityKeys, resolveOpenWaiverPeriod } from "../waiverResolution";
+import { applyEspnYardsToKickerGames, buildKickerSeasonRows } from "../kickerGameLog";
+import { fetchEspnKickerEventsByGame } from "../espnKickerGames";
 import { playerIdentityKey } from "../../shared/playerIdentity";
 import { computeNextResolutionTime, nextRosterCutDeadline } from "../waiverResolutionTiming";
 import { getWaiverAwardDate, hasClearedWaiverHold } from "../waiverHold";
@@ -1071,11 +1073,25 @@ export const leagueRouter = router({
   // Multi-year season-by-season stats, powering the player profile's Stats tab. Uses
   // ESPN's public gamelog API (no key required) but computes CVC's own fantasy points
   // from this season's actual scoring_rule rows, not a hardcoded formula.
-  playerCareerSeasonStats: publicProcedure.input(z.object({ playerId: z.string().uuid(), espnId: z.string().min(1) })).query(async ({ input }) => {
-    const player = unwrap(await supabase.from("player").select("position, nfl_team").eq("id", input.playerId).maybeSingle());
+  playerCareerSeasonStats: publicProcedure.input(z.object({ playerId: z.string().uuid(), espnId: z.string().optional(), tank01PlayerId: z.string().optional() })).query(async ({ input }) => {
+    const player = unwrap(await supabase.from("player").select("display_name, position, nfl_team").eq("id", input.playerId).maybeSingle());
     if (!player?.position) return { seasons: [] };
     const { season } = await getCurrentLeagueAndSeason();
     const rules = unwrap(await supabase.from("scoring_rule").select("stat_key, value, applies_to_positions").eq("season_id", season.id)) ?? [];
+    // Kickers: ESPN's gamelog labels do not carry field goal yardage, so every season came out as
+    // blanks and 0.0. Build the seasons from the same per game rows the Game Log tab shows
+    // (Tank01 counts plus ESPN per kick yardage) so the two tabs always agree.
+    if (player.position === "K" && input.tank01PlayerId) {
+      const adapter = getNFLDataAdapter();
+      if (adapter instanceof Tank01NFLDataAdapter) {
+        const years = Array.from({ length: 5 }, (_, index) => season.year - index);
+        const logs = await Promise.all(years.map(async year => parseCvcGameLog(await adapter.getGamesForPlayer(input.tank01PlayerId!, year).catch(() => ({})), player.nfl_team ?? "", "K", rules)));
+        const eventsByGame = await fetchEspnKickerEventsByGame(logs.flatMap(games => games.map(game => game.gameId)));
+        const gamesByYear = Object.fromEntries(years.map((year, index) => [year, applyEspnYardsToKickerGames(logs[index], player.display_name, rules, eventsByGame)]));
+        return { seasons: buildKickerSeasonRows(gamesByYear, player.nfl_team ?? undefined) };
+      }
+    }
+    if (!input.espnId) return { seasons: [] };
     const seasons = await getCvcPlayerCareerStats(input.espnId, player.position, rules, season.year, 5, player.nfl_team ?? undefined);
     return { seasons };
   }),
@@ -1133,7 +1149,7 @@ export const leagueRouter = router({
   // player's confirmed Tank01 playerID (from the client's already-fetched Tank01 info
   // response) rather than searching by name again.
   playerGameLog: publicProcedure.input(z.object({ playerId: z.string().uuid(), tank01PlayerId: z.string().min(1), year: z.number().int() })).query(async ({ input }) => {
-    const player = unwrap(await supabase.from("player").select("position, nfl_team").eq("id", input.playerId).maybeSingle());
+    const player = unwrap(await supabase.from("player").select("display_name, position, nfl_team").eq("id", input.playerId).maybeSingle());
     if (!player?.position) return { games: [] };
     const adapter = getNFLDataAdapter();
     if (!(adapter instanceof Tank01NFLDataAdapter)) return { games: [] };
@@ -1141,6 +1157,11 @@ export const leagueRouter = router({
     const rules = unwrap(await supabase.from("scoring_rule").select("stat_key, value, applies_to_positions").eq("season_id", season.id)) ?? [];
     const body = await adapter.getGamesForPlayer(input.tank01PlayerId, input.year).catch(() => ({}));
     const games = parseCvcGameLog(body, player.nfl_team ?? "", player.position, rules);
+    // Tank01's game log has no field goal yardage, so a kicker's points were extra points only.
+    if (player.position === "K" && games.length) {
+      const eventsByGame = await fetchEspnKickerEventsByGame(games.map(game => game.gameId));
+      return { games: applyEspnYardsToKickerGames(games, player.display_name, rules, eventsByGame) };
+    }
     return { games };
   }),
 

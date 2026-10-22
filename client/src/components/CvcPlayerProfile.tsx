@@ -132,7 +132,7 @@ export function CvcPlayerProfile() {
 
   const espnId = firstOf(tank ?? undefined, ["espnID", "espnId"]);
   const tank01PlayerId = firstOf(tank ?? undefined, ["playerID", "playerId"]);
-  const seasonStats = trpc.league.playerCareerSeasonStats.useQuery({ playerId, espnId: espnId ?? "" }, { enabled: valid && Boolean(espnId) && tab === "stats", staleTime: 30 * 60_000 });
+  const seasonStats = trpc.league.playerCareerSeasonStats.useQuery({ playerId, espnId: espnId ?? undefined, tank01PlayerId: detail.data?.position === "K" ? tank01PlayerId ?? undefined : undefined }, { enabled: valid && (Boolean(espnId) || (detail.data?.position === "K" && Boolean(tank01PlayerId))) && tab === "stats", staleTime: 30 * 60_000 });
 
   const currentSeasonYear = detail.data?.season?.year ?? new Date().getFullYear();
   const [gameLogYear, setGameLogYear] = useState(currentSeasonYear);
