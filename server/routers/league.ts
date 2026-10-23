@@ -11,7 +11,7 @@ import { archiveFantasyProsNews, getArchivedFantasyProsNews, mergeFantasyProsNew
 import { attachFantasyProsPlayerNames } from "../fantasyProsNewsNames";
 import { normalizePlayerName } from "@shared/playerNameMatch";
 import { syncNflTeamAssignments } from "../nflTeamAssignmentSync";
-import { getFaabBalance, MAX_ROSTER_SIZE, nextClaimPriority, STARTING_FAAB } from "../waiverRules";
+import { getFaabBalance, MAX_ROSTER_SIZE, nextClaimPriority } from "../waiverRules";
 import { awardFreeAgentClaimNow, loadRosteredIdentityKeys, resolveOpenWaiverPeriod } from "../waiverResolution";
 import { applyEspnYardsToKickerGames, buildKickerSeasonRows } from "../kickerGameLog";
 import { fetchEspnKickerEventsByGame } from "../espnKickerGames";

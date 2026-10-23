@@ -1,5 +1,5 @@
 import { computeKickoffUtc } from "@shared/nflKickoff";
-import { calculateCvcFantasyPoints, type CvcScoringRule, type Tank01LiveStats } from "@shared/cvcScoring";
+import { calculateCvcFantasyPoints, type Tank01LiveStats } from "@shared/cvcScoring";
 import { getNFLDataAdapter, Tank01NFLDataAdapter, type Tank01BoxScore } from "./nflDataAdapter";
 import { supabase, unwrap } from "./supabase";
 import { resolveSkinForWeek } from "./cvcSkins";

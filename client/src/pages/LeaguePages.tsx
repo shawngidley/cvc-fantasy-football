@@ -1,5 +1,5 @@
 import { LeagueLayout } from "@/components/LeagueLayout";
-import { draftPreview, franchises, leagueMeta, matchups, rosterPreview, setupAreas, transactionFeed } from "@/lib/leagueData";
+import { matchups, rosterPreview, setupAreas } from "@/lib/leagueData";
 import { cn } from "@/lib/utils";
 import { trpc } from "@/lib/trpc";
 import { useCvcOwnerAuth } from "@/hooks/useCvcOwnerAuth";
@@ -26,7 +26,7 @@ import { CvcDraftRecap } from "@/components/CvcDraftRecap";
 import { TeamLogo } from "@/components/TeamLogo";
 import { selectCvcStandingsMatchup } from "@/lib/cvcStandingsMatchup";
 import { CvcInjuryReport, CvcMyTeamNews } from "@/components/CvcInjuryAndNewsPanels";
-import { Activity, ArrowRight, BadgeDollarSign, BookOpen, CalendarDays, Check, ChevronRight, ClipboardList, Crown, FileText, Gavel, LayoutDashboard, ListFilter, MessageSquarePlus, Newspaper, Plus, Radio, ReceiptText, Scale, Settings2, ShieldCheck, Sparkles, Trophy, Upload, UsersRound, WalletCards } from "lucide-react";
+import { Activity, ArrowRight, BadgeDollarSign, BookOpen, CalendarDays, ChevronRight, ClipboardList, Crown, FileText, Gavel, ListFilter, MessageSquarePlus, Newspaper, Plus, Radio, ReceiptText, Scale, Settings2, ShieldCheck, Trophy, Upload, UsersRound, WalletCards } from "lucide-react";
 import { useMemo, useState } from "react";
 import { Link, useRoute } from "wouter";
 

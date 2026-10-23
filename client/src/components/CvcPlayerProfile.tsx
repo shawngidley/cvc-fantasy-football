@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Link, useRoute } from "wouter";
+import { useRoute } from "wouter";
 import { ArrowLeft, BarChart3, CalendarDays, ChevronDown, ClipboardList, ExternalLink, Newspaper, ShieldCheck, Star, TrendingUp } from "lucide-react";
 import { trpc } from "@/lib/trpc";
 import { normalizePlayerName } from "@shared/playerNameMatch";

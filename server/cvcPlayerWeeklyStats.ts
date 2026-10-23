@@ -1,5 +1,5 @@
 import { calculateCvcFantasyPoints, type CvcScoringRule, type Tank01LiveStats } from "@shared/cvcScoring";
-import { supabase, unwrap } from "./supabase";
+import { supabase } from "./supabase";
 import { resolveStatLine } from "./cvcScoringShared";
 
 function numeric(value: unknown): number | null {
