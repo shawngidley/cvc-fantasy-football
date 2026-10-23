@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { calculateCvcFantasyPoints, type CvcScoringRule, type Tank01LiveStats } from "@shared/cvcScoring";
+import { computeKickoffUtc } from "@shared/nflKickoff";
 import { normalizePlayerName } from "@shared/playerNameMatch";
 import { applyKickerEventsToKicking, getKickerEventsForPlayer, parseEspnKickerEvents, type KickerPlayEvent } from "@shared/espnKickerEvents";
 
@@ -20,15 +21,7 @@ const normalizeTeam = (value: string) => ({ kan: "kc", tam: "tb", arz: "ari", ja
  * meaning prime time games (a large share of the week's games) never registered as
  * "active" at all. Date.UTC() correctly rolls hour 24 into 00:00 of the next UTC day.
  * Returns null if the inputs can't be parsed. */
-export function computeKickoffUtc(gameDate: string | undefined, gameTime: string | undefined): number | null {
-  if (!gameDate || !gameTime || gameDate.length < 8) return null;
-  const time = gameTime.match(/(\d+):(\d+)([ap])/i);
-  if (!time) return null;
-  let hour = Number(time[1]);
-  if (time[3].toLowerCase() === "p" && hour !== 12) hour += 12;
-  if (time[3].toLowerCase() === "a" && hour === 12) hour = 0;
-  return Date.UTC(Number(gameDate.slice(0, 4)), Number(gameDate.slice(4, 6)) - 1, Number(gameDate.slice(6, 8)), hour + 4, Number(time[2]), 0);
-}
+export { computeKickoffUtc };
 
 // CRITICAL: these two checks must stay separate. Using one wide window for both
 // "should we fetch this game's box score at all" AND "should the recurring 60-second

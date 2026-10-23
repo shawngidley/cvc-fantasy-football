@@ -1,3 +1,4 @@
+import { computeKickoffUtc } from "@shared/nflKickoff";
 import { calculateCvcFantasyPoints, type CvcScoringRule, type Tank01LiveStats } from "@shared/cvcScoring";
 import { getNFLDataAdapter, Tank01NFLDataAdapter, type Tank01BoxScore } from "./nflDataAdapter";
 import { supabase, unwrap } from "./supabase";
@@ -60,13 +61,7 @@ export function shouldFinalizeWeek(totalScheduledGames: number, gameStatuses: bo
  * timing) was fetching a box score for every game in the week on every single run --
  * including games days in the future that hadn't kicked off yet at all. */
 export function kickoffUtcMs(gameDate?: string, gameTime?: string): number | null {
-  if (!gameDate || !gameTime || gameDate.length < 8) return null;
-  const time = gameTime.match(/(\d+):(\d+)([ap])/i);
-  if (!time) return null;
-  let hour = Number(time[1]);
-  if (time[3].toLowerCase() === "p" && hour !== 12) hour += 12;
-  if (time[3].toLowerCase() === "a" && hour === 12) hour = 0;
-  return Date.UTC(Number(gameDate.slice(0, 4)), Number(gameDate.slice(4, 6)) - 1, Number(gameDate.slice(6, 8)), hour + 4, Number(time[2]), 0);
+  return computeKickoffUtc(gameDate, gameTime);
 }
 
 export function hasKickedOff(gameDate?: string, gameTime?: string): boolean {
