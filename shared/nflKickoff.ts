@@ -1,7 +1,15 @@
-/** Real UTC kickoff instant for a Tank01 gameDate ("20261101") and gameTime ("1:00p"),
- * both Eastern. The Eastern offset is worked out with Intl for that date, so games
- * after the first Sunday of November (EST, UTC-5) and after the second Sunday of March
- * (EDT, UTC-4) are both right. Returns null if the inputs cannot be parsed. */
+/** The one place CVC turns a Tank01 kickoff into a real instant. Used by the server's
+ * game lock (hasKickedOff), the scoring cron, and the client live scores hook.
+ *
+ * Tank01 gives gameDate ("20261101") and gameTime ("1:00p"), both Eastern. The Eastern
+ * offset is worked out with Intl for that date, so games after the first Sunday of
+ * November (EST, UTC-5) and after the second Sunday of March (EDT, UTC-4) are both right.
+ * Never hardcode an offset: that bug made locks and live polling an hour early after
+ * the November clock change.
+ *
+ * It builds the result with Date.UTC arithmetic rather than a "...T24:20:00Z" string,
+ * because an 8pm or later kickoff overflows an hour string and parses to Invalid Date.
+ * Returns null if the inputs cannot be parsed. */
 const EASTERN_FORMAT = new Intl.DateTimeFormat("en-US", { timeZone: "America/New_York", hour12: false, year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit" });
 
 function easternOffsetMs(utcMs: number): number {

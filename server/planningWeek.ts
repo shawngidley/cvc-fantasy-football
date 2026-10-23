@@ -4,11 +4,7 @@ import { supabase, unwrap } from "./supabase";
 
 /** Parses a Tank01 gameDate ("YYYYMMDD") + gameTime ("8:15p"/"1:00p") pair into its
  * real UTC kickoff instant, correctly accounting for whether that date falls in EDT
- * or EST -- unlike hasKickedOff's hardcoded "always UTC-4" assumption (tank01ScoringSync.ts),
- * which is only correct for the roughly half of the NFL season that falls in EDT
- * (through early November); every game from the DST fall-back through the end of the
- * season is off by an hour there. Uses the same proven Eastern-time conversion already
- * relied on for waiver timing. */
+ * or EST. Uses the same Eastern time conversion already relied on for waiver timing. */
 function parseKickoffUtc(gameDate?: string, gameTime?: string): Date | null {
   if (!gameDate || !gameTime || gameDate.length < 8) return null;
   const time = gameTime.match(/(\d+):(\d+)([ap])/i);

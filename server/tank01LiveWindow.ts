@@ -7,8 +7,7 @@
 // which parse a real game's own static gameDate/gameTime -- this function knows nothing
 // about any particular game's schedule at all).
 //
-// Deliberately timezone-aware via Intl rather than a hardcoded UTC offset (the bug that
-// broke kickoffUtcMs/computeKickoffUtc after a DST fall-back): asking Intl for the
+// Deliberately timezone-aware via Intl rather than a hardcoded UTC offset: asking Intl for the
 // wall-clock hour and weekday in America/New_York handles the EDT/EST transition
 // automatically, so this doesn't need its own DST table.
 // Hours 0 and 1 (12:00am-1:59am ET) still belong to the PREVIOUS day's slate: a Sunday

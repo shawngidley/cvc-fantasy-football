@@ -52,14 +52,9 @@ export function shouldFinalizeWeek(totalScheduledGames: number, gameStatuses: bo
   return gameStatuses.every(isFinal => isFinal);
 }
 
-/** Whether a game's kickoff has already passed. Same Date.UTC()-based approach as the
- * client-side computeKickoffUtc (see useCvcTank01LiveScores.ts) -- a string-interpolated
- * "...T${hour}:00Z" timestamp silently produces an Invalid Date for any 8pm+ local
- * kickoff (hour + 4 overflows past 23), so this is built the same correct way.
- * Confirmed as a real, previously-ungated source of API usage: this function's caller
- * (this cron, running every 5 minutes for the entire CVC week regardless of actual game
- * timing) was fetching a box score for every game in the week on every single run --
- * including games days in the future that hadn't kicked off yet at all. */
+/** A game's real kickoff instant (see @shared/nflKickoff). Confirmed as a real source of
+ * API usage: this cron runs every 5 minutes for the whole CVC week, and used to fetch a
+ * box score for every game in the week on every run, including games days away. */
 export function kickoffUtcMs(gameDate?: string, gameTime?: string): number | null {
   return computeKickoffUtc(gameDate, gameTime);
 }

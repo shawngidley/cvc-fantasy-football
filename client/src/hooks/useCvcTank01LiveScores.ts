@@ -13,14 +13,7 @@ export type CvcNflMatchup = { opponent: string; isHome: boolean; gameTime: strin
 
 const normalizeTeam = (value: string) => ({ kan: "kc", tam: "tb", arz: "ari", jax: "jac", was: "wsh" }[value.toLowerCase()] ?? value.toLowerCase());
 
-/** Parses a Tank01 gameDate (YYYYMMDD) + gameTime ("8:20p" style, assumed ET) into a
- * UTC kickoff timestamp. Uses Date.UTC (not a string-interpolated "...T${hour}:00Z"
- * timestamp) because for any 8pm-or-later local kickoff, hour + 4 overflows past 23
- * (e.g. 20 + 4 = 24). A string-built "T24:20:00Z" is not a valid ISO hour and silently
- * parses to an Invalid Date (NaN), which made every comparison against it false --
- * meaning prime time games (a large share of the week's games) never registered as
- * "active" at all. Date.UTC() correctly rolls hour 24 into 00:00 of the next UTC day.
- * Returns null if the inputs can't be parsed. */
+// Kickoff parsing lives in @shared/nflKickoff (real Eastern offset, see that file).
 export { computeKickoffUtc };
 
 // CRITICAL: these two checks must stay separate. Using one wide window for both
