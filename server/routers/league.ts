@@ -18,6 +18,7 @@ import { fetchEspnKickerEventsByGame } from "../espnKickerGames";
 import { playerIdentityKey } from "../../shared/playerIdentity";
 import { one } from "../../shared/relation";
 import { checkTradePick } from "../tradePickRules";
+import { buildTradeDetail } from "../tradeDetail";
 import { computeNextResolutionTime, nextRosterCutDeadline } from "../waiverResolutionTiming";
 import { getWaiverAwardDate, hasClearedWaiverHold } from "../waiverHold";
 import { syncFantasyProsSnapshot, syncFantasyProsActiveFlags, syncFantasyProsRookieFlags } from "../fantasyProsSync";
@@ -380,7 +381,16 @@ export const leagueRouter = router({
     // from ever scanning unrelated transaction types (protection notes, commissioner
     // adjustments, draft picks, etc.).
     const [txResult, draftsResult] = await Promise.all([
-      supabase.from("transaction").select("id, transaction_type, status, summary, occurred_at, details, franchise_id, franchise:franchise_id(name, is_active)").eq("season_id", season.id).in("transaction_type", ["trade", "add", "drop", "waiver"]).order("occurred_at", { ascending: false }),
+      (async () => {
+        // Supabase silently returns at most 1000 rows per request, so page with a total ordering.
+        const rows: any[] = [];
+        for (let from = 0; ; from += 1000) {
+          const page = await supabase.from("transaction").select("id, transaction_type, status, summary, occurred_at, details, franchise_id, franchise:franchise_id(name, is_active)").eq("season_id", season.id).in("transaction_type", ["trade", "add", "drop", "waiver"]).order("occurred_at", { ascending: false }).order("id").range(from, from + 999);
+          if (page.error) return { data: null, error: page.error };
+          rows.push(...(page.data ?? []));
+          if ((page.data ?? []).length < 1000) return { data: rows, error: null };
+        }
+      })(),
       supabase.from("draft").select("status").eq("season_id", season.id),
     ]);
     const { data, error } = txResult;
@@ -410,7 +420,7 @@ export const leagueRouter = router({
     // 2026-08-25T02:00Z is late evening Aug 24 in New York, and is correctly excluded.
     const LOG_START_NY = "2026-08-24";
     const nyDateFormatter = new Intl.DateTimeFormat("en-CA", { timeZone: "America/New_York", year: "numeric", month: "2-digit", day: "2-digit" });
-    return (data ?? []).filter((item: any) => {
+    const visible = (data ?? []).filter((item: any) => {
       const franchise = Array.isArray(item.franchise) ? item.franchise[0] : item.franchise;
       if (franchise?.is_active === false || legacySummary.test(item.summary ?? "")) return false;
       // Auto-cut sweep releases are internal roster housekeeping, never shown on the
@@ -425,6 +435,15 @@ export const leagueRouter = router({
       const franchise = Array.isArray(item.franchise) ? item.franchise[0] : item.franchise;
       return { ...item, franchise_name: franchise?.name ?? null };
     });
+    // Attach what each side of an executed trade sent. Older trades that have no
+    // trade_offer_id in their details keep just their summary line.
+    const tradeIds = Array.from(new Set(visible.map((item: any) => item.details?.trade_offer_id).filter((id: unknown): id is string => typeof id === "string")));
+    const tradeDetails = new Map<string, ReturnType<typeof buildTradeDetail>>();
+    for (let index = 0; index < tradeIds.length; index += 100) {
+      const offers = unwrap(await supabase.from("trade_offer").select("id, proposer_franchise_id, recipient_franchise_id, proposer:proposer_franchise_id(name), recipient:recipient_franchise_id(name), assets:trade_asset(from_franchise_id, player:player_id(display_name, position, nfl_team), pick:draft_pick_id(round_number, pick_number, draft:draft_id(draft_type, season:season_id(year))))").in("id", tradeIds.slice(index, index + 100))) ?? [];
+      for (const offer of offers as any[]) tradeDetails.set(offer.id, buildTradeDetail(offer));
+    }
+    return visible.map((item: any) => ({ ...item, trade: tradeDetails.get(item.details?.trade_offer_id) ?? null }));
   }),
 
   auditHistory: protectedProcedure.input(z.object({ limit: z.number().int().min(1).max(200).optional() }).optional()).query(async ({ ctx, input }) => {
