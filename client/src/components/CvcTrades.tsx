@@ -54,6 +54,7 @@ export function CvcTrades() {
   const [offerPickIds, setOfferPickIds] = useState<string[]>([]);
   const [requestPickIds, setRequestPickIds] = useState<string[]>([]);
   const [note, setNote] = useState("");
+  const [sentTo, setSentTo] = useState<string | null>(null);
   const myRoster = trpc.league.franchiseRoster.useQuery({ franchiseId: mine.data?.id ?? "00000000-0000-0000-0000-000000000000" }, { enabled: Boolean(mine.data?.id) });
   const recipientRoster = trpc.league.franchiseRoster.useQuery({ franchiseId: recipientId || "00000000-0000-0000-0000-000000000000" }, { enabled: Boolean(recipientId) });
   const myPicks = trpc.league.franchisePicks.useQuery({ franchiseId: mine.data?.id ?? "00000000-0000-0000-0000-000000000000" }, { enabled: Boolean(mine.data?.id) });
@@ -62,18 +63,19 @@ export function CvcTrades() {
   const utils = trpc.useUtils();
   const refresh = async () => { await Promise.all([utils.league.myTrades.invalidate(), utils.league.franchiseRoster.invalidate(), utils.league.overview.invalidate(), utils.league.franchisePicks.invalidate()]); };
   const resetBuilder = () => { setRecipientId(""); setOfferPlayerIds([]); setRequestPlayerIds([]); setOfferPickIds([]); setRequestPickIds([]); setNote(""); };
-  const propose = trpc.league.proposeTrade.useMutation({ onSuccess: async () => { resetBuilder(); await refresh(); } });
+  const propose = trpc.league.proposeTrade.useMutation({ onSuccess: async () => { setSentTo(recipient?.name ?? "the other owner"); resetBuilder(); setTab("inbox"); await refresh(); } });
   const respond = trpc.league.respondToTrade.useMutation({ onSuccess: refresh });
   const recipient = overview.data?.franchises.find(franchise => franchise.id === recipientId);
   const toggle = (list: string[], setList: (value: string[]) => void, id: string) => setList(list.includes(id) ? list.filter(item => item !== id) : [...list, id]);
   const canSubmit = Boolean(recipientId) && (offerPlayerIds.length + offerPickIds.length > 0) && (requestPlayerIds.length + requestPickIds.length > 0);
+  const missing = [!recipientId ? "choose the team you are trading with" : null, offerPlayerIds.length + offerPickIds.length === 0 ? "pick at least one player or pick you send" : null, requestPlayerIds.length + requestPickIds.length === 0 ? "pick at least one player or pick you receive" : null].filter(Boolean) as string[];
   const myPlayerLabel = (id: string) => myRoster.data?.players.find(item => item.player?.id === id)?.player?.display_name ?? "Player";
   const recipientPlayerLabel = (id: string) => recipientRoster.data?.players.find(item => item.player?.id === id)?.player?.display_name ?? "Player";
   const myPickLabel = (id: string) => { const pick = myPicks.data?.find(item => item.id === id); return pick ? pickLabel(pick) : "Pick"; };
   const recipientPickLabel = (id: string) => { const pick = recipientPicks.data?.find(item => item.id === id); return pick ? pickLabel(pick) : "Pick"; };
 
   if (auth.loading) return <section className="min-h-screen bg-[#06121b] p-8 text-slate-300">Loading CVC Trade Desk…</section>;
-  if (!auth.isAuthenticated) return <section className="min-h-screen bg-[#06121b] px-4 py-12 text-white"><div className="mx-auto max-w-xl rounded-2xl border border-white/10 bg-white/5 p-8 text-center"><ArrowLeftRight className="mx-auto text-cvc-accent" size={36} /><h1 className="mt-4 font-display text-4xl uppercase">Trade Desk</h1><p className="mt-3 text-sm leading-6 text-slate-300">Sign in with your CVC owner selector and PIN to propose, accept, or review trades.</p><a href="/login" className="mt-6 inline-flex rounded-lg bg-cvc-accent px-4 py-3 text-xs font-black uppercase tracking-[0.12em] text-cvc-deep">Owner Sign In</a></div></section>;
+  if (!auth.isAuthenticated) return <section className="min-h-screen bg-[#06121b] px-4 py-12 text-white"><div className="mx-auto max-w-xl rounded-2xl border border-white/10 bg-white/5 p-8 text-center"><ArrowLeftRight className="mx-auto text-cvc-accent" size={36} /><h1 className="mt-4 font-display text-4xl uppercase">Trade Desk</h1><p className="mt-3 text-sm leading-6 text-slate-300">Sign in with your CVC owner selector and PIN to propose, accept, or review trades.</p><a href="/login" className="mt-6 inline-flex rounded-lg bg-[var(--cvc-accent)] px-4 py-3 text-xs font-black uppercase tracking-[0.12em] text-cvc-deep">Owner Sign In</a></div></section>;
 
   return <section className="min-h-screen bg-[#06121b] px-3 pb-14 pt-5 text-white sm:px-6"><div className="mx-auto max-w-6xl">
     <div className="mb-6 flex flex-wrap items-end justify-between gap-4">
@@ -81,7 +83,7 @@ export function CvcTrades() {
       <div className="rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-right"><p className="text-[10px] font-black uppercase tracking-[0.14em] text-slate-400">Open trade items</p><p className="mt-1 font-display text-3xl text-cvc-accent">{trades.data?.filter((trade: any) => trade.status === "proposed").length ?? 0}</p></div>
     </div>
     <div className="mb-6 flex gap-2 border-b border-white/10">
-      <button onClick={() => setTab("propose")} className={`border-b-2 px-4 py-3 text-xs font-black uppercase tracking-[0.13em] ${tab === "propose" ? "border-cvc-accent text-cvc-accent" : "border-transparent text-slate-400"}`}><Plus size={14} className="mr-1 inline" /> Propose</button>
+      <button onClick={() => { setTab("propose"); setSentTo(null); }} className={`border-b-2 px-4 py-3 text-xs font-black uppercase tracking-[0.13em] ${tab === "propose" ? "border-cvc-accent text-cvc-accent" : "border-transparent text-slate-400"}`}><Plus size={14} className="mr-1 inline" /> Propose</button>
       <button onClick={() => setTab("inbox")} className={`border-b-2 px-4 py-3 text-xs font-black uppercase tracking-[0.13em] ${tab === "inbox" ? "border-cvc-accent text-cvc-accent" : "border-transparent text-slate-400"}`}><Inbox size={14} className="mr-1 inline" /> Trade Inbox</button>
     </div>
 
@@ -109,12 +111,14 @@ export function CvcTrades() {
         <label className="text-xs font-black uppercase tracking-[0.15em] text-cvc-accent">Optional note</label>
         <textarea value={note} onChange={event => setNote(event.target.value)} className="mt-3 min-h-24 w-full rounded-lg border border-white/10 bg-black/20 px-3 py-3 text-sm text-white outline-none" placeholder="Optional trade note" />
         <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
-          <p className="text-xs leading-5 text-slate-300">The trade processes immediately once {recipient?.name ?? "the recipient"} accepts.</p>
-          <button disabled={!canSubmit || propose.isPending} onClick={() => propose.mutate({ recipientFranchiseId: recipientId, offerPlayerIds, requestPlayerIds, offerPickIds, requestPickIds, note: note.trim() || undefined })} className="inline-flex items-center gap-2 rounded-lg bg-cvc-accent px-4 py-3 text-xs font-black uppercase tracking-[0.13em] text-cvc-deep disabled:opacity-40"><Send size={14} /> {propose.isPending ? "Submitting" : "Submit trade proposal"}</button>
+          <p className="text-xs leading-5 text-slate-300">{missing.length ? `Before you can send: ${missing.join(", ")}.` : `${recipient?.name ?? "The other owner"} will see this offer in their Trade Inbox. The trade processes as soon as they accept.`}</p>
+          <button disabled={!canSubmit || propose.isPending} onClick={() => propose.mutate({ recipientFranchiseId: recipientId, offerPlayerIds, requestPlayerIds, offerPickIds, requestPickIds, note: note.trim() || undefined })} className="inline-flex items-center gap-2 rounded-lg bg-[var(--cvc-accent)] px-4 py-3 text-xs font-black uppercase tracking-[0.13em] text-cvc-deep disabled:opacity-40"><Send size={14} /> {propose.isPending ? "Sending" : `Send trade offer${recipient?.name ? ` to ${recipient.name}` : ""}`}</button>
         </div>
         {propose.error ? <p className="mt-3 text-sm text-rose-300">{propose.error.message}</p> : null}
       </section>
     </div> : <section className="space-y-3">
+      {respond.error ? <p className="rounded-2xl border border-rose-400/40 bg-rose-500/10 p-4 text-sm text-rose-200">{respond.error.message}</p> : null}
+      {sentTo ? <div className="rounded-2xl border border-emerald-400/40 bg-emerald-500/10 p-4 text-sm font-semibold text-emerald-200">Trade offer sent to {sentTo}. It is waiting for them to accept or reject it below. You can cancel it any time before then.</div> : null}
       {trades.isLoading ? <p className="text-slate-300">Loading CVC trade inbox…</p> : trades.data?.length ? trades.data.map((trade: any) => {
         const proposer = trade.proposer?.[0]; const recipientItem = trade.recipient?.[0];
         const isRecipient = recipientItem?.id === mine.data?.id; const isProposer = proposer?.id === mine.data?.id;
@@ -138,6 +142,7 @@ export function CvcTrades() {
           </div>
           {trade.status === "proposed" && <div className="mt-4 flex flex-wrap gap-2">
             {isRecipient ? <><button onClick={() => respond.mutate({ tradeId: trade.id, response: "accepted" })} className="inline-flex items-center gap-1 rounded-lg bg-emerald-800 px-3 py-2 text-xs font-black uppercase text-white"><Check size={13} /> Accept</button><button onClick={() => respond.mutate({ tradeId: trade.id, response: "rejected" })} className="inline-flex items-center gap-1 rounded-lg bg-rose-800 px-3 py-2 text-xs font-black uppercase text-white"><X size={13} /> Reject</button></> : null}
+            {isProposer ? <span className="self-center text-xs font-semibold text-slate-500">Waiting on {recipientItem?.name}</span> : null}
             {isProposer ? <button onClick={() => respond.mutate({ tradeId: trade.id, response: "cancelled" })} className="rounded-lg border border-slate-300 px-3 py-2 text-xs font-black uppercase">Cancel</button> : null}
           </div>}
         </article>;
