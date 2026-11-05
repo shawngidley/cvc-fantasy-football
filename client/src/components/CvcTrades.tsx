@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { ArrowLeftRight, Check, Inbox, Plus, Send, X } from "lucide-react";
 import { trpc } from "@/lib/trpc";
+import { one } from "@shared/relation";
 import { useCvcOwnerAuth } from "@/hooks/useCvcOwnerAuth";
 
 function TradeStatus({ value }: { value: string }) {
@@ -120,13 +121,14 @@ export function CvcTrades() {
       {respond.error ? <p className="rounded-2xl border border-rose-400/40 bg-rose-500/10 p-4 text-sm text-rose-200">{respond.error.message}</p> : null}
       {sentTo ? <div className="rounded-2xl border border-emerald-400/40 bg-emerald-500/10 p-4 text-sm font-semibold text-emerald-200">Trade offer sent to {sentTo}. It is waiting for them to accept or reject it below. You can cancel it any time before then.</div> : null}
       {trades.isLoading ? <p className="text-slate-300">Loading CVC trade inbox…</p> : trades.data?.length ? trades.data.map((trade: any) => {
-        const proposer = trade.proposer?.[0]; const recipientItem = trade.recipient?.[0];
+        const proposer = one<any>(trade.proposer); const recipientItem = one<any>(trade.recipient);
         const isRecipient = recipientItem?.id === mine.data?.id; const isProposer = proposer?.id === mine.data?.id;
         const assetLabel = (asset: any) => {
-          if (asset.player?.[0]) return asset.player[0].display_name;
-          const pick = asset.pick?.[0];
+          const assetPlayer = one<any>(asset.player);
+          if (assetPlayer) return assetPlayer.display_name;
+          const pick = one<any>(asset.pick);
           if (!pick) return null;
-          const draft = pick.draft?.[0]; const year = draft?.season?.[0]?.year ?? "";
+          const draft = one<any>(pick.draft); const year = one<any>(draft?.season)?.year ?? "";
           return `${year} ${draft?.draft_type === "rookie" ? "Rookie" : draft?.draft_type ?? ""} Draft R${pick.round_number}.${String(pick.pick_number).padStart(2, "0")}`.trim();
         };
         const proposerAssets = (trade.assets ?? []).filter((asset: any) => asset.from_franchise_id === proposer?.id).map(assetLabel).filter(Boolean).join(", ");

@@ -16,6 +16,8 @@ import { awardFreeAgentClaimNow, loadRosteredIdentityKeys, resolveOpenWaiverPeri
 import { applyEspnYardsToKickerGames, buildKickerSeasonRows } from "../kickerGameLog";
 import { fetchEspnKickerEventsByGame } from "../espnKickerGames";
 import { playerIdentityKey } from "../../shared/playerIdentity";
+import { one } from "../../shared/relation";
+import { checkTradePick } from "../tradePickRules";
 import { computeNextResolutionTime, nextRosterCutDeadline } from "../waiverResolutionTiming";
 import { getWaiverAwardDate, hasClearedWaiverHold } from "../waiverHold";
 import { syncFantasyProsSnapshot, syncFantasyProsActiveFlags, syncFantasyProsRookieFlags } from "../fantasyProsSync";
@@ -120,7 +122,7 @@ async function executeAcceptedTrade(tradeId: string, season: { id: string; year:
     }),
   ]);
   unwrap(await supabase.from("trade_offer").update({ status: "processed", reviewed_at: new Date().toISOString(), reviewed_by_owner_id: actorOwnerId }).eq("id", trade.id).select("id").single());
-  unwrap(await supabase.from("transaction").insert({ season_id: season.id, franchise_id: trade.proposer_franchise_id, actor_owner_id: actorOwnerId, transaction_type: "trade", status: "final", summary: `${trade.proposer?.[0]?.name ?? "CVC franchise"} completed a trade with ${trade.recipient?.[0]?.name ?? "CVC franchise"}.`, details: { trade_offer_id: trade.id, asset_count: assets.length } }).select("id").single());
+  unwrap(await supabase.from("transaction").insert({ season_id: season.id, franchise_id: trade.proposer_franchise_id, actor_owner_id: actorOwnerId, transaction_type: "trade", status: "final", summary: `${one(trade.proposer)?.name ?? "CVC franchise"} completed a trade with ${one(trade.recipient)?.name ?? "CVC franchise"}.`, details: { trade_offer_id: trade.id, asset_count: assets.length } }).select("id").single());
   await createAuditEvent(league.id, season.id, actorOwnerId, "trade_offer", trade.id, "processed", auditSummary);
 }
 
@@ -1960,15 +1962,8 @@ export const leagueRouter = router({
     // yet -- once complete, even a leftover 'open' pick from a data quirk shouldn't be
     // tradeable) or next year's picks. Nothing further out.
     for (const pickId of pickIds) {
-      const pick = pickById.get(pickId)!;
-      const draftRow = pick.draft?.[0];
-      const pickYear = draftRow?.season?.[0]?.year;
-      if (pickYear == null || (pickYear !== season.year && pickYear !== season.year + 1)) {
-        throw new TRPCError({ code: "BAD_REQUEST", message: `Only ${season.year} and ${season.year + 1} CVC draft picks may be traded.` });
-      }
-      if (pickYear === season.year && draftRow?.status === "complete") {
-        throw new TRPCError({ code: "BAD_REQUEST", message: `The ${season.year} CVC draft has already been completed, so its picks can no longer be traded.` });
-      }
+      const problem = checkTradePick(pickById.get(pickId)!, season.year);
+      if (problem) throw new TRPCError({ code: "BAD_REQUEST", message: problem });
     }
     if (input.offerPickIds.some(pickId => pickById.get(pickId)!.current_franchise_id !== proposer.id) || input.requestPickIds.some(pickId => pickById.get(pickId)!.current_franchise_id !== recipient.id)) throw new TRPCError({ code: "BAD_REQUEST", message: "Every CVC trade pick must currently be owned by the franchise offering that pick." });
     const trade = unwrap(await supabase.from("trade_offer").insert({ season_id: season.id, proposer_franchise_id: proposer.id, recipient_franchise_id: recipient.id, note: input.note ?? null }).select("id").single());
