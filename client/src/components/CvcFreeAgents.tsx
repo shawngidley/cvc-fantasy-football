@@ -137,7 +137,14 @@ export function CvcFreeAgents() {
     return map;
   }, [myBids.data]);
   const invalidateBidsAndGroups = async () => { await Promise.all([utils.league.myFaabBids.invalidate(), utils.league.myFaabBidGroups.invalidate()]); };
-  const submit = trpc.league.submitFaabBid.useMutation({ onSuccess: async () => { setSelectedPlayerId(""); setAmount("1"); await Promise.all([utils.league.myFaabBids.invalidate(), utils.league.myFaabBalance.invalidate(), utils.league.activity.invalidate()]); } });
+  const submit = trpc.league.submitFaabBid.useMutation({ onSuccess: async data => {
+    setSelectedPlayerId(""); setAmount("1");
+    // A free-period pickup is awarded inside submitFaabBid itself now (no "Confirm
+    // claim" step on Manage Bids), so the player is already on the roster: say so, and
+    // refresh the pool so they drop out of Free Agents right away.
+    if (data.awarded) toast.success(`${data.playerName} is on your roster.`);
+    await Promise.all([utils.league.myFaabBids.invalidate(), utils.league.myFaabBalance.invalidate(), utils.league.activity.invalidate(), ...(data.awarded ? [utils.league.freeAgents.invalidate(), utils.league.allPlayers.invalidate(), utils.league.watchlistPlayers.invalidate()] : [])]);
+  } });
   const confirmClaim = trpc.league.confirmFreeAgentClaim.useMutation({ onSuccess: async () => { await utils.league.myFaabBids.invalidate(); }, onError: error => toast.error(error.message) });
   const cancelClaim = trpc.league.cancelFaabBid.useMutation({ onSuccess: async () => { await Promise.all([utils.league.myFaabBids.invalidate(), utils.league.myFaabBalance.invalidate()]); }, onError: error => toast.error(error.message) });
   const setPriority = trpc.league.setFaabBidPriority.useMutation({ onSuccess: async () => { await utils.league.myFaabBids.invalidate(); }, onError: error => toast.error(error.message) });
@@ -284,7 +291,7 @@ export function CvcFreeAgents() {
 
   return <div className="mx-auto max-w-[1440px]">
     <div className="mb-5 flex flex-wrap items-end justify-between gap-4">
-      <div><div className="cvc-eyebrow"><Users size={14} /> Player pool</div><h1 className="mt-2 font-display text-5xl uppercase leading-none tracking-[0.04em] text-white sm:text-6xl">Free Agents & FAAB</h1><p className="mt-3 max-w-3xl text-sm text-cvc-muted">Search the synchronized CVC player pool, review player availability, and submit a protected FAAB claim when the waiver window is open.</p>{isFreePeriod ? <p className="mt-2 inline-block rounded-full border border-amber-400/50 bg-amber-400/10 px-3 py-1 text-xs font-bold uppercase tracking-[.06em] text-amber-300">Free agent period — $1 salary, $0 FAAB, awarded by waiver priority</p> : null}</div>
+      <div><div className="cvc-eyebrow"><Users size={14} /> Player pool</div><h1 className="mt-2 font-display text-5xl uppercase leading-none tracking-[0.04em] text-white sm:text-6xl">Free Agents & FAAB</h1><p className="mt-3 max-w-3xl text-sm text-cvc-muted">Search the synchronized CVC player pool, review player availability, and submit a protected FAAB claim when the waiver window is open.</p>{isFreePeriod ? <p className="mt-2 inline-block rounded-full border border-amber-400/50 bg-amber-400/10 px-3 py-1 text-xs font-bold uppercase tracking-[.06em] text-amber-300">Free agent period — $1 salary, $0 FAAB, awarded instantly</p> : null}</div>
       {owner?.franchise ? <div className="rounded-lg border border-cvc-accent/50 bg-cvc-accent/10 px-4 py-3 text-right"><p className="font-display text-[11px] uppercase tracking-[.1em] text-cvc-accent">FAAB balance</p><p className="mt-1 font-display text-2xl text-white">${faabBalance.data?.balance ?? "—"}</p></div> : <div className="rounded-lg border border-cvc-accent/35 bg-cvc-accent/10 px-4 py-3"><p className="font-display text-[11px] uppercase tracking-[.1em] text-cvc-accent">Waiver window</p><p className="mt-1 text-sm text-white">{waiver.data?.period ? `${waiver.data.period.label} open` : "No active period"}</p></div>}
     </div>
 
@@ -394,8 +401,8 @@ export function CvcFreeAgents() {
 
     {selectedPlayerId ? <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4" onClick={() => setSelectedPlayerId("")}>
       <div className="max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-xl border border-cvc-accent/40 bg-cvc-deep p-5 shadow-2xl" onClick={event => event.stopPropagation()}>
-        <div className="flex items-start justify-between gap-3"><div className="flex items-center gap-2 text-cvc-accent"><DollarSign size={18} /><p className="font-display text-xl uppercase text-white">{isFreePeriod ? "Free agent claim" : "FAAB bid"} — {selectedPlayer?.display_name ?? ""}</p></div><button onClick={() => setSelectedPlayerId("")} className="text-cvc-muted hover:text-white" aria-label="Close"><X size={20} /></button></div>
-        <p className="mt-3 text-sm leading-5 text-cvc-muted">{isFreePeriod ? "This is the post-Sunday free agent period: every player signs for a $1 salary at $0 FAAB cost, bid-exempt, and awarded by waiver priority (worst-record-first, then rotates to the back after each win)." : "This is a blind auction. Your bid is sealed until the next Thursday or Sunday 9:00am ET resolution. Highest bid wins. Ties go to the team with the worse record, then fewer points scored."}</p>
+        <div className="flex items-start justify-between gap-3"><div className="flex items-center gap-2 text-cvc-accent"><DollarSign size={18} /><p className="font-display text-xl uppercase text-white">{isFreePeriod ? `Claim ${selectedPlayer?.display_name ?? ""}?` : `FAAB bid — ${selectedPlayer?.display_name ?? ""}`}</p></div><button onClick={() => setSelectedPlayerId("")} className="text-cvc-muted hover:text-white" aria-label="Close"><X size={20} /></button></div>
+        <p className="mt-3 text-sm leading-5 text-cvc-muted">{isFreePeriod ? "Free agent period: no bidding and nothing to confirm later. Click Claim now and this player goes straight onto your roster at a $1 salary and $0 FAAB. First come, first served while the window is open." : "This is a blind auction. Your bid is sealed until the next Thursday or Sunday 9:00am ET resolution. Highest bid wins. Ties go to the team with the worse record, then fewer points scored."}</p>
 
         {selectedPlayer ? <div className="mt-4 flex items-center justify-between gap-3 rounded-lg bg-white px-4 py-3 text-cvc-deep">
           <div className="flex items-center gap-3">{selectedPlayer.nfl_team ? <img src={teamLogo(selectedPlayer.nfl_team)} alt="" className="h-9 w-9 rounded-full bg-slate-100 object-contain" /> : null}<div><p className="font-bold">{selectedPlayer.display_name}</p><p className="text-xs text-slate-500">{selectedPlayer.position} · {selectedPlayer.nfl_team ?? "FA"}</p></div></div>
@@ -410,7 +417,7 @@ export function CvcFreeAgents() {
           isFreePeriod
             ? (selectedPlayer?.heldForWaiver
                 ? <p className="mt-3 rounded-md border border-red-400/40 bg-red-500/10 px-3 py-2 text-center text-xs font-semibold text-red-200">Cut less than 48 hours ago, not eligible for the free pickup yet. Once the 48-hour hold clears, at the earliest {new Date(selectedPlayer.awardDate).toLocaleString("en-US", { weekday: "long", month: "short", day: "numeric", hour: "numeric", minute: "2-digit", timeZone: "America/New_York" })} ET, they'll be claimable again.</p>
-                : <p className="mt-3 rounded-md border border-amber-400/40 bg-amber-500/10 px-3 py-2 text-center text-xs font-semibold text-amber-200">If you win, you're awarded immediately once you confirm the claim</p>)
+                : <p className="mt-3 rounded-md border border-amber-400/40 bg-amber-500/10 px-3 py-2 text-center text-xs font-semibold text-amber-200">Awarded the moment you click Claim now</p>)
             : <p className="mt-3 rounded-md border border-amber-400/40 bg-amber-500/10 px-3 py-2 text-center text-xs font-semibold text-amber-200">If you win, awarded {new Date(selectedPlayer.awardDate).toLocaleString("en-US", { weekday: "long", month: "short", day: "numeric", hour: "numeric", minute: "2-digit", timeZone: "America/New_York" })} ET</p>
         ) : null}
 
@@ -430,11 +437,11 @@ export function CvcFreeAgents() {
           </div>;
         })() : null}
 
-        <p className="mt-4 text-center text-xs text-cvc-muted">{waiver.data?.period?.label ?? "Waiver"} · Bids are blind until the commissioner's resolution runs</p>
+        <p className="mt-4 text-center text-xs text-cvc-muted">{waiver.data?.period?.label ?? "Waiver"}{isFreePeriod ? " · Pickups are awarded instantly" : " · Bids are blind until the commissioner's resolution runs"}</p>
         {submit.error ? <p className="mt-2 text-center text-sm text-red-300">{submit.error.message}</p> : null}
 
-        <div className="mt-4 flex gap-3"><button onClick={() => setSelectedPlayerId("")} className="flex-1 rounded-lg border border-white/20 py-2.5 text-sm font-bold text-white hover:bg-white/10">Cancel</button><button disabled={submit.isPending || (!isFreePeriod && (Number(amount) < 1 || Number(amount) > 30))} onClick={() => submit.mutate({ playerId: selectedPlayerId, amount: isFreePeriod ? 1 : Number(amount) })} className="cvc-button-compact flex-[2] justify-center disabled:opacity-50">{submit.isPending ? "Submitting…" : isFreePeriod ? "Submit claim" : `Submit $${Number(amount) || 0} bid`}</button></div>
-        <p className="mt-3 text-[11px] leading-4 text-cvc-muted">Your claims share a limit on how many you can win. Change the limit or the order on the Manage Bids tab.</p>
+        <div className="mt-4 flex gap-3"><button onClick={() => setSelectedPlayerId("")} className="flex-1 rounded-lg border border-white/20 py-2.5 text-sm font-bold text-white hover:bg-white/10">Cancel</button><button disabled={submit.isPending || (!isFreePeriod && (Number(amount) < 1 || Number(amount) > 30))} onClick={() => submit.mutate({ playerId: selectedPlayerId, amount: isFreePeriod ? 1 : Number(amount) })} className="cvc-button-compact flex-[2] justify-center disabled:opacity-50">{submit.isPending ? (isFreePeriod ? "Claiming…" : "Submitting…") : isFreePeriod ? "Claim now" : `Submit $${Number(amount) || 0} bid`}</button></div>
+        {isFreePeriod ? null : <p className="mt-3 text-[11px] leading-4 text-cvc-muted">Your claims share a limit on how many you can win. Change the limit or the order on the Manage Bids tab.</p>}
       </div>
     </div> : null}
     {confirmDialog.dialog}

@@ -85,25 +85,18 @@ export async function awardFreeAgentClaimNow(bidId: string): Promise<ImmediateFr
 
   await ensureWaiverPriorityBootstrapped(period.season_id);
 
-  // Same shared-pool cap the batch resolver enforces: an ungrouped claim's limit is
-  // the franchise's current default-pool max (the highest max_players_desired among
-  // its still-pending ungrouped claims this period, so a later-raised max always
-  // wins); a grouped claim shares its own group's stated max instead.
-  let capLimit = 1;
-  let groupLabel: string | null = null;
-  if (bid.bid_group_id) {
-    const group = unwrap(await supabase.from("faab_bid_group").select("id, label, max_players_desired").eq("id", bid.bid_group_id).maybeSingle());
-    capLimit = group?.max_players_desired ?? 1;
-    groupLabel = group?.label ?? null;
-  } else {
-    const poolBids = unwrap(await supabase.from("faab_bid").select("max_players_desired").eq("waiver_period_id", period.id).eq("franchise_id", bid.franchise_id).eq("status", "pending").is("bid_group_id", null)) ?? [];
-    capLimit = poolBids.length ? Math.max(...poolBids.map(row => row.max_players_desired)) : 1;
-  }
-  let wonQuery = supabase.from("faab_bid").select("id", { count: "exact", head: true }).eq("waiver_period_id", period.id).eq("franchise_id", bid.franchise_id).eq("status", "won");
-  wonQuery = bid.bid_group_id ? wonQuery.eq("bid_group_id", bid.bid_group_id) : wonQuery.is("bid_group_id", null);
-  const wonSoFar = (await wonQuery).count ?? 0;
-  if (wonSoFar >= capLimit) {
-    return { outcome: "rejected", reason: `Already claimed ${wonSoFar} player${wonSoFar === 1 ? "" : "s"}${groupLabel ? ` in the "${groupLabel}" group` : ""} this period, at your stated max of ${capLimit}.` };
+  // No "max players this period" pool cap here any more. That cap is a bid-period
+  // tool ("win up to N from my pool of sealed bids") and it only ever made sense when
+  // free claims were parked on Manage Bids, where the owner could raise it. Since
+  // Nov 2026 a free-period pickup is awarded straight from the claim dialog
+  // (submitFaabBid calls this directly), so the cap would have silently blocked every
+  // pickup after the first with no way to lift it. The only hard limit on a free
+  // pickup is the roster itself: 22 players, same ceiling the batch resolver uses.
+  const activeRoster = unwrap(await supabase.from("roster_assignment").select("id, player_id").eq("season_id", period.season_id).eq("franchise_id", bid.franchise_id).is("released_at", null)) ?? [];
+  const dropIsOnRoster = Boolean(bid.drop_player_id) && activeRoster.some(row => row.player_id === bid.drop_player_id);
+  const rosterAfterAward = activeRoster.length + 1 - (dropIsOnRoster ? 1 : 0);
+  if (rosterAfterAward > MAX_ROSTER_SIZE) {
+    return { outcome: "rejected", reason: `Your roster is full (${activeRoster.length} of ${MAX_ROSTER_SIZE}). Cut a player first, then claim ${player.display_name}.` };
   }
 
   // No FAAB-budget check here, deliberately. This function is only ever reached for a

@@ -1631,7 +1631,24 @@ export const leagueRouter = router({
     const bid = unwrap(await supabase.from("faab_bid").upsert({ waiver_period_id: period.id, franchise_id: franchise.id, player_id: input.playerId, drop_player_id: input.dropPlayerId ?? null, amount, priority: claimPriority, max_players_desired: maxPlayersDesired, status: "pending", confirmed_at: isFreePeriod ? null : new Date().toISOString() }, { onConflict: "waiver_period_id,franchise_id,player_id" }).select("id, amount, priority, status, confirmed_at").single());
     if (!bid) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "CVC waiver claim could not be saved." });
     await createAuditEvent(league.id, season.id, owner.id, "faab_bid", bid.id, "submitted", `Submitted ${period.label} claim for ${playerRow.display_name}`);
-    return bid;
+    if (!isFreePeriod) return { ...bid, awarded: false as const };
+
+    // Free-period pickup: award it right here, in the same request (commissioner call,
+    // Nov 2026). There's nothing to bid on and nothing to resolve later -- the owner
+    // already confirmed in the claim dialog -- so parking the claim on Manage Bids
+    // behind a second "Confirm claim" button was just an extra step. The old
+    // confirmFreeAgentClaim procedure is kept only for any unconfirmed claim that
+    // predates this change.
+    const result = await awardFreeAgentClaimNow(bid.id);
+    if (result.outcome === "already_claimed") throw new TRPCError({ code: "BAD_REQUEST", message: `${playerRow.display_name} was just claimed by another CVC franchise.` });
+    if (result.outcome === "rejected") {
+      // Don't leave a claim that can't be awarded sitting as "unconfirmed" on Manage
+      // Bids -- the owner never sees that tab in this flow, so it would just rot there.
+      unwrap(await supabase.from("faab_bid").update({ status: "cancelled", resolved_at: new Date().toISOString() }).eq("id", bid.id).select("id").single());
+      throw new TRPCError({ code: "BAD_REQUEST", message: result.reason });
+    }
+    await createAuditEvent(league.id, season.id, owner.id, "faab_bid", bid.id, "awarded", `${result.franchiseName} claimed ${result.playerName} (free agent period).`);
+    return { ...bid, status: "won", awarded: true as const, playerName: result.playerName };
   }),
 
   // Free-period claims are NOT auto-awarded on submit like bid-period FAAB claims are
