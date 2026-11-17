@@ -243,7 +243,11 @@ async function fetchEspnKickerEventsForWeek(games: { gameDate?: string; home?: s
         const summary = await fetch(`https://site.api.espn.com/apis/site/v2/sports/football/nfl/summary?event=${espnEvent.id}`);
         if (!summary.ok) continue;
         for (const play of parseEspnKickerEvents(await summary.json())) {
-          const key = `${play.playerName}|${play.type}|${play.outcome}|${play.yards}|${play.text}`;
+          // Keyed per ESPN game + individual play, not per play text: two real kicks by
+          // the same kicker at the same distance have byte-identical text, and the old
+          // text key silently dropped the second one (see KickerPlayEvent.playKey).
+          // The text key is only a fallback for an event that somehow has no playKey.
+          const key = `${espnEvent.id}|${play.playKey ?? `${play.playerName}|${play.type}|${play.outcome}|${play.yards}|${play.text}`}`;
           if (!seen.has(key)) { seen.add(key); events.push(play); }
         }
       }
