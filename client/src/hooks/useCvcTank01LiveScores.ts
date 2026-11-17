@@ -36,6 +36,30 @@ export { computeKickoffUtc };
 // correction window). Same reasoning already applied server-side in
 // tank01ScoringSync.ts's hasKickedOff, which also has no upper bound for the same
 // reason -- this just brings the client-side check in line with that.
+/** Merges a poll's freshly fetched kicker events into the events already captured for
+ * this week. A recurring poll only refetches games still in progress, so replacing
+ * would wipe the events for games that have since gone final -- hence the merge.
+ *
+ * Keyed on playKey, NOT on the play text. Two real kicks by the same kicker at the
+ * same distance carry byte-identical ESPN text (Brandon Aubrey's two 52-yarders in
+ * DAL @ SF on 2026-11-15, both " B.Aubrey 52 yard field goal is GOOD, Center-T.Sieg,
+ * Holder-B.Anger."), so a text key dropped the second one here even after the parser
+ * and the fetch loop were fixed to keep it: the score was right, because that uses
+ * the freshly fetched array directly, while the badge read this merged state and
+ * showed one kick. playKey is ESPN's own play id for any real payload, which is
+ * unique across games too. The text key remains only as a fallback for an event with
+ * no playKey. */
+export function mergeKickerEvents(previous: KickerPlayEvent[], incoming: KickerPlayEvent[]): KickerPlayEvent[] {
+  const key = (event: KickerPlayEvent) => event.playKey ?? `${event.playerName}|${event.type}|${event.outcome}|${event.yards}|${event.text}`;
+  const seen = new Set(previous.map(key));
+  const merged = previous.slice();
+  for (const event of incoming) {
+    const eventKey = key(event);
+    if (!seen.has(eventKey)) { seen.add(eventKey); merged.push(event); }
+  }
+  return merged;
+}
+
 export function isGameFetchEligible(gameDate?: string, gameTime?: string): boolean {
   const kickoff = computeKickoffUtc(gameDate, gameTime);
   if (kickoff === null) return false;
@@ -216,16 +240,7 @@ export function useCvcTank01LiveScores(week: number | undefined, season: number 
         // progress, so overwriting would wipe the kicker events already captured
         // for games that have since gone final. Dedup by the same key the fetch
         // loop uses.
-        setKickerEvents(prev => {
-          const key = (event: KickerPlayEvent) => `${event.playerName}|${event.type}|${event.outcome}|${event.yards}|${event.text}`;
-          const seen = new Set(prev.map(key));
-          const merged = prev.slice();
-          for (const event of kickerEvents) {
-            const eventKey = key(event);
-            if (!seen.has(eventKey)) { seen.add(eventKey); merged.push(event); }
-          }
-          return merged;
-        });
+        setKickerEvents(prev => mergeKickerEvents(prev, kickerEvents));
         if (kickerEvents.length) {
           setStatLines(current => {
             const next = { ...current };

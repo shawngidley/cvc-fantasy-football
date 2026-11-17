@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { computeKickoffUtc, getCvcLivePoints, isGameCurrentlyLive, isGameFetchEligible } from "./useCvcTank01LiveScores";
+import { computeKickoffUtc, getCvcLivePoints, isGameCurrentlyLive, isGameFetchEligible, mergeKickerEvents } from "./useCvcTank01LiveScores";
+import type { KickerPlayEvent } from "@shared/espnKickerEvents";
 import { normalizePlayerName } from "@shared/playerNameMatch";
 
 describe("computeKickoffUtc", () => {
@@ -154,5 +155,34 @@ describe("isGameCurrentlyLive (narrow window -- whether the recurring poll shoul
     vi.setSystemTime(kickoff + 6 * 60 * 60 * 1000);
     expect(isGameFetchEligible("20260913", "1:00p")).toBe(true); // still fetched
     expect(isGameCurrentlyLive("20260913", "1:00p")).toBe(false); // but poll must stop rescheduling
+  });
+});
+
+describe("mergeKickerEvents keeps two identical kicks across polls (Aubrey's two 52-yarders, DAL @ SF 2026-11-15)", () => {
+  const AUBREY = " B.Aubrey 52 yard field goal is GOOD, Center-T.Sieg, Holder-B.Anger.";
+  const fg = (playKey: string | undefined, text = AUBREY): KickerPlayEvent =>
+    ({ playerName: "B. Aubrey", type: "fg", outcome: "made", yards: 52, text, ...(playKey ? { playKey } : {}) });
+
+  it("keeps both kicks when their text is identical but their ESPN play ids differ", () => {
+    const merged = mergeKickerEvents([], [fg("401873063302"), fg("4018730632713")]);
+    expect(merged).toHaveLength(2);
+    expect(merged.map(event => event.yards)).toEqual([52, 52]);
+  });
+
+  it("still keeps both when they arrive on separate polls, as a live game actually delivers them", () => {
+    const first = mergeKickerEvents([], [fg("401873063302")]);
+    expect(first).toHaveLength(1);
+    const second = mergeKickerEvents(first, [fg("401873063302"), fg("4018730632713")]);
+    expect(second).toHaveLength(2);
+  });
+
+  it("does not re-add an event already captured by an earlier poll", () => {
+    const prev = [fg("401873063302"), fg("4018730632713")];
+    expect(mergeKickerEvents(prev, [fg("401873063302"), fg("4018730632713")])).toHaveLength(2);
+  });
+
+  it("falls back to the text key only when an event carries no playKey", () => {
+    expect(mergeKickerEvents([], [fg(undefined), fg(undefined)])).toHaveLength(1);
+    expect(mergeKickerEvents([fg(undefined)], [fg(undefined, " B.Aubrey 38 yard field goal is GOOD.")])).toHaveLength(2);
   });
 });
