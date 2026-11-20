@@ -1,10 +1,14 @@
 import { parse } from "csv-parse/sync";
 import { supabase, unwrap } from "./supabase";
-import { normalizeNFLTeamCode } from "../shared/nflTeamCodes";
-import { normalizePlayerName } from "../shared/playerNameMatch";
+import { ELIGIBLE_POSITIONS, latestTeamsFromRosterRows, rosterKey, type RosterRow } from "./nflTeamAssignmentRules";
 
 const NFLVERSE_ROSTER_URL = "https://github.com/nflverse/nflverse-data/releases/download/rosters/roster_2026.csv";
-const ELIGIBLE_POSITIONS = ["QB", "RB", "WR", "TE", "K"];
+/** Supabase (PostgREST) caps any single select at 1000 rows unless you page. The
+ * player table holds several thousand skill-position players, so a single select
+ * silently synced only the first thousand for the whole season -- every player past
+ * that point (Josh Downs, row ~2,960, among ~125 others) kept his August team no
+ * matter how many times the cron ran. */
+const PAGE_SIZE = 1000;
 
 export type NflTeamAssignmentSyncResult = {
   rosterRowsFetched: number;
@@ -12,6 +16,18 @@ export type NflTeamAssignmentSyncResult = {
   updated: number;
   updatedPlayers: { displayName: string; from: string | null; to: string }[];
 };
+
+/** Every CVC skill-position player, paged so the whole table is read, not just the
+ * first 1000 rows PostgREST returns by default. */
+async function loadAllEligiblePlayers(): Promise<{ id: string; display_name: string; position: string | null; nfl_team: string | null }[]> {
+  const players: { id: string; display_name: string; position: string | null; nfl_team: string | null }[] = [];
+  for (let offset = 0; ; offset += PAGE_SIZE) {
+    const page = unwrap(await supabase.from("player").select("id, display_name, position, nfl_team").in("position", ELIGIBLE_POSITIONS).neq("provider", "placeholder").order("id").range(offset, offset + PAGE_SIZE - 1)) ?? [];
+    players.push(...page);
+    if (page.length < PAGE_SIZE) break;
+  }
+  return players;
+}
 
 /**
  * Syncs player.nfl_team directly from nflverse's roster_2026.csv, matched by
@@ -29,31 +45,15 @@ export async function syncNflTeamAssignments(): Promise<NflTeamAssignmentSyncRes
   const response = await fetch(NFLVERSE_ROSTER_URL, { signal: AbortSignal.timeout(30_000) });
   if (!response.ok) throw new Error(`nflverse roster fetch failed with status ${response.status}`);
   const csvText = await response.text();
-  const rows = parse(csvText, { columns: true, skip_empty_lines: true }) as Record<string, string>[];
+  const rows = parse(csvText, { columns: true, skip_empty_lines: true }) as RosterRow[];
+  const latestByKey = latestTeamsFromRosterRows(rows);
 
-  // nflverse's roster CSV has one row per player per week. Keep only the
-  // highest week seen per (name, position) so a mid-season trade reflects the
-  // player's most current team rather than their week-1 team.
-  const latestByKey = new Map<string, { team: string; week: number }>();
-  for (const row of rows) {
-    const fullName = row.full_name?.trim();
-    const position = (row.position ?? "").trim().toUpperCase();
-    if (!fullName || !ELIGIBLE_POSITIONS.includes(position)) continue;
-    const week = Number(row.week) || 0;
-    const key = `${normalizePlayerName(fullName)}|${position}`;
-    const existing = latestByKey.get(key);
-    if (!existing || week > existing.week) {
-      latestByKey.set(key, { team: normalizeNFLTeamCode(row.team), week });
-    }
-  }
-
-  const players = unwrap(await supabase.from("player").select("id, display_name, position, nfl_team").in("position", ELIGIBLE_POSITIONS).neq("provider", "placeholder")) ?? [];
+  const players = await loadAllEligiblePlayers();
 
   let matchedPlayers = 0;
   const updatedPlayers: NflTeamAssignmentSyncResult["updatedPlayers"] = [];
   for (const player of players) {
-    const key = `${normalizePlayerName(player.display_name)}|${(player.position ?? "").toUpperCase()}`;
-    const match = latestByKey.get(key);
+    const match = latestByKey.get(rosterKey(player.display_name, player.position));
     if (!match || !match.team) continue; // not every CVC player is on a current NFL roster (retired, etc.) -- expected, not an error
     matchedPlayers++;
     if (match.team !== player.nfl_team) {
