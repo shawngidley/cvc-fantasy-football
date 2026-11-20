@@ -54,7 +54,7 @@ export async function syncNflTeamAssignments(): Promise<NflTeamAssignmentSyncRes
   const updatedPlayers: NflTeamAssignmentSyncResult["updatedPlayers"] = [];
   for (const player of players) {
     const match = latestByKey.get(rosterKey(player.display_name, player.position));
-    if (!match || !match.team) continue; // not every CVC player is on a current NFL roster (retired, etc.) -- expected, not an error
+    if (!match || !match.team) continue; // a player nflverse has no row for at all (long retired, never signed) is left as CVC has him -- expected, not an error
     matchedPlayers++;
     if (match.team !== player.nfl_team) {
       unwrap(await supabase.from("player").update({ nfl_team: match.team }).eq("id", player.id).select("id").single());
