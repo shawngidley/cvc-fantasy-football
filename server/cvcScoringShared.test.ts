@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { mapWithConcurrencyLimit, normalizeTeam, resolveStatLine } from "./cvcScoringShared";
+import { mapWithConcurrencyLimit, normalizeTeam, resolveStatLine, shouldPreserveFrozenLineup } from "./cvcScoringShared";
 
 describe("mapWithConcurrencyLimit", () => {
   it("never has more than `limit` calls in flight at once", async () => {
@@ -100,5 +100,26 @@ describe("resolveStatLine (fix for a real, confirmed bug: two genuinely differen
   it("returns undefined when nothing matches at all", () => {
     const statLines = new Map<string, unknown>([["someoneelse", statLineA]]);
     expect(resolveStatLine(statLines, { display_name: "Nobody Here", nfl_team: "SEA", position: "WR" })).toBeUndefined();
+  });
+});
+
+describe("shouldPreserveFrozenLineup (week 3 was rebuilt from the current roster on 2026-11-23)", () => {
+  it("freezes a finalized week that already has a snapshot, so a retroactive scoring fix cannot rebuild its lineup", () => {
+    expect(shouldPreserveFrozenLineup("final", 130)).toBe(true);
+    expect(shouldPreserveFrozenLineup("final", 1)).toBe(true);
+  });
+
+  it("still reconciles the week in progress, so a legitimate pre-kickoff roster move lands", () => {
+    expect(shouldPreserveFrozenLineup("live", 130)).toBe(false);
+    expect(shouldPreserveFrozenLineup("upcoming", 0)).toBe(false);
+  });
+
+  it("lets resetWeekSnapshot opt a finalized week back in by emptying it first", () => {
+    expect(shouldPreserveFrozenLineup("final", 0)).toBe(false);
+  });
+
+  it("does not freeze on a missing status", () => {
+    expect(shouldPreserveFrozenLineup(null, 130)).toBe(false);
+    expect(shouldPreserveFrozenLineup(undefined, 130)).toBe(false);
   });
 });

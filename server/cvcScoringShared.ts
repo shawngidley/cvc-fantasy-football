@@ -13,6 +13,26 @@ export const normalizeTeam = (value: string) => ({ kan: "kc", tam: "tb", arz: "a
  * (kept as a real fallback, not just theoretical -- a name-only key is still correct
  * for the overwhelming majority of players, who don't share their name with anyone
  * else in the league). */
+/** Whether a sync must leave this week's lineup snapshot exactly as it is.
+ *
+ * reconcileLineupSnapshot re-derives a week's lineup from the CURRENT roster. That is
+ * correct for the week in progress and destructive for a week already in the books,
+ * because its two guards both lean on present-day state: isLocked() tests a player's
+ * CURRENT nfl_team against the teams that played that week, so anyone since released
+ * or set to FA fails it and loses his snapshot row, and heldBeforeKickoff() returns
+ * true whenever acquired_at is null, handing today's roster -- bench included -- rows
+ * for a game it never played. Confirmed live on 2026-11-23: forcing a recompute of
+ * week 3 took it from 90 starters to 98, flipped two head-to-head results and
+ * mis-awarded that week's skin.
+ *
+ * So a finalized week that still has a snapshot is frozen: a retroactive scoring fix
+ * re-runs the scoring math over the lineup that was actually played. Deleting the
+ * snapshot first (resetWeekSnapshot) drops the row count to zero and opts back in,
+ * which is the one case where rebuilding from the current roster is intended. */
+export function shouldPreserveFrozenLineup(weekStatus: string | null | undefined, existingSnapshotRows: number): boolean {
+  return weekStatus === "final" && existingSnapshotRows > 0;
+}
+
 export function resolveStatLine<T>(statLines: Map<string, T>, player: { display_name: string; nfl_team?: string | null; position?: string | null }): T | undefined {
   const position = player.position === "DEF" ? "DST" : player.position ?? "";
   if (position === "DST") return statLines.get(`dst:${normalizeTeam(player.nfl_team ?? "")}`);

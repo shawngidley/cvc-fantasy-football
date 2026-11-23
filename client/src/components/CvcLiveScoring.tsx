@@ -118,7 +118,11 @@ export function CvcLiveScoring() {
   const board = trpc.league.liveScoringBoard.useQuery({ weekNumber: selectedWeekNumber ?? undefined });
   const rules = trpc.league.scoringRules.useQuery();
   const slots = trpc.league.rosterSlots.useQuery();
-  const live = useCvcTank01LiveScores(board.data?.week?.weekNumber, 2026, rules.data ?? []);
+  // A closed week renders from its frozen snapshot and stored per-player points, so it
+  // needs no Tank01 at all -- which is also why no live poll is started for one.
+  const isPastWeek = board.data?.isPastWeek ?? false;
+  const frozenPoints = board.data?.frozenPoints ?? {};
+  const live = useCvcTank01LiveScores(isPastWeek ? undefined : board.data?.week?.weekNumber, 2026, rules.data ?? []);
   const { projections } = useCvcNFLProjections(board.data?.week?.weekNumber, 2026, rules.data ?? []);
   const { isAuthenticated } = useCvcOwnerAuth();
   const myFranchise = trpc.league.myFranchise.useQuery(undefined, { enabled: isAuthenticated });
@@ -146,11 +150,18 @@ export function CvcLiveScoring() {
   const starterSlots = (slots.data ?? []).filter(slot => !["BENCH", "BN", "IR", "TAXI"].includes(slot.code.toUpperCase())).flatMap(slot => Array.from({ length: Math.max(1, Number(slot.maximum_count ?? 1)) }, () => slot.code)).sort((a, b) => slotRank(a) - slotRank(b));
   const maxRows = Math.max(selectedAway.length, selectedHome.length, starterSlots.length);
   const maxBenchRows = Math.max(benchAway.length, benchHome.length);
-  const points = (entry: any) => entry?.player ? getCvcLivePoints(live.statLines, entry.player.display_name, entry.player.position, entry.player.nfl_team, rules.data ?? []) : null;
+  const points = (entry: any) => {
+    if (!entry?.player) return null;
+    if (isPastWeek) return frozenPoints[entry.player.id] ?? null;
+    return getCvcLivePoints(live.statLines, entry.player.display_name, entry.player.position, entry.player.nfl_team, rules.data ?? []);
+  };
   const total = (lineup: any[]) => lineup.reduce((sum, entry) => sum + (points(entry) ?? 0), 0);
-  const awayTotal = total(selectedAway);
-  const homeTotal = total(selectedHome);
-  const hasLiveScores = Object.keys(live.statLines).length > 0;
+  // The headline numbers for a closed week are the stored matchup scores -- the same
+  // source the Schedule page reads, so the two pages can no longer disagree.
+  const awayTotal = isPastWeek ? Number(selected?.awayScore ?? 0) : total(selectedAway);
+  const homeTotal = isPastWeek ? Number(selected?.homeScore ?? 0) : total(selectedHome);
+  // Gates every "other games" pill too: those fall back to matchup.{home,away}Score.
+  const hasLiveScores = !isPastWeek && Object.keys(live.statLines).length > 0;
   const gameDates = useMemo(() => Array.from(new Set(Object.values(live.nflMatchups).map(m => m.gameDate).filter(Boolean))), [live.nflMatchups]);
   const { gameStatus } = useCvcNFLGameStatus(gameDates);
   // Same aggregation as WRC's build: sum minutesRemainingInGame and projected points

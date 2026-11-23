@@ -4,7 +4,7 @@ import { getNFLDataAdapter, Tank01NFLDataAdapter, type Tank01BoxScore } from "./
 import { supabase, unwrap } from "./supabase";
 import { resolveSkinForWeek } from "./cvcSkins";
 import { promotePlannedLineupForWeek } from "./plannedLineup";
-import { mapWithConcurrencyLimit, normalizeTeam, resolveStatLine, type SnapshotRow } from "./cvcScoringShared";
+import { mapWithConcurrencyLimit, normalizeTeam, resolveStatLine, shouldPreserveFrozenLineup, type SnapshotRow } from "./cvcScoringShared";
 import { normalizePlayerName } from "@shared/playerNameMatch";
 import { applyKickerEventsToKicking, getKickerEventsForPlayer, parseEspnKickerEvents, type KickerPlayEvent } from "@shared/espnKickerEvents";
 import { applyReturnTouchdownsToDefense, parseEspnReturnTouchdowns } from "@shared/espnReturnTouchdowns";
@@ -350,7 +350,10 @@ export async function syncTank01Scores(now = new Date(), forceWeekNumber?: numbe
   // Reconciles every sync call, not just the first one for the week -- see
   // reconcileLineupSnapshot's own comment for why a one-time snapshot silently
   // undercounted legitimate pre-kickoff roster moves.
-  await reconcileLineupSnapshot(season.id, week.id, franchiseIds, games);
+  // NEVER for a finalized week that already has one, though -- that rebuilds the
+  // lineup from today's roster and corrupts the record. See
+  // shouldPreserveFrozenLineup in cvcScoringShared.ts for the full reasoning.
+  if (!shouldPreserveFrozenLineup(week.status, alreadySnapshotted.length)) await reconcileLineupSnapshot(season.id, week.id, franchiseIds, games);
   const snapshots = unwrap(await supabase.from("weekly_lineup_snapshot").select("franchise_id, slot_code, player:player_id(id, display_name, position, nfl_team)").eq("schedule_week_id", week.id)) as SnapshotRow[] ?? [];
   const { statLines, gameStatuses } = await tankStatLinesForWeek(adapter, games);
   if (!statLines.size) {

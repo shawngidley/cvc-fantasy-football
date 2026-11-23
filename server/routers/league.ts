@@ -2103,10 +2103,22 @@ export const leagueRouter = router({
       ? (unwrap(await supabase.from("weekly_lineup_snapshot").select("id, franchise_id, slot_code, player:player_id(id, display_name, position, nfl_team, metadata)").eq("schedule_week_id", week.id).in("franchise_id", franchiseIds)) ?? []).map((row: any) => ({ id: row.id, franchise_id: row.franchise_id, assigned_slot_code: row.slot_code, player: row.player }))
       : null;
     const assignments = snapshotLineup ?? (franchiseIds.length ? unwrap(await supabase.from("roster_assignment").select("id, franchise_id, assigned_slot_code, player:player_id(id, display_name, position, nfl_team, metadata)").eq("season_id", season.id).in("franchise_id", franchiseIds).is("released_at", null)) ?? [] : []);
+    // A finished week has to render what was actually scored, not a fresh re-derivation.
+    // Without this the page summed the frozen lineup against a live Tank01 fetch on every
+    // view, so it disagreed with the Schedule page (which reads matchup.home_score) and
+    // re-fetched Tank01 for weeks long since closed.
+    const frozenPoints: Record<string, number> = {};
+    if (isPastWeek) {
+      for (const row of (unwrap(await supabase.from("cvc_player_weekly_stat").select("player_id, fantasy_points").eq("schedule_week_id", week.id)) ?? []) as { player_id: string; fantasy_points: number | string | null }[]) {
+        frozenPoints[row.player_id] = Number(row.fantasy_points ?? 0);
+      }
+    }
     const lineupFor = (franchiseId: string) => franchiseLiveLineup(assignments, franchiseId);
     const franchise = (value: unknown) => Array.isArray(value) ? value[0] as { name?: string; logo_url?: string | null } | undefined : value as { name?: string; logo_url?: string | null } | null;
     return {
       week: { weekNumber: week.week_number, label: week.label, status: week.status },
+      isPastWeek,
+      frozenPoints,
       matchups: matchups.map(item => ({
         id: item.id,
         home: franchise(item.home)?.name ?? "Home", away: franchise(item.away)?.name ?? "Away",
