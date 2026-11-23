@@ -3,6 +3,7 @@ import { calculateCvcFantasyPoints, type CvcScoringRule, type Tank01LiveStats } 
 import { computeKickoffUtc } from "@shared/nflKickoff";
 import { normalizePlayerName } from "@shared/playerNameMatch";
 import { applyKickerEventsToKicking, getKickerEventsForPlayer, parseEspnKickerEvents, type KickerPlayEvent } from "@shared/espnKickerEvents";
+import { applyReturnTouchdownsToDefense, parseEspnReturnTouchdowns } from "@shared/espnReturnTouchdowns";
 
 const TANK01_BASE_URL = "/api/tank01";
 const POLL_INTERVAL_MS = 60_000;
@@ -84,8 +85,12 @@ export function isGameCurrentlyLive(gameDate?: string, gameTime?: string): boole
  * event's summary and parse kicker plays out of the play-by-play text. This exists
  * because Tank01's live box score doesn't reliably include FG yardage at all -- CVC's
  * own scoring needs exact yardage (0.1 pts/yard), not just a made-count. */
-async function fetchEspnKickerEvents(activeGames: TankGame[]): Promise<KickerPlayEvent[]> {
+async function fetchEspnKickerEvents(activeGames: TankGame[]): Promise<{ kickerEvents: KickerPlayEvent[]; returnTouchdownsByTeam: Record<string, number> }> {
   const events: KickerPlayEvent[] = [];
+  // Special-teams return TDs per team (lowercase CVC code), which Tank01's D/ST line
+  // never carries -- see @shared/espnReturnTouchdowns. One game per team per week, so
+  // a per-team count is complete for any game this fetch covers.
+  const returnTouchdownsByTeam: Record<string, number> = {};
   const seen = new Set<string>();
   const dates = Array.from(new Set(activeGames.map(game => game.gameDate).filter((date): date is string => Boolean(date))));
   for (const date of dates) {
@@ -103,7 +108,9 @@ async function fetchEspnKickerEvents(activeGames: TankGame[]): Promise<KickerPla
         if (!espnEvent?.id) continue;
         const summary = await fetch(`/api/espn/summary?event=${espnEvent.id}`);
         if (!summary.ok) continue;
-        for (const play of parseEspnKickerEvents(await summary.json())) {
+        const summaryJson = await summary.json();
+        for (const [team, count] of Array.from(parseEspnReturnTouchdowns(summaryJson))) returnTouchdownsByTeam[normalizeTeam(team)] = count;
+        for (const play of parseEspnKickerEvents(summaryJson)) {
           // Keyed per ESPN game + individual play, not per play text: two real kicks by
           // the same kicker at the same distance have byte-identical text, and the old
           // text key silently dropped the second one (see KickerPlayEvent.playKey).
@@ -114,7 +121,7 @@ async function fetchEspnKickerEvents(activeGames: TankGame[]): Promise<KickerPla
       }
     } catch { /* one bad date's ESPN fetch shouldn't block the rest */ }
   }
-  return events;
+  return { kickerEvents: events, returnTouchdownsByTeam };
 }
 
 export function useCvcTank01LiveScores(week: number | undefined, season: number | undefined, rules: CvcScoringRule[]) {
@@ -124,6 +131,8 @@ export function useCvcTank01LiveScores(week: number | undefined, season: number 
   const [nflMatchups, setNflMatchups] = useState<Record<string, CvcNflMatchup>>({});
   const [statLines, setStatLines] = useState<LiveStatMap>({});
   const [kickerEvents, setKickerEvents] = useState<KickerPlayEvent[]>([]);
+  // Special-teams return TDs per team seen so far this week (see fetchEspnKickerEvents).
+  const returnTouchdownsRef = useRef<Record<string, number>>({});
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   // Guards against the effect re-running (e.g. because `rules` -- an array built with
   // `rules.data ?? []` in the caller -- gets a new reference on every render, which it
@@ -234,8 +243,26 @@ export function useCvcTank01LiveScores(week: number | undefined, season: number 
       // events for a kicker (e.g. the play text didn't match, or nothing's happened
       // yet), that kicker's stat line is left as Tank01 provided it, not blanked out.
       try {
-        const kickerEvents = await fetchEspnKickerEvents(gamesToFetch);
+        const { kickerEvents, returnTouchdownsByTeam } = await fetchEspnKickerEvents(gamesToFetch);
         if (activeWeekRef.current !== requestWeek) return false;
+        // Special-teams return TDs onto each D/ST line. Merged per team across polls
+        // for the same reason kicker events are (a later poll only re-fetches games
+        // still in progress), and applied idempotently: applyReturnTouchdownsToDefense
+        // keeps Tank01's own defTD aside so re-running it never compounds the count.
+        returnTouchdownsRef.current = { ...returnTouchdownsRef.current, ...returnTouchdownsByTeam };
+        const returnTouchdowns = returnTouchdownsRef.current;
+        if (Object.keys(returnTouchdowns).length) {
+          setStatLines(current => {
+            const next = { ...current };
+            for (const [team, count] of Object.entries(returnTouchdowns)) {
+              const key = `dst:${team}`;
+              const entry = next[key] as Record<string, unknown> | undefined;
+              if (!entry?.Defense || !count) continue;
+              next[key] = { ...entry, Defense: applyReturnTouchdownsToDefense(entry.Defense as Record<string, unknown>, count) } as Tank01LiveStats;
+            }
+            return next;
+          });
+        }
         // Merge rather than replace: a recurring poll only fetches games still in
         // progress, so overwriting would wipe the kicker events already captured
         // for games that have since gone final. Dedup by the same key the fetch
@@ -294,6 +321,7 @@ export function useCvcTank01LiveScores(week: number | undefined, season: number 
     initialFetchDoneForWeekRef.current = null;
     setStatLines({});
     setKickerEvents([]);
+    returnTouchdownsRef.current = {};
     setNflMatchups({});
     setLastUpdated(null);
     setError(null);

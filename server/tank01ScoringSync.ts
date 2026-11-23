@@ -7,6 +7,7 @@ import { promotePlannedLineupForWeek } from "./plannedLineup";
 import { mapWithConcurrencyLimit, normalizeTeam, resolveStatLine, type SnapshotRow } from "./cvcScoringShared";
 import { normalizePlayerName } from "@shared/playerNameMatch";
 import { applyKickerEventsToKicking, getKickerEventsForPlayer, parseEspnKickerEvents, type KickerPlayEvent } from "@shared/espnKickerEvents";
+import { applyReturnTouchdownsToDefense, parseEspnReturnTouchdowns } from "@shared/espnReturnTouchdowns";
 import { listGamesForWeekForCron } from "./tank01ScheduleCache";
 import { persistWeeklyStats, refreshSeasonStatsCurrent, type WeeklyStatPlayer } from "./cvcPlayerWeeklyStats";
 
@@ -223,8 +224,14 @@ async function reconcileLineupSnapshot(seasonId: string, weekId: string, franchi
  * the game; without this, the OFFICIAL score that actually determines standings and
  * win/loss records could still finalize that same made field goal as worth 0 yards --
  * a silent discrepancy between what was shown live and what actually counted. */
-async function fetchEspnKickerEventsForWeek(games: { gameDate?: string; home?: string; away?: string }[]): Promise<KickerPlayEvent[]> {
+export type EspnWeekEvents = { kickerEvents: KickerPlayEvent[]; returnTouchdownsByTeam: Map<string, number> };
+
+async function fetchEspnEventsForWeek(games: { gameDate?: string; home?: string; away?: string }[]): Promise<EspnWeekEvents> {
   const events: KickerPlayEvent[] = [];
+  // Special-teams return TDs per CVC team code (see @shared/espnReturnTouchdowns for
+  // why Tank01's D/ST line can't supply these). A team plays once per week, so one
+  // count per team is the whole story.
+  const returnTouchdownsByTeam = new Map<string, number>();
   const seen = new Set<string>();
   const dates = Array.from(new Set(games.map(game => game.gameDate).filter((date): date is string => Boolean(date))));
   for (const date of dates) {
@@ -242,7 +249,9 @@ async function fetchEspnKickerEventsForWeek(games: { gameDate?: string; home?: s
         if (!espnEvent?.id) continue;
         const summary = await fetch(`https://site.api.espn.com/apis/site/v2/sports/football/nfl/summary?event=${espnEvent.id}`);
         if (!summary.ok) continue;
-        for (const play of parseEspnKickerEvents(await summary.json())) {
+        const summaryJson = await summary.json();
+        for (const [team, count] of Array.from(parseEspnReturnTouchdowns(summaryJson))) returnTouchdownsByTeam.set(normalizeTeam(team), count);
+        for (const play of parseEspnKickerEvents(summaryJson)) {
           // Keyed per ESPN game + individual play, not per play text: two real kicks by
           // the same kicker at the same distance have byte-identical text, and the old
           // text key silently dropped the second one (see KickerPlayEvent.playKey).
@@ -253,7 +262,20 @@ async function fetchEspnKickerEventsForWeek(games: { gameDate?: string; home?: s
       }
     } catch { /* one bad date's ESPN fetch shouldn't block the rest */ }
   }
-  return events;
+  return { kickerEvents: events, returnTouchdownsByTeam };
+}
+
+/** Adds each team's special-teams return touchdowns (from ESPN) to its D/ST line's
+ * defTD, which Tank01 only ever fills with defensive scores. Teams ESPN reported no
+ * return TD for are left exactly as Tank01 provided them. */
+export function applyEspnReturnTouchdownOverrides(statLines: Map<string, Tank01LiveStats>, returnTouchdownsByTeam: Map<string, number>) {
+  for (const [team, count] of Array.from(returnTouchdownsByTeam)) {
+    if (!count) continue;
+    const key = `dst:${normalizeTeam(team)}`;
+    const entry = statLines.get(key);
+    if (!entry?.Defense) continue;
+    statLines.set(key, { ...entry, Defense: applyReturnTouchdownsToDefense(entry.Defense as Record<string, unknown>, count) } as Tank01LiveStats);
+  }
 }
 
 /** Overrides a player's Kicking.fgYds/xpMade with real per-kick ESPN data where
@@ -299,8 +321,9 @@ async function tankStatLinesForWeek(adapter: Tank01NFLDataAdapter, games: Awaite
     }
     return isGameFinal(box as unknown as { gameStatus?: unknown; gameStatusCode?: unknown });
   });
-  const kickerEvents = await fetchEspnKickerEventsForWeek(kickedOffGames);
+  const { kickerEvents, returnTouchdownsByTeam } = await fetchEspnEventsForWeek(kickedOffGames);
   applyEspnKickerOverrides(statLines, kickerEvents);
+  applyEspnReturnTouchdownOverrides(statLines, returnTouchdownsByTeam);
   return { statLines, gameStatuses };
 }
 
