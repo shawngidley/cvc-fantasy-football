@@ -34,8 +34,17 @@ async function espnJson(url: string): Promise<any | null> {
 
 async function main() {
   const onlyWeeks = new Set(process.argv.slice(2).map(Number).filter(Number.isFinite));
-  const season = unwrap(await supabase.from("season").select("id, year").order("year", { ascending: false }).limit(1).single());
+  // Pick the season the way the app does (getCurrentLeagueAndSeason in
+  // server/routers/league.ts): the row flagged is_current. Highest `year` is WRONG --
+  // a future season row exists to hold next year's tradeable rookie picks (2027 at the
+  // time of writing) and it has no weeks, no rosters and no snapshots, so ordering by
+  // year silently scanned an empty season and reported that nothing was affected.
+  const league = unwrap(await supabase.from("league").select("id").eq("slug", "cvc-auction-football").single());
+  if (!league) throw new Error("CVC league not found.");
+  const season = unwrap(await supabase.from("season").select("id, year").eq("league_id", league.id).eq("is_current", true).limit(1).maybeSingle())
+    ?? unwrap(await supabase.from("season").select("id, year").eq("league_id", league.id).order("year", { ascending: false }).limit(1).maybeSingle());
   if (!season) throw new Error("No season found.");
+  console.log(`Scanning CVC season ${season.year} (${season.id})`);
   const rules = unwrap(await supabase.from("scoring_rule").select("stat_key, value, applies_to_positions").eq("season_id", season.id)) ?? [];
   const tdRule = rules.find(rule => rule.stat_key === "defensive_touchdown" && (!rule.applies_to_positions?.length || rule.applies_to_positions.includes("DST")));
   const pointsPerTd = Number(tdRule?.value ?? 6);

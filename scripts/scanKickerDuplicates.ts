@@ -72,8 +72,17 @@ function madeFgList(events: KickerPlayEvent[]): string {
 
 async function main() {
   const onlyWeeks = new Set(process.argv.slice(2).map(Number).filter(Number.isFinite));
-  const season = unwrap(await supabase.from("season").select("id, year").order("year", { ascending: false }).limit(1).single());
+  // Pick the season the way the app does (getCurrentLeagueAndSeason in
+  // server/routers/league.ts): the row flagged is_current. Highest `year` is WRONG --
+  // a future season row exists to hold next year's tradeable rookie picks (2027 at the
+  // time of writing) and it has no weeks, no rosters and no snapshots, so ordering by
+  // year silently scanned an empty season and reported that nothing was affected.
+  const league = unwrap(await supabase.from("league").select("id").eq("slug", "cvc-auction-football").single());
+  if (!league) throw new Error("CVC league not found.");
+  const season = unwrap(await supabase.from("season").select("id, year").eq("league_id", league.id).eq("is_current", true).limit(1).maybeSingle())
+    ?? unwrap(await supabase.from("season").select("id, year").eq("league_id", league.id).order("year", { ascending: false }).limit(1).maybeSingle());
   if (!season) throw new Error("No season found.");
+  console.log(`Scanning CVC season ${season.year} (${season.id})`);
   const rules = (unwrap(await supabase.from("scoring_rule").select("stat_key, value, applies_to_positions").eq("season_id", season.id)) ?? []) as CvcScoringRule[];
   const weeks = (unwrap(await supabase.from("schedule_week").select("id, week_number, label").eq("season_id", season.id).eq("status", "final").order("week_number")) ?? []).filter(w => !onlyWeeks.size || onlyWeeks.has(w.week_number));
   const lastWeekNumber = Math.max(...((unwrap(await supabase.from("schedule_week").select("week_number").eq("season_id", season.id)) ?? []).map(w => w.week_number)));
