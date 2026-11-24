@@ -3,6 +3,8 @@ import { ArrowLeftRight, Check, Inbox, Plus, Send, X } from "lucide-react";
 import { trpc } from "@/lib/trpc";
 import { one } from "@shared/relation";
 import { useCvcOwnerAuth } from "@/hooks/useCvcOwnerAuth";
+import { CvcTradeDeadlineBanner, useTradeDeadlineCountdown } from "@/components/CvcTradeDeadlineBanner";
+import { TRADE_DEADLINE_PASSED_MESSAGE } from "@shared/tradeDeadline";
 
 function TradeStatus({ value }: { value: string }) {
   const tone = value === "accepted" || value === "processed" ? "bg-emerald-950 text-emerald-200" : value === "rejected" || value === "cancelled" ? "bg-rose-950 text-rose-200" : "bg-amber-100 text-amber-800";
@@ -66,6 +68,9 @@ export function CvcTrades() {
   const resetBuilder = () => { setRecipientId(""); setOfferPlayerIds([]); setRequestPlayerIds([]); setOfferPickIds([]); setRequestPickIds([]); setNote(""); };
   const propose = trpc.league.proposeTrade.useMutation({ onSuccess: async () => { setSentTo(recipient?.name ?? "the other owner"); resetBuilder(); setTab("inbox"); await refresh(); } });
   const respond = trpc.league.respondToTrade.useMutation({ onSuccess: refresh });
+  // Mirrors the server's trade-deadline check so the buttons go dark at the same
+  // instant instead of failing on click (the server still refuses regardless).
+  const deadlinePassed = useTradeDeadlineCountdown().passed;
   const recipient = overview.data?.franchises.find(franchise => franchise.id === recipientId);
   const toggle = (list: string[], setList: (value: string[]) => void, id: string) => setList(list.includes(id) ? list.filter(item => item !== id) : [...list, id]);
   const canSubmit = Boolean(recipientId) && (offerPlayerIds.length + offerPickIds.length > 0) && (requestPlayerIds.length + requestPickIds.length > 0);
@@ -83,6 +88,7 @@ export function CvcTrades() {
       <div><p className="mb-2 text-xs font-black uppercase tracking-[0.2em] text-cvc-accent">League Office</p><h1 className="font-display text-5xl uppercase leading-none sm:text-6xl">Trade Desk</h1></div>
       <div className="rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-right"><p className="text-[10px] font-black uppercase tracking-[0.14em] text-slate-400">Open trade items</p><p className="mt-1 font-display text-3xl text-cvc-accent">{trades.data?.filter((trade: any) => trade.status === "proposed").length ?? 0}</p></div>
     </div>
+    <CvcTradeDeadlineBanner showLink={false} />
     <div className="mb-6 flex gap-2 border-b border-white/10">
       <button onClick={() => { setTab("propose"); setSentTo(null); }} className={`border-b-2 px-4 py-3 text-xs font-black uppercase tracking-[0.13em] ${tab === "propose" ? "border-cvc-accent text-cvc-accent" : "border-transparent text-slate-400"}`}><Plus size={14} className="mr-1 inline" /> Propose</button>
       <button onClick={() => setTab("inbox")} className={`border-b-2 px-4 py-3 text-xs font-black uppercase tracking-[0.13em] ${tab === "inbox" ? "border-cvc-accent text-cvc-accent" : "border-transparent text-slate-400"}`}><Inbox size={14} className="mr-1 inline" /> Trade Inbox</button>
@@ -112,8 +118,8 @@ export function CvcTrades() {
         <label className="text-xs font-black uppercase tracking-[0.15em] text-cvc-accent">Optional note</label>
         <textarea value={note} onChange={event => setNote(event.target.value)} className="mt-3 min-h-24 w-full rounded-lg border border-white/10 bg-black/20 px-3 py-3 text-sm text-white outline-none" placeholder="Optional trade note" />
         <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
-          <p className="text-xs leading-5 text-slate-300">{missing.length ? `Before you can send: ${missing.join(", ")}.` : `${recipient?.name ?? "The other owner"} will see this offer in their Trade Inbox. The trade processes as soon as they accept.`}</p>
-          <button disabled={!canSubmit || propose.isPending} onClick={() => propose.mutate({ recipientFranchiseId: recipientId, offerPlayerIds, requestPlayerIds, offerPickIds, requestPickIds, note: note.trim() || undefined })} className="inline-flex items-center gap-2 rounded-lg bg-[var(--cvc-accent)] px-4 py-3 text-xs font-black uppercase tracking-[0.13em] text-cvc-deep disabled:opacity-40"><Send size={14} /> {propose.isPending ? "Sending" : `Send trade offer${recipient?.name ? ` to ${recipient.name}` : ""}`}</button>
+          <p className="text-xs leading-5 text-slate-300">{deadlinePassed ? TRADE_DEADLINE_PASSED_MESSAGE : missing.length ? `Before you can send: ${missing.join(", ")}.` : `${recipient?.name ?? "The other owner"} will see this offer in their Trade Inbox. The trade processes as soon as they accept.`}</p>
+          <button disabled={!canSubmit || propose.isPending || deadlinePassed} onClick={() => propose.mutate({ recipientFranchiseId: recipientId, offerPlayerIds, requestPlayerIds, offerPickIds, requestPickIds, note: note.trim() || undefined })} className="inline-flex items-center gap-2 rounded-lg bg-[var(--cvc-accent)] px-4 py-3 text-xs font-black uppercase tracking-[0.13em] text-cvc-deep disabled:opacity-40"><Send size={14} /> {propose.isPending ? "Sending" : `Send trade offer${recipient?.name ? ` to ${recipient.name}` : ""}`}</button>
         </div>
         {propose.error ? <p className="mt-3 text-sm text-rose-300">{propose.error.message}</p> : null}
       </section>
@@ -143,7 +149,7 @@ export function CvcTrades() {
             <TradeStatus value={trade.status} />
           </div>
           {trade.status === "proposed" && <div className="mt-4 flex flex-wrap gap-2">
-            {isRecipient ? <><button onClick={() => respond.mutate({ tradeId: trade.id, response: "accepted" })} className="inline-flex items-center gap-1 rounded-lg bg-emerald-800 px-3 py-2 text-xs font-black uppercase text-white"><Check size={13} /> Accept</button><button onClick={() => respond.mutate({ tradeId: trade.id, response: "rejected" })} className="inline-flex items-center gap-1 rounded-lg bg-rose-800 px-3 py-2 text-xs font-black uppercase text-white"><X size={13} /> Reject</button></> : null}
+            {isRecipient ? <><button disabled={deadlinePassed} title={deadlinePassed ? TRADE_DEADLINE_PASSED_MESSAGE : undefined} onClick={() => respond.mutate({ tradeId: trade.id, response: "accepted" })} className="inline-flex items-center gap-1 rounded-lg bg-emerald-800 px-3 py-2 text-xs font-black uppercase text-white disabled:cursor-not-allowed disabled:opacity-40"><Check size={13} /> Accept</button><button onClick={() => respond.mutate({ tradeId: trade.id, response: "rejected" })} className="inline-flex items-center gap-1 rounded-lg bg-rose-800 px-3 py-2 text-xs font-black uppercase text-white"><X size={13} /> Reject</button></> : null}
             {isProposer ? <span className="self-center text-xs font-semibold text-slate-500">Waiting on {recipientItem?.name}</span> : null}
             {isProposer ? <button onClick={() => respond.mutate({ tradeId: trade.id, response: "cancelled" })} className="rounded-lg border border-slate-300 px-3 py-2 text-xs font-black uppercase">Cancel</button> : null}
           </div>}

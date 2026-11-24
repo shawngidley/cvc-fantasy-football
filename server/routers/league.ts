@@ -10,6 +10,7 @@ import { getFantasyProsInjuries, getFantasyProsNews, getFantasyProsProjections, 
 import { archiveFantasyProsNews, getArchivedFantasyProsNews, mergeFantasyProsNews } from "../fantasyProsArchive";
 import { attachFantasyProsPlayerNames } from "../fantasyProsNewsNames";
 import { normalizePlayerName } from "@shared/playerNameMatch";
+import { TRADE_DEADLINE_PASSED_MESSAGE, tradeDeadlinePassed } from "@shared/tradeDeadline";
 import { syncNflTeamAssignments } from "../nflTeamAssignmentSync";
 import { getFaabBalance, MAX_ROSTER_SIZE, nextClaimPriority } from "../waiverRules";
 import { awardFreeAgentClaimNow, loadRosteredIdentityKeys, resolveOpenWaiverPeriod } from "../waiverResolution";
@@ -1977,6 +1978,9 @@ export const leagueRouter = router({
     .refine(value => new Set([...value.offerPlayerIds, ...value.requestPlayerIds]).size === value.offerPlayerIds.length + value.requestPlayerIds.length, { message: "A player may appear only once in a CVC trade proposal." })
     .refine(value => new Set([...value.offerPickIds, ...value.requestPickIds]).size === value.offerPickIds.length + value.requestPickIds.length, { message: "A draft pick may appear only once in a CVC trade proposal." }))
     .mutation(async ({ ctx, input }) => {
+    // Trade deadline (see @shared/tradeDeadline): nothing new can be proposed after it,
+    // since it could never be accepted in time anyway.
+    if (tradeDeadlinePassed()) throw new TRPCError({ code: "PRECONDITION_FAILED", message: TRADE_DEADLINE_PASSED_MESSAGE });
     const owner = await getOwnerAccess({ openId: ctx.user.openId });
     if (!owner) throw new TRPCError({ code: "FORBIDDEN", message: "A CVC owner session is required to propose a trade." });
     const { league, season } = await getCurrentLeagueAndSeason();
@@ -2025,10 +2029,15 @@ export const leagueRouter = router({
     const isRecipient = trade.recipient_franchise_id === franchise.id; const isProposer = trade.proposer_franchise_id === franchise.id;
     if (trade.status !== "proposed" || (input.response === "accepted" || input.response === "rejected" ? !isRecipient : !isProposer)) throw new TRPCError({ code: "FORBIDDEN", message: "This CVC trade response is not available." });
     if (input.response !== "accepted") {
+      // Rejecting or withdrawing stays open after the deadline so stale proposals can
+      // be cleared out; only acceptance is cut off.
       const updated = unwrap(await supabase.from("trade_offer").update({ status: input.response, responded_at: new Date().toISOString() }).eq("id", trade.id).select("id, status").single());
       await createAuditEvent(league.id, season.id, owner.id, "trade_offer", trade.id, input.response, `CVC trade proposal was ${input.response}.`);
       return updated;
     }
+    // The deadline is on ACCEPTANCE (commissioner call, Nov 2026): a proposal sent
+    // before 10pm ET Wednesday that is accepted after it does not go through.
+    if (tradeDeadlinePassed()) throw new TRPCError({ code: "PRECONDITION_FAILED", message: TRADE_DEADLINE_PASSED_MESSAGE });
     // No commissioner approval step: once the recipient accepts, the trade executes
     // immediately -- both sides already agreed, so there's nothing left to approve.
     unwrap(await supabase.from("trade_offer").update({ status: "accepted", responded_at: new Date().toISOString() }).eq("id", trade.id).select("id").single());
